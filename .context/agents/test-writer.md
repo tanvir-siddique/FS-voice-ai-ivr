@@ -1,219 +1,165 @@
 # Test Writer - Voice AI IVR
 
-## Contexto
+## Papel
+Escrever e manter testes unitários e de integração.
 
-Você escreve testes para o Voice AI IVR. O projeto usa pytest para Python e estrutura de testes em `voice-ai-service/tests/`.
+## Framework
+- **pytest** + pytest-asyncio
+- **unittest.mock** para mocks
+- Coverage target: **80%**
 
 ## Estrutura de Testes
 
 ```
 voice-ai-service/tests/
-├── conftest.py           # Fixtures compartilhadas
-├── unit/
-│   ├── test_stt_providers.py
-│   ├── test_tts_providers.py
-│   ├── test_llm_providers.py
-│   ├── test_embeddings_providers.py
-│   ├── test_rag_service.py
-│   └── test_session_manager.py
-├── integration/
-│   ├── test_api_transcribe.py
-│   ├── test_api_chat.py
-│   └── test_database.py
-└── e2e/
-    └── test_full_conversation.py
+├── conftest.py                    # Fixtures compartilhadas
+└── unit/
+    ├── test_llm_providers.py
+    ├── test_stt_providers.py
+    ├── test_tts_providers.py
+    ├── test_embeddings_providers.py
+    ├── test_rag_service.py
+    ├── test_session_manager.py
+    └── test_rate_limiter.py
 ```
 
-## Fixtures Principais
+## Fixtures Padrão
 
 ```python
 # conftest.py
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-@pytest.fixture
-def domain_uuid():
-    """UUID de teste para multi-tenant."""
-    return "test-domain-uuid-1234"
+from unittest.mock import AsyncMock, patch
 
 @pytest.fixture
 def mock_db():
-    """Mock do banco de dados."""
-    db = AsyncMock()
-    db.fetchrow = AsyncMock(return_value={
-        "provider_name": "openai",
-        "config": {"api_key": "test-key"}
-    })
-    return db
+    """Mock database pool"""
+    with patch('services.database.db_pool') as mock:
+        yield mock
 
 @pytest.fixture
-def mock_openai_client():
-    """Mock do cliente OpenAI."""
-    client = MagicMock()
-    client.chat.completions.create = AsyncMock(return_value=MagicMock(
-        choices=[MagicMock(message=MagicMock(content="Resposta teste"))]
-    ))
-    return client
+def openai_config():
+    return {"api_key": "test-key", "model": "gpt-4o-mini"}
+
+@pytest.fixture
+def sample_domain_uuid():
+    return "12345678-1234-1234-1234-123456789012"
 ```
 
 ## Padrões de Teste
 
-### Teste de Provider (Unitário)
+### Teste de Provider
 
 ```python
-# test_llm_providers.py
-import pytest
-from unittest.mock import AsyncMock, patch
-from services.llm.openai import OpenAILLM
-
 class TestOpenAILLM:
-    @pytest.fixture
-    def provider(self):
-        return OpenAILLM({"api_key": "test-key", "model": "gpt-4"})
-    
     @pytest.mark.asyncio
-    async def test_chat_returns_response(self, provider):
-        with patch.object(provider, 'client') as mock_client:
-            mock_client.chat.completions.create = AsyncMock(
+    async def test_chat_completion_success(self, openai_config):
+        # Arrange
+        with patch('openai.AsyncOpenAI') as mock_client:
+            mock_client.return_value.chat.completions.create = AsyncMock(
                 return_value=MagicMock(
-                    choices=[MagicMock(message=MagicMock(content="Olá!"))]
+                    choices=[MagicMock(message=MagicMock(content="OK"))]
                 )
             )
+            llm = OpenAILLM(openai_config)
             
-            result = await provider.chat(
-                system_prompt="Você é uma secretária.",
-                messages=[{"role": "user", "content": "Olá"}]
-            )
+            # Act
+            result = await llm.chat("Hello", [])
             
-            assert result.response == "Olá!"
-            assert result.action is None
-    
+            # Assert
+            assert result.response == "OK"
+
     @pytest.mark.asyncio
-    async def test_chat_parses_transfer_action(self, provider):
-        with patch.object(provider, 'client') as mock_client:
-            mock_client.chat.completions.create = AsyncMock(
-                return_value=MagicMock(
-                    choices=[MagicMock(message=MagicMock(
-                        content='Transferindo... {"action": "transfer", "target": "200"}'
-                    ))]
-                )
+    async def test_chat_completion_timeout(self, openai_config):
+        with patch('openai.AsyncOpenAI') as mock_client:
+            mock_client.return_value.chat.completions.create = AsyncMock(
+                side_effect=asyncio.TimeoutError()
             )
+            llm = OpenAILLM(openai_config)
             
-            result = await provider.chat(
-                system_prompt="...",
-                messages=[{"role": "user", "content": "Falar com vendas"}]
-            )
-            
-            assert result.action == "transfer"
-            assert result.action_data["target"] == "200"
+            with pytest.raises(asyncio.TimeoutError):
+                await llm.chat("Hello", [])
 ```
 
-### Teste de API (Integração)
+### Teste de API Endpoint
 
 ```python
-# test_api_chat.py
-import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, patch
-from main import app
 
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-class TestChatEndpoint:
-    def test_chat_requires_domain_uuid(self, client):
-        response = client.post("/api/v1/chat", json={
-            "message": "Olá"
-            # Falta domain_uuid
-        })
-        assert response.status_code == 422
+def test_transcribe_endpoint():
+    client = TestClient(app)
     
-    def test_chat_success(self, client, domain_uuid):
-        with patch('api.chat.provider_manager') as mock_pm:
-            mock_provider = AsyncMock()
-            mock_provider.chat.return_value = MagicMock(
-                response="Olá! Como posso ajudar?",
-                action=None
-            )
-            mock_pm.get_llm_provider.return_value = mock_provider
-            
-            response = client.post("/api/v1/chat", json={
-                "domain_uuid": domain_uuid,
-                "message": "Olá"
-            })
-            
-            assert response.status_code == 200
-            assert "Olá" in response.json()["response"]
+    response = client.post("/transcribe", json={
+        "domain_uuid": "test-uuid",
+        "audio_base64": "...",
+        "format": "wav"
+    })
+    
+    assert response.status_code == 200
+    assert "text" in response.json()
 ```
 
-### Teste Multi-Tenant
+### Teste de Rate Limiter
 
 ```python
-class TestMultiTenant:
-    @pytest.mark.asyncio
-    async def test_data_isolation(self, mock_db):
-        """Verifica que tenant A não vê dados do tenant B."""
-        domain_a = "domain-a-uuid"
-        domain_b = "domain-b-uuid"
-        
-        # Configurar mock para retornar dados diferentes por domain
-        async def fetch_by_domain(query, domain_uuid):
-            if domain_uuid == domain_a:
-                return {"name": "Secretária A"}
-            elif domain_uuid == domain_b:
-                return {"name": "Secretária B"}
-            return None
-        
-        mock_db.fetchrow.side_effect = fetch_by_domain
-        
-        result_a = await mock_db.fetchrow("...", domain_a)
-        result_b = await mock_db.fetchrow("...", domain_b)
-        
-        assert result_a["name"] == "Secretária A"
-        assert result_b["name"] == "Secretária B"
+@pytest.mark.asyncio
+async def test_rate_limit_exceeded():
+    limiter = RateLimiter()
+    domain = "test-domain"
+    
+    # Exhaust limit
+    for _ in range(100):
+        await limiter.increment(domain, "chat")
+    
+    # Should be limited
+    allowed = await limiter.check(domain, "chat")
+    assert allowed is False
+```
+
+## Mocking External Services
+
+```python
+# Mock OpenAI
+@pytest.fixture
+def mock_openai():
+    with patch('services.llm.openai.AsyncOpenAI') as mock:
+        mock.return_value.chat.completions.create = AsyncMock(...)
+        yield mock
+
+# Mock Redis
+@pytest.fixture
+def mock_redis():
+    with patch('aioredis.from_url') as mock:
+        mock.return_value.get = AsyncMock(return_value=None)
+        mock.return_value.set = AsyncMock()
+        yield mock
 ```
 
 ## Comandos
 
 ```bash
-# Rodar todos os testes
+# Rodar todos
 pytest
 
-# Com verbose
-pytest -v
-
-# Apenas unitários
-pytest tests/unit/
-
-# Arquivo específico
-pytest tests/unit/test_llm_providers.py
-
-# Teste específico
-pytest tests/unit/test_llm_providers.py::TestOpenAILLM::test_chat_returns_response
-
-# Com cobertura
+# Com coverage
 pytest --cov=services --cov-report=html
 
-# Ver cobertura no terminal
-pytest --cov=services --cov-report=term-missing
+# Específico
+pytest tests/unit/test_llm_providers.py -v
+
+# Com output
+pytest -v -s
+
+# Por marker
+pytest -m "not slow"
 ```
 
-## Checklist de Testes
+## Convenções
 
-### Para cada Provider novo:
-- [ ] Teste de inicialização
-- [ ] Teste de operação principal (transcribe/synthesize/chat/embed)
-- [ ] Teste de health_check
-- [ ] Teste de erro (API key inválida, timeout, etc)
+- Nome de arquivo: `test_*.py`
+- Nome de classe: `Test{Componente}`
+- Nome de método: `test_{comportamento}_{contexto}`
+- Arrange → Act → Assert
+- Um assert por teste (idealmente)
 
-### Para cada Endpoint novo:
-- [ ] Teste de validação (domain_uuid obrigatório)
-- [ ] Teste de sucesso
-- [ ] Teste de erro
-- [ ] Teste de autenticação (se aplicável)
-
-### Para cada Feature:
-- [ ] Testes unitários dos componentes
-- [ ] Teste de integração do fluxo completo
-- [ ] Teste multi-tenant (isolamento)
+---
+*Playbook para: Test Writer*

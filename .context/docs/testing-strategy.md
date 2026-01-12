@@ -1,185 +1,219 @@
 # Testing Strategy - Voice AI IVR
 
-## Visão Geral
+## Pirâmide de Testes
 
-O Voice AI IVR usa uma estratégia de testes em 3 níveis:
+```
+        ┌───────────────┐
+        │     E2E       │  ← Poucos, lentos, caros
+        │   (manual)    │
+        ├───────────────┤
+        │  Integration  │  ← Alguns, com mocks
+        │    Tests      │
+        ├───────────────┤
+        │    Unit       │  ← Muitos, rápidos
+        │    Tests      │
+        └───────────────┘
+```
 
-1. **Unitários** - Componentes isolados (providers, services)
-2. **Integração** - Endpoints API, database
-3. **E2E** - Fluxo completo de conversa
+## Unit Tests
 
-## Ferramentas
-
-| Ferramenta | Uso |
-|------------|-----|
-| pytest | Framework de testes |
-| pytest-asyncio | Suporte a async/await |
-| pytest-cov | Cobertura de código |
-| unittest.mock | Mocking |
-| httpx | Cliente HTTP para testes de API |
-
-## Estrutura
+### Estrutura
 
 ```
 voice-ai-service/tests/
-├── conftest.py           # Fixtures globais
-├── unit/
-│   ├── test_stt_providers.py
-│   ├── test_tts_providers.py
-│   ├── test_llm_providers.py
-│   ├── test_embeddings_providers.py
-│   ├── test_rag_service.py
-│   └── test_session_manager.py
-├── integration/
-│   ├── test_api_transcribe.py
-│   ├── test_api_synthesize.py
-│   ├── test_api_chat.py
-│   └── test_database.py
-└── e2e/
-    └── test_full_conversation.py
+├── conftest.py                    # Fixtures compartilhadas
+└── unit/
+    ├── test_llm_providers.py      # LLM providers
+    ├── test_stt_providers.py      # STT providers
+    ├── test_tts_providers.py      # TTS providers
+    ├── test_embeddings_providers.py
+    ├── test_rag_service.py        # RAG pipeline
+    ├── test_session_manager.py    # Session handling
+    └── test_rate_limiter.py       # Rate limiting
 ```
 
-## Testes Unitários
-
-### Objetivo
-Testar componentes isoladamente, mockando dependências externas.
-
-### Cobertura Atual
-
-| Componente | Arquivos | Cobertura |
-|------------|----------|-----------|
-| STT Providers | whisper_local, whisper_api | ~80% |
-| TTS Providers | piper, openai, elevenlabs | ~80% |
-| LLM Providers | openai, anthropic, groq, ollama | ~85% |
-| Embeddings | openai, local | ~80% |
-| RAG Service | vector_store, embedding_service | ~70% |
-| Session Manager | session_manager | ~90% |
-
-### Exemplo
+### Fixtures
 
 ```python
-# tests/unit/test_llm_providers.py
-import pytest
-from unittest.mock import AsyncMock, patch
+# conftest.py
+@pytest.fixture
+def mock_db():
+    """Mock database connection"""
+    with patch('services.database.get_pool') as mock:
+        yield mock
 
+@pytest.fixture
+def openai_config():
+    """Config para testes OpenAI"""
+    return {"api_key": "test-key", "model": "gpt-4o-mini"}
+
+@pytest.fixture
+def sample_audio():
+    """Audio de teste"""
+    return base64.b64encode(b"RIFF...").decode()
+```
+
+### Exemplos de Testes
+
+```python
+# test_llm_providers.py
 class TestOpenAILLM:
     @pytest.mark.asyncio
-    async def test_chat_basic(self):
-        """Testa chat básico sem ação."""
-        provider = OpenAILLM({"api_key": "test", "model": "gpt-4"})
-        
-        with patch.object(provider, 'client') as mock:
-            mock.chat.completions.create = AsyncMock(return_value=...)
+    async def test_chat_completion(self, openai_config):
+        with patch.object(AsyncOpenAI, 'chat') as mock:
+            mock.completions.create = AsyncMock(return_value=...)
             
-            result = await provider.chat(
-                system_prompt="...",
-                messages=[{"role": "user", "content": "Olá"}]
-            )
+            llm = OpenAILLM(openai_config)
+            result = await llm.chat("Hello", [])
             
             assert result.response is not None
+            assert result.action is not None
+
+    @pytest.mark.asyncio
+    async def test_parse_action_transfer(self, openai_config):
+        llm = OpenAILLM(openai_config)
+        response = "Vou transferir para o setor comercial [TRANSFER:1001]"
+        
+        action = llm.parse_action(response)
+        
+        assert action["type"] == "transfer"
+        assert action["target"] == "1001"
 ```
 
-## Testes de Integração
-
-### Objetivo
-Testar endpoints API com banco de dados real (ou mock realista).
-
-### Setup
-
-```python
-# conftest.py para integração
-@pytest.fixture
-async def test_db():
-    """Banco de teste isolado."""
-    # Criar schema temporário
-    await db.execute("CREATE SCHEMA test_voice_ai")
-    # Rodar migrations
-    await run_migrations()
-    yield db
-    # Cleanup
-    await db.execute("DROP SCHEMA test_voice_ai CASCADE")
-```
-
-### Exemplo
-
-```python
-# tests/integration/test_api_chat.py
-from fastapi.testclient import TestClient
-
-def test_chat_endpoint(client, domain_uuid):
-    response = client.post("/api/v1/chat", json={
-        "domain_uuid": domain_uuid,
-        "message": "Qual o horário de funcionamento?",
-        "conversation_id": "test-conv-123"
-    })
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert "response" in data
-```
-
-## Testes E2E
-
-### Objetivo
-Testar fluxo completo: FreeSWITCH → Voice AI → resposta.
-
-### Approach
-Simular chamadas usando FreeSWITCH test harness ou mocks.
-
-```python
-# tests/e2e/test_full_conversation.py
-@pytest.mark.e2e
-async def test_complete_call_flow():
-    """Simula uma conversa completa."""
-    # 1. Iniciar sessão
-    session = await create_session(domain_uuid, caller_id)
-    
-    # 2. Saudação
-    greeting = await synthesize(domain_uuid, "Olá, como posso ajudar?")
-    
-    # 3. Transcrever pergunta
-    text = await transcribe(domain_uuid, audio_path)
-    
-    # 4. Chat com IA
-    response = await chat(domain_uuid, text, session.id)
-    
-    # 5. Verificar ação
-    if response.action == "transfer":
-        # Verificar transferência
-        pass
-    
-    # 6. Cleanup
-    await session.close()
-```
-
-## Comandos
+### Rodar Testes
 
 ```bash
 # Todos os testes
 pytest
 
-# Apenas unitários (rápido)
-pytest tests/unit/ -v
-
-# Integração (requer banco)
-pytest tests/integration/ -v
-
-# E2E (mais lento)
-pytest tests/e2e/ -v -m e2e
-
-# Com cobertura
-pytest --cov=services --cov=api --cov-report=html
-
-# Relatório no terminal
-pytest --cov=. --cov-report=term-missing
+# Com coverage
+pytest --cov=services --cov-report=html
 
 # Testes específicos
-pytest tests/unit/test_llm_providers.py::TestOpenAILLM -v
+pytest tests/unit/test_llm_providers.py -v
+
+# Por marker
+pytest -m "not slow"
+
+# Verbose com output
+pytest -v -s
 ```
 
-## CI/CD
+## Integration Tests
 
-### Pipeline Sugerido
+### API Tests
+
+```python
+# test_api_integration.py
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+
+def test_transcribe_endpoint():
+    response = client.post("/transcribe", json={
+        "domain_uuid": "test-domain-uuid",
+        "audio_base64": "...",
+        "format": "wav"
+    })
+    assert response.status_code == 200
+    assert "text" in response.json()
+
+def test_chat_with_rag():
+    # Setup: upload document first
+    # ...
+    
+    response = client.post("/chat", json={
+        "domain_uuid": "test-domain-uuid",
+        "secretary_uuid": "test-secretary-uuid",
+        "message": "Qual o horário?",
+        "history": []
+    })
+    
+    assert response.status_code == 200
+    assert "response" in response.json()
+```
+
+### Database Tests
+
+```python
+# test_database_integration.py
+@pytest.mark.asyncio
+async def test_provider_config_retrieval():
+    async with get_pool() as pool:
+        async with pool.acquire() as conn:
+            result = await conn.fetchrow(
+                "SELECT * FROM v_voice_ai_providers WHERE domain_uuid = $1",
+                "test-domain-uuid"
+            )
+            assert result is not None
+```
+
+## E2E Tests (Manual)
+
+### Checklist de Teste de Chamada
+
+```markdown
+## Teste Turn-based
+
+- [ ] Ligar para ramal 8000
+- [ ] Ouvir saudação
+- [ ] Falar pergunta
+- [ ] Receber resposta coerente
+- [ ] Pedir transferência
+- [ ] Verificar transferência funciona
+- [ ] Verificar log de conversa no FusionPBX
+
+## Teste Realtime
+
+- [ ] Ligar para ramal 8001 (realtime)
+- [ ] Conversar naturalmente
+- [ ] Testar barge-in (interromper IA)
+- [ ] Verificar latência < 500ms
+- [ ] Testar full-duplex
+- [ ] Verificar function calling (transfer)
+```
+
+## Mocking
+
+### Providers Externos
+
+```python
+# Mock OpenAI
+@pytest.fixture
+def mock_openai():
+    with patch('openai.AsyncOpenAI') as mock:
+        mock.return_value.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(
+                    message=MagicMock(content="Resposta mock")
+                )]
+            )
+        )
+        yield mock
+```
+
+### Database
+
+```python
+# Mock asyncpg
+@pytest.fixture
+def mock_db_pool():
+    mock_pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+    mock_conn.fetchrow.return_value = {
+        "provider_uuid": "...",
+        "config": {"api_key": "..."}
+    }
+    
+    with patch('services.database.db_pool', mock_pool):
+        yield mock_pool
+```
+
+## CI/CD Integration
+
+### GitHub Actions
 
 ```yaml
 # .github/workflows/test.yml
@@ -192,55 +226,65 @@ jobs:
     runs-on: ubuntu-latest
     
     services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_DB: test_voice_ai
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
     
     steps:
       - uses: actions/checkout@v4
       
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
       
       - name: Install dependencies
         run: |
           cd voice-ai-service
           pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
       
       - name: Run tests
         run: |
           cd voice-ai-service
-          pytest --cov=. --cov-report=xml
+          pytest --cov=services --cov-report=xml
       
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v3
+```
+
+## Test Data
+
+### Fixtures de Áudio
+
+```python
+# tests/fixtures/
+# - sample_speech.wav (5s de fala)
+# - silence.wav (silêncio)
+# - noise.wav (ruído)
+# - long_speech.wav (60s)
+```
+
+### Fixtures de Documentos
+
+```python
+# tests/fixtures/
+# - sample.pdf (2 páginas)
+# - sample.docx (1 página)
+# - sample.txt (1KB)
+# - large.pdf (100 páginas)
 ```
 
 ## Métricas de Qualidade
 
-| Métrica | Meta | Atual |
-|---------|------|-------|
-| Cobertura de código | ≥80% | ~75% |
-| Testes unitários | 100% providers | ✅ |
-| Testes de integração | 100% endpoints | ~80% |
-| Testes E2E | Fluxo principal | Em progresso |
+| Métrica | Target | Atual |
+|---------|--------|-------|
+| Code Coverage | > 80% | - |
+| Unit Tests | > 100 | - |
+| Integration Tests | > 20 | - |
+| Flaky Tests | 0 | - |
+| Test Runtime | < 5min | - |
 
-## Manutenção
-
-### Ao adicionar novo Provider
-1. Criar `tests/unit/test_PROVIDER.py`
-2. Testar: inicialização, operação principal, erros
-
-### Ao adicionar novo Endpoint
-1. Criar `tests/integration/test_api_ENDPOINT.py`
-2. Testar: validação, sucesso, erros, multi-tenant
-
-### Ao modificar código existente
-1. Rodar testes existentes
-2. Adicionar testes para novos cenários
-3. Verificar cobertura não diminuiu
+---
+*Gerado em: 2026-01-12*

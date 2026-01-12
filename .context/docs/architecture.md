@@ -1,178 +1,208 @@
 # Architecture - Voice AI IVR
 
-## Visão Geral da Arquitetura
+## Overview
 
-O sistema segue uma arquitetura híbrida com separação clara de responsabilidades:
+O sistema segue uma arquitetura híbrida onde:
+- **FreeSWITCH/FusionPBX** roda no host (bare metal)
+- **Serviços de IA** rodam em Docker
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CHAMADA TELEFÔNICA                          │
-└─────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         FREESWITCH (mod_lua)                        │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────────────┐   │
-│  │ Dialplan XML  │──│secretary_ai.lua│──│ HTTP Client (lib/http)│   │
-│  └───────────────┘  └───────────────┘  └───────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-                                   │ HTTP API
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    VOICE AI SERVICE (FastAPI)                       │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐   │
-│  │   STT   │ │   TTS   │ │   LLM   │ │   RAG   │ │ Conversations│   │
-│  │ Factory │ │ Factory │ │ Factory │ │ Service │ │   Service    │   │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └──────┬──────┘   │
-│       │          │          │          │              │            │
-│       └──────────┴──────────┴──────────┴──────────────┘            │
-│                              │                                      │
-│                    ┌─────────┴─────────┐                           │
-│                    │  ProviderManager  │                           │
-│                    │  (Multi-Tenant)   │                           │
-│                    └─────────┬─────────┘                           │
-└──────────────────────────────┼──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        POSTGRESQL (FusionPBX)                       │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────────────┐   │
-│  │ v_voice_*     │  │ v_domains     │  │ pgvector (embeddings) │   │
-│  │ (6 tabelas)   │  │ (multi-tenant)│  │                       │   │
-│  └───────────────┘  └───────────────┘  └───────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        FUSIONPBX (PHP)                              │
-│  ┌───────────────────────────────────────────────────────────────┐ │
-│  │                 voice_secretary App                            │ │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │ │
-│  │  │Secretary│ │Documents│ │Transfer │ │Conversa-│ │Providers│ │ │
-│  │  │  CRUD   │ │  CRUD   │ │  Rules  │ │  tions  │ │  Config │ │ │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ │ │
-│  └───────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                          HOST SERVER                               │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  ┌──────────────────────────────────────────┐                     │
+│  │     FreeSWITCH + FusionPBX (bare metal)  │                     │
+│  │  ┌─────────────────┐  ┌───────────────┐  │                     │
+│  │  │ mod_audio_stream│  │ Lua Scripts   │  │                     │
+│  │  │ (realtime)      │  │ (turn-based)  │  │                     │
+│  │  └────────┬────────┘  └───────┬───────┘  │                     │
+│  └───────────┼───────────────────┼──────────┘                     │
+│              │                   │                                 │
+│              │ ws://8080         │ http://8100                     │
+│              ▼                   ▼                                 │
+│  ┌──────────────────────────────────────────────────────────┐     │
+│  │                    DOCKER COMPOSE                         │     │
+│  │  ┌──────────────────┐    ┌──────────────────┐            │     │
+│  │  │ voice-ai-realtime│    │ voice-ai-service │            │     │
+│  │  │    :8080 (WS)    │    │   :8100 (HTTP)   │            │     │
+│  │  │  • Bridge WS     │    │  • REST API      │            │     │
+│  │  │  • OpenAI RT     │    │  • STT/TTS/LLM   │            │     │
+│  │  │  • ElevenLabs    │    │  • RAG/Docs      │            │     │
+│  │  └────────┬─────────┘    └────────┬─────────┘            │     │
+│  │           │                       │                       │     │
+│  │           └───────────┬───────────┘                       │     │
+│  │                       ▼                                   │     │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐          │     │
+│  │  │   redis    │  │  chromadb  │  │   ollama   │          │     │
+│  │  │   :6379    │  │   :8000    │  │   :11434   │          │     │
+│  │  └────────────┘  └────────────┘  └────────────┘          │     │
+│  └──────────────────────────────────────────────────────────┘     │
+│                                                                    │
+│                    ┌────────────────────────────┐                 │
+│                    │      PostgreSQL            │                 │
+│                    │  (shared with FusionPBX)   │                 │
+│                    └────────────────────────────┘                 │
+│                                                                    │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-## Padrões Arquiteturais
+## Key Patterns
 
 ### 1. Factory Pattern (Multi-Provider)
 
-Cada tipo de serviço (STT, TTS, LLM, Embeddings) usa uma Factory para instanciar providers:
+Cada tipo de serviço (STT, TTS, LLM, Embeddings) usa factory pattern:
 
 ```python
-# services/stt/factory.py
+# voice-ai-service/services/stt/factory.py
 def create_stt_provider(provider_name: str, config: dict) -> BaseSTT:
-    return _providers[provider_name](config)
+    providers = {
+        "openai_whisper": OpenAIWhisperSTT,
+        "azure_speech": AzureSpeechSTT,
+        "google_speech": GoogleSpeechSTT,
+        # ...
+    }
+    return providers[provider_name](config)
 ```
 
-**Benefícios:**
-- Adicionar novo provider = criar classe + registrar na factory
-- Zero alteração no código existente
-- Configuração via banco de dados (por tenant)
+### 2. Provider Manager (Multi-Tenant)
 
-### 2. ProviderManager (Multi-Tenant)
-
-Gerencia instâncias de providers por domínio:
+O `ProviderManager` gerencia instâncias de providers por domain:
 
 ```python
 class ProviderManager:
-    async def get_stt_provider(self, domain_uuid: str) -> BaseSTT:
-        config = await self._load_config(domain_uuid, "stt")
-        return create_stt_provider(config["provider_name"], config)
+    async def get_stt(self, domain_uuid: str) -> BaseSTT:
+        # 1. Busca config do domain no PostgreSQL
+        # 2. Cria ou retorna instância cacheada
+        # 3. Aplica fallback se necessário
 ```
 
-### 3. Session Manager (Contexto de Conversa)
+### 3. Session Manager (Context)
 
-Mantém histórico e contexto para cada chamada ativa:
+Mantém histórico de conversas para contexto do LLM:
 
 ```python
 class SessionManager:
-    sessions: Dict[session_id, Session]
+    def get_context(self, call_uuid: str) -> List[ChatMessage]:
+        # Retorna últimas N mensagens da sessão
     
-    async def add_message(session_id, role, content)
-    async def get_history(session_id, max_messages=10)
+    def add_message(self, call_uuid: str, message: ChatMessage):
+        # Adiciona mensagem ao histórico
 ```
 
-### 4. RAG (Retrieval Augmented Generation)
-
-Fluxo para respostas baseadas em documentos:
-
-1. **Upload**: Documento → Extração → Chunking → Embeddings → VectorStore
-2. **Query**: Pergunta → Embedding → Busca Vetorial → Contexto → LLM
-
-## Decisões Técnicas
-
-### D1: Python + FastAPI vs Node.js
-
-**Escolha**: Python + FastAPI
-
-**Motivos:**
-- Ecossistema de IA maduro (OpenAI, Anthropic, sentence-transformers)
-- async/await nativo com alta performance
-- Typing forte com Pydantic
-- Facilidade de integração com Whisper, faster-whisper
-
-### D2: pgvector vs ChromaDB vs SQLite-vec
-
-**Escolha**: pgvector (com fallback para ChromaDB)
-
-**Motivos:**
-- Reutiliza PostgreSQL do FusionPBX
-- Sem serviço adicional para gerenciar
-- Queries SQL padrão com `<=>` (cosine distance)
-- ChromaDB como alternativa para dev/testes
-
-### D3: Lua no FreeSWITCH vs Python ESL
-
-**Escolha**: Lua (mod_lua)
-
-**Motivos:**
-- Já embarcado no FreeSWITCH
-- Baixa latência (mesmo processo)
-- Simplicidade para fluxos de chamada
-- Python service apenas para IA (separação de responsabilidades)
-
-### D4: Multi-Tenant via domain_uuid
-
-**Implementação:**
-- TODAS as tabelas têm `domain_uuid NOT NULL`
-- TODOS os endpoints exigem `domain_uuid` como parâmetro
-- PHP usa `$_SESSION['domain_uuid']` (nunca do request)
-- Lua obtém `session:getVariable("domain_uuid")`
-
-## Fluxo de uma Chamada
+### 4. RAG Pipeline
 
 ```
-1. [FREESWITCH] Chamada entra → Dialplan roteia para secretary_ai.lua
-2. [LUA] Carrega config da secretária (filtrado por domain_uuid)
-3. [LUA] Reproduz saudação (TTS)
-4. [LOOP]
-   4.1 [LUA] Grava áudio do cliente
-   4.2 [PYTHON] Transcreve (STT)
-   4.3 [PYTHON] Busca contexto RAG (se habilitado)
-   4.4 [PYTHON] Processa com LLM (+ histórico)
-   4.5 [PYTHON] Retorna resposta + ação
-   4.6 [LUA] Reproduz resposta (TTS)
-   4.7 [LUA] Se ação="transfer" → transfere
-   4.8 [LUA] Se ação="hangup" → despede e desliga
-5. [LUA] Salva conversa no banco
-6. [LUA] Envia webhook para OmniPlay (opcional)
+┌──────────┐    ┌───────────┐    ┌──────────────┐
+│ Document │ →  │ Chunking  │ →  │  Embeddings  │
+│  Upload  │    │ (1000tok) │    │ (OpenAI/etc) │
+└──────────┘    └───────────┘    └──────────────┘
+                                        │
+                                        ▼
+                               ┌──────────────┐
+                               │ Vector Store │
+                               │ (ChromaDB)   │
+                               └──────────────┘
+
+┌─────────┐    ┌──────────────┐    ┌─────────┐
+│  Query  │ →  │ Similarity   │ →  │ Context │ → LLM
+│         │    │   Search     │    │ + Query │
+└─────────┘    └──────────────┘    └─────────┘
 ```
 
-## Escalabilidade
+## Component Details
 
-| Componente | Estratégia de Escala |
-|------------|---------------------|
-| FreeSWITCH | Cluster SIP (Kamailio) |
-| Voice AI Service | Horizontal (múltiplas instâncias) |
-| PostgreSQL | Réplicas de leitura |
-| Providers | Rate limiting por tenant |
+### voice-ai-service (API v1)
 
-## Segurança
+| Path | Responsabilidade |
+|------|------------------|
+| `/api/transcribe.py` | STT endpoint |
+| `/api/synthesize.py` | TTS endpoint |
+| `/api/chat.py` | LLM endpoint com RAG |
+| `/api/documents.py` | Upload/processamento docs |
+| `/api/conversations.py` | Histórico |
+| `/services/provider_manager.py` | Multi-tenant/provider |
+| `/services/rag/` | Vector store, embeddings |
 
-- **Autenticação**: JWT no FusionPBX, API interna sem auth (localhost only)
-- **Multi-Tenant**: Isolamento total via `domain_uuid`
-- **Secrets**: API keys em variáveis de ambiente ou tabela `v_voice_ai_providers` (JSONB criptografado)
-- **Rate Limiting**: Por tenant (configurável em settings)
+### voice-ai-realtime (Bridge v2)
+
+| Componente | Responsabilidade |
+|------------|------------------|
+| `RealtimeBridge` | WebSocket server |
+| `ProviderRouter` | Seleciona provider realtime |
+| `OpenAIRealtimeProvider` | OpenAI Realtime API |
+| `ElevenLabsProvider` | ElevenLabs Conv AI |
+| `GeminiLiveProvider` | Google Gemini 2.0 |
+| `CustomPipelineProvider` | Deepgram + Groq + Piper |
+
+### freeswitch/scripts
+
+| Script | Modo | Descrição |
+|--------|------|-----------|
+| `secretary_ai.lua` | Turn-based | Fluxo completo v1 |
+| `get_secretary_mode.lua` | Router | Decide realtime/turn-based |
+| `lib/http.lua` | Util | HTTP client |
+| `lib/config.lua` | Util | Carrega config do PostgreSQL |
+
+### fusionpbx-app
+
+| Página | Função |
+|--------|--------|
+| `secretary.php` | Lista secretárias |
+| `secretary_edit.php` | Criar/editar secretária |
+| `providers.php` | Gerenciar providers |
+| `documents.php` | Upload de documentos |
+| `conversations.php` | Histórico |
+
+## Database Schema
+
+```sql
+-- Providers de IA
+CREATE TABLE v_voice_ai_providers (
+    provider_uuid UUID PRIMARY KEY,
+    domain_uuid UUID NOT NULL REFERENCES v_domains,
+    provider_type VARCHAR(20),  -- stt, tts, llm, embeddings
+    provider_name VARCHAR(50),  -- openai_whisper, elevenlabs, etc
+    config JSONB,               -- api_key, model, etc (encrypted)
+    is_default BOOLEAN
+);
+
+-- Secretárias virtuais
+CREATE TABLE v_voice_secretaries (
+    secretary_uuid UUID PRIMARY KEY,
+    domain_uuid UUID NOT NULL REFERENCES v_domains,
+    name VARCHAR(100),
+    extension VARCHAR(10),
+    processing_mode VARCHAR(20),  -- turn_based, realtime, auto
+    system_prompt TEXT,
+    greeting TEXT,
+    farewell TEXT,
+    stt_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    tts_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    llm_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    realtime_provider_uuid UUID REFERENCES v_voice_ai_providers
+);
+```
+
+## Multi-Tenant Isolation
+
+Cada domain_uuid tem:
+- ✅ Próprias secretárias
+- ✅ Próprios providers configurados
+- ✅ Própria base de conhecimento (RAG)
+- ✅ Próprio histórico de conversas
+- ✅ Próprios limites de uso (rate limiting)
+
+## Network Ports
+
+| Service | Port | Protocol |
+|---------|------|----------|
+| voice-ai-service | 8100 | HTTP/REST |
+| voice-ai-realtime | 8080 | WebSocket |
+| Redis | 6379 | Redis protocol |
+| ChromaDB | 8000 | HTTP |
+| Ollama | 11434 | HTTP |
+| PostgreSQL | 5432 | PostgreSQL |
+
+---
+*Gerado em: 2026-01-12*

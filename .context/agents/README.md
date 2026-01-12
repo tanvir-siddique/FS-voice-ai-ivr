@@ -1,92 +1,43 @@
-# Agents - Voice AI IVR
+# 🤖 Agent Playbooks - Voice AI IVR
 
-## Visão Geral
-
-Estes playbooks fornecem instruções específicas para diferentes tipos de tarefas no projeto Voice AI IVR.
+Playbooks para auxiliar agentes de IA no desenvolvimento do projeto.
 
 ## Playbooks Disponíveis
 
-### Desenvolvimento
+| Agente | Descrição | Arquivo |
+|--------|-----------|---------|
+| **Architect** | Arquitetura, decisões técnicas | [architect-specialist.md](./architect-specialist.md) |
+| **Backend** | Python/FastAPI, providers, APIs | [backend-specialist.md](./backend-specialist.md) |
+| **Database** | PostgreSQL, migrations | [database-specialist.md](./database-specialist.md) |
+| **DevOps** | Docker, deployment, FreeSWITCH | [devops-specialist.md](./devops-specialist.md) |
+| **Frontend** | PHP FusionPBX (em breve) | [frontend-specialist.md](./frontend-specialist.md) |
+| **Test Writer** | Testes unitários/integração | [test-writer.md](./test-writer.md) |
+| **Code Reviewer** | Code review, padrões | [code-reviewer.md](./code-reviewer.md) |
+| **Security** | Segurança, multi-tenant | [security-auditor.md](./security-auditor.md) |
+| **Bug Fixer** | Debug, troubleshooting | [bug-fixer.md](./bug-fixer.md) |
 
-| Playbook | Quando Usar |
-|----------|-------------|
-| [Feature Developer](./feature-developer.md) | Implementar nova funcionalidade end-to-end |
-| [Backend Specialist](./backend-specialist.md) | Trabalhar no Voice AI Service (Python) |
-| [Database Specialist](./database-specialist.md) | Criar/modificar migrations, queries |
+## Uso
 
-### Qualidade
+Cada playbook contém:
+- **Papel**: Responsabilidades do agente
+- **Stack**: Tecnologias relevantes
+- **Padrões**: Convenções do projeto
+- **Tarefas Comuns**: How-tos
+- **Cuidados**: Do's and Don'ts
 
-| Playbook | Quando Usar |
-|----------|-------------|
-| [Code Reviewer](./code-reviewer.md) | Revisar PRs, verificar padrões |
-| [Test Writer](./test-writer.md) | Escrever testes unitários/integração |
-| [Bug Fixer](./bug-fixer.md) | Investigar e corrigir bugs |
+## Regras Gerais (Todos os Agentes)
 
-### Especialistas
+1. **Multi-Tenant**: Sempre filtrar por `domain_uuid`
+2. **Async**: Usar `async/await` para I/O
+3. **Logs**: Estruturados, sem dados sensíveis
+4. **Testes**: Cobertura mínima de 80%
+5. **Documentação**: Manter OpenSpec atualizado
 
-| Playbook | Quando Usar |
-|----------|-------------|
-| [Architect Specialist](./architect-specialist.md) | Decisões de arquitetura |
-| [Security Auditor](./security-auditor.md) | Auditoria de segurança |
-| [Performance Optimizer](./performance-optimizer.md) | Otimização de performance |
-| [Documentation Writer](./documentation-writer.md) | Escrever/atualizar docs |
+## Links Úteis
 
-### DevOps
+- [OpenSpec Proposals](/openspec/changes/)
+- [API Docs](http://localhost:8100/docs)
+- [Documentação](../.context/docs/)
 
-| Playbook | Quando Usar |
-|----------|-------------|
-| [DevOps Specialist](./devops-specialist.md) | Deploy, CI/CD, infraestrutura |
-
-## Como Usar
-
-1. **Identifique a tarefa** - Feature? Bug? Review?
-2. **Abra o playbook correspondente**
-3. **Siga as instruções específicas**
-
-## Regras Universais
-
-Estas regras se aplicam a TODOS os playbooks:
-
-### 1. Multi-Tenant SEMPRE
-```python
-# TODA query DEVE incluir domain_uuid
-WHERE domain_uuid = $1
-```
-
-### 2. Não Quebrar Existente
-```python
-# Adicione, não modifique
-new_field: Optional[str] = None  # Opcional = compatível
-```
-
-### 3. Logs com Contexto
-```python
-logger.info("Action", domain_uuid=domain_uuid, ...)
-```
-
-### 4. Migrations Idempotentes
-```sql
-CREATE TABLE IF NOT EXISTS ...
-CREATE INDEX IF NOT EXISTS ...
-```
-
-## Hierarquia de Documentação
-
-```
-.context/
-├── docs/          # O QUE o sistema faz
-│   ├── project-overview.md
-│   ├── architecture.md
-│   └── ...
-└── agents/        # COMO trabalhar no sistema
-    ├── backend-specialist.md
-    ├── code-reviewer.md
-    └── ...
-```
-
-## Atualizações
-
-Ao modificar significativamente o projeto:
-1. Atualizar playbooks afetados
-2. Revisar regras críticas
-3. Adicionar novos exemplos se necessário
+---
+*Última atualização: 2026-01-12*

@@ -1,65 +1,82 @@
-# Tooling - Voice AI IVR
+# Tooling & Productivity - Voice AI IVR
 
-## Linting e Formatação
+## Scripts Disponíveis
 
-### Python (Voice AI Service)
+### Docker
 
-| Ferramenta | Uso | Comando |
-|------------|-----|---------|
-| ruff | Linting rápido | `ruff check .` |
-| black | Formatação | `black .` |
-| mypy | Type checking | `mypy services/` |
+| Script | Descrição |
+|--------|-----------|
+| `scripts/docker-build.sh` | Build da imagem Docker |
+| `scripts/docker-up.sh` | Iniciar serviços |
+| `scripts/docker-up.sh --dev` | Modo desenvolvimento (hot reload) |
+| `scripts/docker-up.sh --ollama` | Com Ollama (LLM local) |
+| `scripts/docker-install-ollama-models.sh` | Instalar modelos Ollama |
+| `scripts/docker-install-piper-voices.sh` | Instalar vozes Piper |
+
+### FreeSWITCH
+
+| Script | Descrição |
+|--------|-----------|
+| `scripts/setup-freeswitch-integration.sh` | Copiar scripts/dialplan |
+
+## Ferramentas de Desenvolvimento
+
+### Python
 
 ```bash
-cd voice-ai-service
+# Virtual environment
+python -m venv venv
+source venv/bin/activate
 
-# Verificar estilo
+# Dependências
+pip install -r requirements.txt
+
+# Linting
 ruff check .
-
-# Corrigir automaticamente
 ruff check . --fix
 
-# Formatar código
+# Formatting
 black .
 
 # Type checking
-mypy services/ api/ models/
+mypy .
 ```
 
-### Configuração (pyproject.toml)
+### Docker
 
-```toml
-[tool.ruff]
-line-length = 100
-select = ["E", "F", "W", "I", "N", "D", "UP"]
-ignore = ["D100", "D104"]
+```bash
+# Build
+docker compose build
 
-[tool.black]
-line-length = 100
-target-version = ["py310"]
+# Logs
+docker compose logs -f voice-ai-service
 
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_ignores = true
+# Shell no container
+docker exec -it voice-ai-service bash
+
+# Rebuild sem cache
+docker compose build --no-cache
 ```
 
-### PHP (FusionPBX App)
+### FreeSWITCH
 
-Seguir padrões do FusionPBX existente:
-- Indentação: tabs
-- Aspas simples para strings
-- Nomes de variáveis: snake_case
+```bash
+# Console
+fs_cli
 
-### Lua (FreeSWITCH)
+# Reload dialplan
+fs_cli -x "reloadxml"
 
-- Indentação: 4 espaços
-- Nomes locais: snake_case
-- Funções: camelCase (padrão FreeSWITCH)
+# Debug chamada
+fs_cli -x "sofia status"
+
+# Logs
+tail -f /var/log/freeswitch/freeswitch.log
+```
 
 ## IDE Configuration
 
-### VSCode
+### VS Code
 
 ```json
 // .vscode/settings.json
@@ -67,15 +84,18 @@ Seguir padrões do FusionPBX existente:
     "python.linting.enabled": true,
     "python.linting.ruffEnabled": true,
     "python.formatting.provider": "black",
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["voice-ai-service/tests"],
     "editor.formatOnSave": true,
     "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
-    "python.analysis.typeCheckingMode": "basic"
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": true
+        }
+    }
 }
 ```
 
-### Extensões Recomendadas
+### Extensions Recomendadas
 
 ```json
 // .vscode/extensions.json
@@ -84,184 +104,167 @@ Seguir padrões do FusionPBX existente:
         "ms-python.python",
         "ms-python.vscode-pylance",
         "charliermarsh.ruff",
-        "ms-python.black-formatter",
-        "sumneko.lua",
-        "bmewburn.vscode-intelephense-client"
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml",
+        "dbaeumer.vscode-eslint"
     ]
 }
 ```
 
-## Scripts de Automação
-
-### Verificação Completa
-
-```bash
-#!/bin/bash
-# scripts/check-all.sh
-
-echo "=== Linting ==="
-cd voice-ai-service
-ruff check .
-
-echo "=== Type Checking ==="
-mypy services/ api/
-
-echo "=== Tests ==="
-pytest tests/unit/ -v
-
-echo "=== Coverage ==="
-pytest --cov=. --cov-report=term-missing
-```
-
-### Pre-commit Hook
-
-```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-
-cd voice-ai-service
-
-# Lint
-ruff check . --fix
-if [ $? -ne 0 ]; then
-    echo "Linting failed"
-    exit 1
-fi
-
-# Format
-black --check .
-if [ $? -ne 0 ]; then
-    echo "Formatting required. Run: black ."
-    exit 1
-fi
-
-# Types
-mypy services/ api/ --ignore-missing-imports
-if [ $? -ne 0 ]; then
-    echo "Type errors found"
-    exit 1
-fi
-
-# Quick tests
-pytest tests/unit/ -q
-if [ $? -ne 0 ]; then
-    echo "Tests failed"
-    exit 1
-fi
-```
-
 ## Debugging
 
-### Python
+### Python (FastAPI)
 
 ```python
-# Usar breakpoint() para debug interativo
-def process_request(data):
-    breakpoint()  # Pausa aqui
-    result = transform(data)
-    return result
-```
+# Adicionar breakpoint
+import pdb; pdb.set_trace()
 
-```bash
-# Rodar com debug
-python -m pdb main.py
-
-# Ou com ipdb (mais amigável)
-pip install ipdb
-PYTHONBREAKPOINT=ipdb.set_trace python main.py
+# Ou com debugpy (remote debug)
+# 1. Adicionar ao Dockerfile:
+#    RUN pip install debugpy
+# 2. Iniciar com:
+#    python -m debugpy --listen 0.0.0.0:5678 -m uvicorn main:app
 ```
 
 ### Lua (FreeSWITCH)
 
 ```lua
--- Logging detalhado
-local function log(level, message)
-    freeswitch.consoleLog(level, "[SECRETARY_AI] " .. message .. "\n")
-end
+-- Adicionar logs
+freeswitch.consoleLog("INFO", "Debug: " .. variable .. "\n")
 
-log("INFO", "Starting request")
-log("DEBUG", "Data: " .. tostring(data))
-log("ERR", "Error occurred: " .. error_msg)
+-- Ver no console
+-- fs_cli
+-- sofia loglevel all 9
 ```
+
+## Monitoramento
+
+### Health Checks
 
 ```bash
-# Acompanhar logs em tempo real
-tail -f /var/log/freeswitch/freeswitch.log | grep SECRETARY_AI
+# API
+curl http://localhost:8100/health
+
+# Redis
+redis-cli ping
+
+# PostgreSQL
+psql -c "SELECT 1"
 ```
 
-### PHP
+### Logs
 
-```php
-// Debug logging
-error_log("Debug: " . print_r($variable, true));
+```bash
+# Docker logs
+docker compose logs -f
 
-// Ou usar FusionPBX debug
-if ($debug) {
-    echo "<pre>" . print_r($data, true) . "</pre>";
-}
+# Específico
+docker logs voice-ai-service -f --tail 100
+
+# Filtrar erros
+docker logs voice-ai-service 2>&1 | grep -i error
 ```
 
-## Profiling
-
-### Python Performance
+### Métricas
 
 ```python
-# Profiling simples
-import time
+# Prometheus metrics endpoint (futuro)
+# GET /metrics
 
-start = time.perf_counter()
-result = await expensive_operation()
-elapsed = time.perf_counter() - start
-logger.info(f"Operation took {elapsed:.3f}s")
+# Exemplo de métricas
+# voice_ai_requests_total{domain="...",endpoint="chat"}
+# voice_ai_latency_seconds{domain="...",endpoint="chat"}
+# voice_ai_errors_total{domain="...",type="timeout"}
 ```
+
+## Automação
+
+### Pre-commit Hooks
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.1.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+  
+  - repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+      - id: black
+  
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+```
+
+### Makefile
+
+```makefile
+# Makefile
+.PHONY: build up down logs test lint
+
+build:
+	./scripts/docker-build.sh
+
+up:
+	./scripts/docker-up.sh
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+test:
+	docker exec voice-ai-service pytest
+
+lint:
+	docker exec voice-ai-service ruff check .
+
+shell:
+	docker exec -it voice-ai-service bash
+```
+
+## Troubleshooting Tools
+
+### Network
 
 ```bash
-# Profiling detalhado
-python -m cProfile -o profile.prof main.py
-python -m pstats profile.prof
+# Verificar portas
+netstat -tlnp | grep 8100
+
+# Testar conectividade
+curl -v http://localhost:8100/health
+
+# DNS dentro do Docker
+docker exec voice-ai-service nslookup host.docker.internal
 ```
 
-### Memory
+### Memória/CPU
 
 ```bash
-# Monitorar memória
-pip install memory-profiler
-python -m memory_profiler script.py
+# Stats dos containers
+docker stats
+
+# Processos no container
+docker exec voice-ai-service top
 ```
 
-## Database Tools
+### Database
 
 ```bash
-# Conectar ao banco
-psql -h localhost -U fusionpbx fusionpbx
-
-# Verificar tabelas voice_ai
-\dt v_voice_*
-
-# Explain query
-EXPLAIN ANALYZE SELECT * FROM v_voice_document_chunks 
-WHERE domain_uuid = '...' 
-ORDER BY embedding <=> '...'::vector 
-LIMIT 5;
-
-# Ver índices
-\di v_voice_*
+# Conectar ao PostgreSQL
+docker exec -it voice-ai-service python
+>>> from services.database import get_pool
+>>> pool = await get_pool()
+>>> await pool.fetchval("SELECT 1")
 ```
 
-## Comandos Úteis
-
-```bash
-# Voice AI Service
-cd voice-ai-service
-uvicorn main:app --reload --port 8100  # Dev
-uvicorn main:app --host 0.0.0.0 --port 8100  # Prod
-
-# FreeSWITCH
-fs_cli  # Console interativo
-fs_cli -x "reloadxml"  # Recarregar dialplan
-fs_cli -x "show channels"  # Ver chamadas ativas
-
-# FusionPBX
-sudo systemctl restart nginx php-fpm  # Restart web
-sudo rm -rf /var/www/fusionpbx/temp/*  # Limpar cache
-```
+---
+*Gerado em: 2026-01-12*

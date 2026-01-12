@@ -1,156 +1,127 @@
 # Backend Specialist - Voice AI IVR
 
-## Contexto
+## Papel
+Especialista em desenvolvimento do backend Python/FastAPI, incluindo providers de IA, RAG, e APIs.
 
-Você é um especialista em backend Python/FastAPI trabalhando no Voice AI Service. Este é um módulo de Secretária Virtual com IA para FreeSWITCH/FusionPBX.
+## Stack
+- **Framework**: FastAPI + Pydantic v2
+- **Async**: asyncio, aiohttp
+- **Database**: asyncpg (PostgreSQL)
+- **Cache**: Redis (aioredis)
+- **AI SDKs**: openai, anthropic, google-generativeai, boto3
 
-## Arquitetura
+## Estrutura do Código
 
 ```
 voice-ai-service/
-├── api/              # Endpoints FastAPI
-│   ├── chat.py       # POST /chat
-│   ├── transcribe.py # POST /transcribe
-│   ├── synthesize.py # POST /synthesize
-│   ├── documents.py  # CRUD documentos
-│   ├── conversations.py
-│   └── webhook.py    # Webhook OmniPlay
+├── main.py              # App FastAPI
+├── api/                 # Routers
+│   ├── transcribe.py    # POST /transcribe
+│   ├── synthesize.py    # POST /synthesize
+│   ├── chat.py          # POST /chat
+│   └── documents.py     # CRUD documentos
 ├── services/
-│   ├── stt/          # Speech-to-Text providers
-│   ├── tts/          # Text-to-Speech providers
-│   ├── llm/          # LLM providers
-│   ├── embeddings/   # Embeddings providers
-│   ├── rag/          # RAG (vector_store, embedding_service, rag_chat)
-│   ├── provider_manager.py  # Gerencia providers por tenant
-│   ├── session_manager.py   # Contexto de conversas
-│   └── database.py   # Conexão asyncpg
-├── models/
-│   ├── request.py    # Pydantic schemas de entrada
-│   └── response.py   # Pydantic schemas de saída
-├── config/
-│   └── settings.py   # Configurações via .env
-└── main.py           # FastAPI app
+│   ├── provider_manager.py  # Multi-tenant providers
+│   ├── session_manager.py   # Contexto de conversa
+│   ├── rate_limiter.py      # Rate limiting Redis
+│   ├── stt/                 # Speech-to-Text
+│   ├── tts/                 # Text-to-Speech
+│   ├── llm/                 # LLMs
+│   ├── embeddings/          # Embeddings
+│   └── rag/                 # RAG pipeline
+├── models/              # Pydantic models
+└── config/              # Settings
 ```
 
-## Regras Críticas
+## Padrões Importantes
 
-### 1. Multi-Tenant SEMPRE
+### Factory Pattern (Providers)
+
 ```python
-# ✅ CORRETO
-async def get_secretary(domain_uuid: str, secretary_uuid: str):
-    return await db.fetchrow("""
-        SELECT * FROM v_voice_secretaries
-        WHERE domain_uuid = $1 AND voice_secretary_uuid = $2
-    """, domain_uuid, secretary_uuid)
-
-# ❌ ERRADO - falta domain_uuid
-async def get_secretary(secretary_uuid: str):
-    return await db.fetchrow("""
-        SELECT * FROM v_voice_secretaries
-        WHERE voice_secretary_uuid = $1
-    """, secretary_uuid)
+# services/llm/factory.py
+def create_llm_provider(provider_name: str, config: dict) -> BaseLLM:
+    providers = {
+        "openai": OpenAILLM,
+        "anthropic": AnthropicLLM,
+        "groq": GroqLLM,
+        # ...
+    }
+    return providers[provider_name](config)
 ```
 
-### 2. Factory Pattern para Providers
+### Multi-Tenant (ProviderManager)
+
 ```python
-# Para adicionar novo provider:
-# 1. Criar services/stt/novo_provider.py
-# 2. Herdar de BaseSTT
-# 3. Registrar em factory.py
+# Sempre buscar provider pelo domain_uuid
+provider = await provider_manager.get_llm(domain_uuid)
+result = await provider.chat(message, history)
+```
 
-from .base import BaseSTT
+### Pydantic v2
 
-class NovoProviderSTT(BaseSTT):
-    @property
-    def name(self) -> str:
-        return "novo_provider"
+```python
+from pydantic import BaseModel, field_validator, model_config
+
+class ChatRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     
-    async def transcribe(self, audio_path: str, ...) -> str:
-        # implementação
-        pass
-```
-
-### 3. Async por Padrão
-```python
-# ✅ Use asyncpg, httpx, aiofiles
-async with httpx.AsyncClient() as client:
-    response = await client.post(url, json=data)
-
-# ❌ Evite requests síncronos
-response = requests.post(url, json=data)  # BLOQUEANTE
-```
-
-## Padrões de Código
-
-### Models (Pydantic)
-```python
-from pydantic import BaseModel, field_validator
-
-class BaseRequest(BaseModel):
-    domain_uuid: str
+    domain_uuid: UUID
+    message: str
     
     @field_validator('domain_uuid')
     @classmethod
     def validate_uuid(cls, v):
-        # Validação
-        return v
+        return UUID(str(v))
 ```
 
-### Endpoints
+## Tarefas Comuns
+
+### Adicionar Novo Provider
+
+1. Criar classe em `services/{tipo}/{provider}.py`
+2. Herdar de `Base{Tipo}` (ex: `BaseLLM`)
+3. Implementar métodos abstratos
+4. Adicionar ao factory
+5. Adicionar testes
+
+### Novo Endpoint
+
+1. Criar router em `api/`
+2. Definir request/response em `models/`
+3. Incluir router em `main.py`
+4. Adicionar rate limiting se necessário
+
+## Debugging
+
 ```python
-from fastapi import APIRouter, HTTPException
+# Logs estruturados
+import logging
+logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Feature"])
-
-@router.post("/action")
-async def action(request: ActionRequest) -> ActionResponse:
-    if not request.domain_uuid:
-        raise HTTPException(400, "domain_uuid required")
-    
-    # Usar ProviderManager para obter provider correto
-    provider = await provider_manager.get_llm_provider(request.domain_uuid)
-    result = await provider.chat(...)
-    
-    return ActionResponse(...)
-```
-
-### Error Handling
-```python
-try:
-    result = await provider.transcribe(audio_path)
-except ProviderError as e:
-    logger.error("Transcription failed", error=str(e), domain=domain_uuid)
-    raise HTTPException(500, f"STT error: {str(e)}")
+logger.info("Processing request", extra={
+    "domain_uuid": str(domain_uuid),
+    "endpoint": "chat",
+})
 ```
 
 ## Testes
 
 ```bash
 # Rodar testes
-pytest tests/unit/ -v
+pytest tests/unit/test_llm_providers.py -v
 
-# Com cobertura
+# Com coverage
 pytest --cov=services --cov-report=html
 ```
 
-## Debugging
+## Cuidados
 
-```python
-# Use structlog
-import structlog
-logger = structlog.get_logger()
+- ✅ Sempre validar `domain_uuid`
+- ✅ Usar `async/await` para I/O
+- ✅ Tratar timeouts (AI providers são lentos)
+- ✅ Log sem dados sensíveis
+- ❌ Nunca hardcodar API keys
+- ❌ Nunca confiar em input do cliente
 
-logger.info("Processing request", 
-    domain_uuid=domain_uuid,
-    provider=provider.name,
-    input_size=len(audio_data))
-```
-
-## Dependências Críticas
-
-- `fastapi>=0.109.0` - Framework web
-- `asyncpg>=0.29.0` - PostgreSQL async
-- `openai>=1.10.0` - OpenAI SDK
-- `anthropic>=0.18.0` - Anthropic SDK
-- `sentence-transformers>=2.3.0` - Embeddings locais
-- `chromadb>=0.4.22` - Vector store (dev)
+---
+*Playbook para: Backend Specialist*

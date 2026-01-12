@@ -1,209 +1,201 @@
 # Database Specialist - Voice AI IVR
 
+## Papel
+Especialista em PostgreSQL, migrations, e integração com FusionPBX.
+
 ## Contexto
 
-Você trabalha com PostgreSQL 13+ no contexto do FusionPBX. O Voice AI IVR adiciona 6 novas tabelas ao schema existente.
+O sistema usa o **mesmo PostgreSQL do FusionPBX**, adicionando tabelas próprias com prefixo `v_voice_`.
 
-## Schema
+## Schema Principal
 
 ```sql
--- Tabelas do Voice AI (prefixo v_voice_*)
-
-v_voice_ai_providers     -- Configurações de providers (STT/TTS/LLM/Embeddings)
-v_voice_secretaries      -- Secretárias configuradas
-v_voice_documents        -- Documentos para RAG
-v_voice_document_chunks  -- Chunks vetorizados
-v_voice_transfer_rules   -- Regras de transferência
-v_voice_conversations    -- Histórico de conversas
-v_voice_messages         -- Mensagens das conversas
-```
-
-## Regras Críticas
-
-### 1. Multi-Tenant OBRIGATÓRIO
-```sql
--- ✅ TODAS as tabelas DEVEM ter domain_uuid
-CREATE TABLE v_voice_example (
-    example_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid) ON DELETE CASCADE,
-    -- outros campos...
+-- Providers de IA por tenant
+CREATE TABLE v_voice_ai_providers (
+    provider_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid),
+    provider_type VARCHAR(20) NOT NULL,  -- stt, tts, llm, embeddings
+    provider_name VARCHAR(50) NOT NULL,
+    config JSONB NOT NULL,  -- API keys criptografadas
+    is_default BOOLEAN DEFAULT false,
+    is_enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
--- ✅ TODAS as queries DEVEM filtrar por domain_uuid
-SELECT * FROM v_voice_secretaries WHERE domain_uuid = $1;
+-- Secretárias virtuais
+CREATE TABLE v_voice_secretaries (
+    secretary_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid),
+    name VARCHAR(100) NOT NULL,
+    extension VARCHAR(10),
+    processing_mode VARCHAR(20) DEFAULT 'turn_based',
+    system_prompt TEXT,
+    greeting TEXT,
+    farewell TEXT,
+    stt_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    tts_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    llm_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    realtime_provider_uuid UUID REFERENCES v_voice_ai_providers,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Conversas
+CREATE TABLE v_voice_conversations (
+    conversation_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_uuid UUID NOT NULL,
+    secretary_uuid UUID REFERENCES v_voice_secretaries,
+    caller_id VARCHAR(50),
+    call_uuid VARCHAR(100),
+    started_at TIMESTAMP DEFAULT NOW(),
+    ended_at TIMESTAMP,
+    resolution VARCHAR(50),
+    transferred_to VARCHAR(50)
+);
+
+-- Mensagens
+CREATE TABLE v_voice_messages (
+    message_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_uuid UUID REFERENCES v_voice_conversations,
+    role VARCHAR(20),  -- user, assistant, system
+    content TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
 ```
 
-### 2. Migrations IDEMPOTENTES
+## Migrations
+
+### Estrutura
+
+```
+database/migrations/
+├── 001_create_providers.sql
+├── 002_create_secretaries.sql
+├── 003_create_conversations.sql
+├── 004_create_documents.sql
+├── 005_create_transfer_rules.sql
+├── 006_create_messages.sql
+└── 007_insert_default_providers.sql
+```
+
+### Criar Nova Migration
+
+```bash
+# Convenção de nome
+touch database/migrations/00X_descricao.sql
+```
+
+### Regras de Migration
+
 ```sql
--- ✅ CORRETO - Verifica antes de criar
+-- SEMPRE idempotente
+CREATE TABLE IF NOT EXISTS ...
+
+-- Com IF NOT EXISTS
+ALTER TABLE tabela ADD COLUMN IF NOT EXISTS coluna tipo;
+
+-- Ou verificar antes
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'v_voice_secretaries' 
-        AND column_name = 'new_column'
+        WHERE table_name = 'tabela' AND column_name = 'coluna'
     ) THEN
-        ALTER TABLE v_voice_secretaries ADD COLUMN new_column VARCHAR(255);
+        ALTER TABLE tabela ADD COLUMN coluna tipo;
     END IF;
 END $$;
-
--- ✅ CORRETO - CREATE IF NOT EXISTS
-CREATE TABLE IF NOT EXISTS v_voice_example (...);
-CREATE INDEX IF NOT EXISTS idx_example ON v_voice_example(field);
-
--- ❌ ERRADO - Falha se executar 2 vezes
-ALTER TABLE v_voice_secretaries ADD COLUMN new_column VARCHAR(255);
-```
-
-### 3. Índices para Performance
-```sql
--- Índice para queries por tenant
-CREATE INDEX idx_voice_secretaries_domain 
-ON v_voice_secretaries(domain_uuid);
-
--- Índice composto para lookups frequentes
-CREATE INDEX idx_voice_conversations_domain_caller
-ON v_voice_conversations(domain_uuid, caller_id);
-
--- Índice para busca vetorial (pgvector)
-CREATE INDEX idx_chunks_embedding 
-ON v_voice_document_chunks 
-USING ivfflat (embedding vector_cosine_ops);
-```
-
-## Tabelas Principais
-
-### v_voice_ai_providers
-```sql
-CREATE TABLE v_voice_ai_providers (
-    provider_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid) ON DELETE CASCADE,
-    provider_type VARCHAR(50) NOT NULL CHECK (provider_type IN ('stt', 'tts', 'llm', 'embeddings')),
-    provider_name VARCHAR(100) NOT NULL,
-    display_name VARCHAR(255),
-    config JSONB NOT NULL DEFAULT '{}',  -- API keys, endpoints, etc
-    is_default BOOLEAN DEFAULT false,
-    enabled BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(domain_uuid, provider_type, provider_name)
-);
-```
-
-### v_voice_secretaries
-```sql
-CREATE TABLE v_voice_secretaries (
-    voice_secretary_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    enabled BOOLEAN DEFAULT true,
-    
-    -- Providers (FK)
-    stt_provider_uuid UUID REFERENCES v_voice_ai_providers(provider_uuid),
-    tts_provider_uuid UUID REFERENCES v_voice_ai_providers(provider_uuid),
-    llm_provider_uuid UUID REFERENCES v_voice_ai_providers(provider_uuid),
-    embeddings_provider_uuid UUID REFERENCES v_voice_ai_providers(provider_uuid),
-    
-    -- Configurações
-    system_prompt TEXT,
-    greeting_message TEXT,
-    goodbye_message TEXT,
-    voice_name VARCHAR(100),
-    language VARCHAR(10) DEFAULT 'pt-BR',
-    rag_enabled BOOLEAN DEFAULT true,
-    rag_similarity_threshold DECIMAL(3,2) DEFAULT 0.5,
-    max_conversation_turns INTEGER DEFAULT 10,
-    
-    -- Webhook (OmniPlay)
-    webhook_url VARCHAR(500),
-    webhook_enabled BOOLEAN DEFAULT false,
-    
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### v_voice_document_chunks (pgvector)
-```sql
--- Requer extensão pgvector
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE v_voice_document_chunks (
-    chunk_uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    domain_uuid UUID NOT NULL REFERENCES v_domains(domain_uuid) ON DELETE CASCADE,
-    document_uuid UUID NOT NULL REFERENCES v_voice_documents(document_uuid) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    embedding vector(1536),  -- OpenAI ada-002 dimension
-    token_count INTEGER,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
--- Índice para busca vetorial eficiente
-CREATE INDEX idx_chunks_embedding_ivfflat
-ON v_voice_document_chunks 
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
 ```
 
 ## Queries Comuns
 
-### Busca Vetorial (RAG)
+### Buscar Config de Provider
+
 ```sql
--- Encontrar chunks mais similares
 SELECT 
-    chunk_uuid,
-    content,
-    1 - (embedding <=> $2::vector) as similarity
-FROM v_voice_document_chunks
-WHERE domain_uuid = $1
-ORDER BY embedding <=> $2::vector
-LIMIT 5;
+    p.provider_uuid,
+    p.provider_name,
+    pgp_sym_decrypt(p.config::bytea, current_setting('app.encryption_key'))::json as config
+FROM v_voice_ai_providers p
+WHERE p.domain_uuid = $1
+  AND p.provider_type = $2
+  AND p.is_enabled = true
+ORDER BY p.is_default DESC
+LIMIT 1;
 ```
 
-### Secretária com Providers
+### Buscar Secretária por Ramal
+
 ```sql
-SELECT 
-    s.*,
-    stt.config as stt_config,
-    stt.provider_name as stt_provider,
-    tts.config as tts_config,
-    tts.provider_name as tts_provider,
-    llm.config as llm_config,
-    llm.provider_name as llm_provider
+SELECT s.*, 
+       p_stt.provider_name as stt_provider,
+       p_tts.provider_name as tts_provider,
+       p_llm.provider_name as llm_provider
 FROM v_voice_secretaries s
-LEFT JOIN v_voice_ai_providers stt ON s.stt_provider_uuid = stt.provider_uuid
-LEFT JOIN v_voice_ai_providers tts ON s.tts_provider_uuid = tts.provider_uuid
-LEFT JOIN v_voice_ai_providers llm ON s.llm_provider_uuid = llm.provider_uuid
-WHERE s.domain_uuid = $1 AND s.voice_secretary_uuid = $2;
+LEFT JOIN v_voice_ai_providers p_stt ON s.stt_provider_uuid = p_stt.provider_uuid
+LEFT JOIN v_voice_ai_providers p_tts ON s.tts_provider_uuid = p_tts.provider_uuid
+LEFT JOIN v_voice_ai_providers p_llm ON s.llm_provider_uuid = p_llm.provider_uuid
+WHERE s.domain_uuid = $1
+  AND s.extension = $2;
 ```
 
-## Backup e Manutenção
+### Histórico de Conversas
 
-```bash
-# Backup específico das tabelas voice_ai
-pg_dump -h localhost -U fusionpbx fusionpbx \
-    -t 'v_voice_*' \
-    -f voice_ai_backup.sql
-
-# Vacuum para performance
-VACUUM ANALYZE v_voice_document_chunks;
-```
-
-## Troubleshooting
-
-### Erro: "vector extension not found"
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+SELECT 
+    c.conversation_uuid,
+    c.caller_id,
+    c.started_at,
+    c.ended_at,
+    c.resolution,
+    s.name as secretary_name,
+    COUNT(m.message_uuid) as message_count
+FROM v_voice_conversations c
+JOIN v_voice_secretaries s ON c.secretary_uuid = s.secretary_uuid
+LEFT JOIN v_voice_messages m ON c.conversation_uuid = m.conversation_uuid
+WHERE c.domain_uuid = $1
+  AND c.started_at >= $2
+GROUP BY c.conversation_uuid, s.name
+ORDER BY c.started_at DESC;
 ```
 
-### Query lenta em chunks
+## Índices
+
 ```sql
--- Verificar índice
-EXPLAIN ANALYZE SELECT ... ORDER BY embedding <=> $1 LIMIT 5;
+-- Multi-tenant: SEMPRE indexar domain_uuid
+CREATE INDEX idx_providers_domain ON v_voice_ai_providers(domain_uuid);
+CREATE INDEX idx_secretaries_domain ON v_voice_secretaries(domain_uuid);
+CREATE INDEX idx_conversations_domain ON v_voice_conversations(domain_uuid);
 
--- Rebuild índice se necessário
-REINDEX INDEX idx_chunks_embedding_ivfflat;
+-- Busca por ramal
+CREATE INDEX idx_secretaries_extension ON v_voice_secretaries(domain_uuid, extension);
+
+-- Busca por data
+CREATE INDEX idx_conversations_date ON v_voice_conversations(domain_uuid, started_at);
 ```
+
+## Conexão (Python)
+
+```python
+# services/database.py
+import asyncpg
+
+async def create_pool():
+    return await asyncpg.create_pool(
+        settings.DATABASE_URL,
+        min_size=5,
+        max_size=20,
+        command_timeout=30,
+        max_inactive_connection_lifetime=300
+    )
+```
+
+## Cuidados
+
+- ✅ Sempre filtrar por `domain_uuid` (multi-tenant)
+- ✅ Usar queries parametrizadas (nunca concatenar)
+- ✅ Criptografar API keys no banco
+- ✅ Migrations idempotentes
+- ❌ Nunca expor dados de outros domains
+- ❌ Nunca logar queries com dados sensíveis
+
+---
+*Playbook para: Database Specialist*

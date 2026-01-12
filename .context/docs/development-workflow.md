@@ -1,235 +1,271 @@
 # Development Workflow - Voice AI IVR
 
-## Pré-requisitos
+## Setup Inicial
 
-- Python 3.10+
-- PostgreSQL 13+ com extensão pgvector
-- FreeSWITCH 1.10+ com mod_lua
-- FusionPBX 5.x+
-- Node.js 18+ (para ferramentas de build)
+### Pré-requisitos
 
-## Setup do Ambiente
+- Python 3.11+
+- Docker & Docker Compose
+- FreeSWITCH 1.10+ (no host)
+- FusionPBX 5.x (no host)
+- PostgreSQL (shared com FusionPBX)
 
-### 1. Voice AI Service (Python)
+### Clone e Setup
 
 ```bash
-cd voice-ai-service
+# Clonar repositório
+git clone https://github.com/julianotarga/voice-ai-ivr.git
+cd voice-ai-ivr
 
-# Criar ambiente virtual
-python3 -m venv venv
-source venv/bin/activate
+# Copiar arquivo de ambiente
+cp env.docker.example .env
 
-# Instalar dependências
-pip install -r requirements.txt
-
-# Copiar e configurar .env
-cp .env.example .env
-# Editar .env com suas configurações
-
-# Rodar migrações
-psql -h localhost -U fusionpbx -d fusionpbx -f ../database/migrations/001_create_providers.sql
-psql -h localhost -U fusionpbx -d fusionpbx -f ../database/migrations/002_create_secretaries.sql
-# ... demais migrações
-
-# Iniciar servidor
-uvicorn main:app --host 0.0.0.0 --port 8100 --reload
+# Editar variáveis
+nano .env
 ```
 
-### 2. Scripts FreeSWITCH (Lua)
+### Variáveis de Ambiente Essenciais
 
 ```bash
-# Copiar scripts
-sudo cp freeswitch/scripts/*.lua /usr/share/freeswitch/scripts/
-sudo cp -r freeswitch/scripts/lib /usr/share/freeswitch/scripts/
+# Database (FusionPBX)
+DATABASE_URL=postgresql://fusionpbx:password@host.docker.internal/fusionpbx
 
-# Copiar dialplan
-sudo cp freeswitch/dialplan/*.xml /etc/freeswitch/dialplan/default/
+# AI Providers (pelo menos um de cada tipo)
+OPENAI_API_KEY=sk-...
+ELEVENLABS_API_KEY=...
+GOOGLE_API_KEY=...
+ANTHROPIC_API_KEY=...
 
-# Recarregar dialplan
+# Redis
+REDIS_URL=redis://redis:6379
+
+# OmniPlay (opcional)
+OMNIPLAY_WEBHOOK_URL=https://...
+OMNIPLAY_WEBHOOK_SECRET=...
+```
+
+## Desenvolvimento Local
+
+### Iniciar Serviços Docker
+
+```bash
+# Build e start
+./scripts/docker-up.sh
+
+# Ou em modo dev (hot reload)
+./scripts/docker-up.sh --dev
+
+# Com Ollama (LLM local)
+./scripts/docker-up.sh --ollama
+```
+
+### Verificar Status
+
+```bash
+# Logs
+docker logs voice-ai-service -f
+
+# Health check
+curl http://localhost:8100/health
+curl http://localhost:8080/health
+
+# API Docs
+open http://localhost:8100/docs
+```
+
+### Instalar Modelos Locais (Opcional)
+
+```bash
+# Ollama models
+./scripts/docker-install-ollama-models.sh
+
+# Piper TTS voices
+./scripts/docker-install-piper-voices.sh
+```
+
+## Integração com FreeSWITCH
+
+```bash
+# Copiar scripts Lua e dialplan
+./scripts/setup-freeswitch-integration.sh
+
+# Verificar instalação
+ls /usr/share/freeswitch/scripts/secretary_ai.lua
+ls /etc/freeswitch/dialplan/default/00_voice_ai.xml
+
+# Recarregar FreeSWITCH
 fs_cli -x "reloadxml"
 ```
 
-### 3. App FusionPBX (PHP)
+## Estrutura de Código
+
+```
+voice-ai-service/
+├── main.py              # Entry point FastAPI
+├── api/                 # Endpoints
+│   ├── transcribe.py    # POST /transcribe
+│   ├── synthesize.py    # POST /synthesize
+│   ├── chat.py          # POST /chat
+│   ├── documents.py     # POST /documents
+│   └── conversations.py # GET /conversations
+├── services/
+│   ├── provider_manager.py  # Multi-tenant/provider
+│   ├── session_manager.py   # Contexto de sessão
+│   ├── rate_limiter.py      # Rate limiting
+│   ├── stt/                 # Speech-to-Text providers
+│   ├── tts/                 # Text-to-Speech providers
+│   ├── llm/                 # LLM providers
+│   ├── embeddings/          # Embedding providers
+│   └── rag/                 # RAG components
+├── models/
+│   ├── request.py       # Pydantic request models
+│   └── response.py      # Pydantic response models
+├── config/
+│   └── settings.py      # Environment config
+└── tests/
+    ├── conftest.py      # Fixtures
+    └── unit/            # Unit tests
+```
+
+## Testes
+
+### Rodar Testes
 
 ```bash
-# Copiar app
-sudo cp -r fusionpbx-app/voice_secretary /var/www/fusionpbx/app/
+# Entrar no container
+docker exec -it voice-ai-service bash
 
-# Definir permissões
-sudo chown -R www-data:www-data /var/www/fusionpbx/app/voice_secretary
-
-# Limpar cache do FusionPBX (se necessário)
-sudo rm -rf /var/www/fusionpbx/temp/*
-```
-
-## Estrutura de Branches
-
-```
-main
-├── develop          # Branch de desenvolvimento ativo
-├── feature/*        # Novas funcionalidades
-├── fix/*            # Correções de bugs
-└── release/*        # Preparação de release
-```
-
-**Convenções:**
-- `feature/add-google-stt` - Nova feature
-- `fix/rag-empty-context` - Correção de bug
-- `release/v1.0.0` - Preparação de versão
-
-## Comandos de Desenvolvimento
-
-### Testes
-
-```bash
-cd voice-ai-service
-
-# Rodar todos os testes
+# Todos os testes
 pytest
 
-# Com cobertura
-pytest --cov=. --cov-report=html
-
-# Apenas testes unitários
-pytest tests/unit/
+# Com coverage
+pytest --cov=services --cov-report=html
 
 # Testes específicos
 pytest tests/unit/test_llm_providers.py -v
 ```
 
-### Linting
+### Testar API Manualmente
 
 ```bash
-# Verificar estilo
-ruff check .
+# Transcrição
+curl -X POST http://localhost:8100/transcribe \
+  -H "Content-Type: application/json" \
+  -d '{"domain_uuid":"abc-123","audio_base64":"...","format":"wav"}'
 
-# Corrigir automaticamente
-ruff check . --fix
-
-# Formatação
-black .
+# Chat
+curl -X POST http://localhost:8100/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "domain_uuid": "abc-123",
+    "secretary_uuid": "def-456",
+    "message": "Qual o horário de funcionamento?",
+    "history": []
+  }'
 ```
 
-### Type Checking
+## Branching Strategy
+
+```
+main              # Produção
+  └── develop     # Desenvolvimento
+        ├── feature/xxx   # Novas features
+        ├── fix/xxx       # Bug fixes
+        └── hotfix/xxx    # Hotfixes urgentes
+```
+
+## Convenções de Commit
 
 ```bash
-mypy services/ api/ models/
+# Formato
+tipo: descrição breve
+
+# Tipos
+feat:     Nova feature
+fix:      Bug fix
+refactor: Refatoração
+docs:     Documentação
+test:     Testes
+chore:    Manutenção
+
+# Exemplos
+git commit -m "feat: add ElevenLabs TTS provider"
+git commit -m "fix: handle timeout in OpenAI API"
+git commit -m "docs: update API documentation"
 ```
 
-## Workflow de Desenvolvimento
+## Migrations
 
-### 1. Adicionar Novo Provider
+```bash
+# Criar nova migration
+cd database/migrations
+touch 00X_description.sql
 
-**Exemplo: Adicionar novo STT provider**
-
-```python
-# 1. Criar arquivo services/stt/novo_provider.py
-from .base import BaseSTT
-
-class NovoProviderSTT(BaseSTT):
-    @property
-    def name(self) -> str:
-        return "novo_provider"
-    
-    async def transcribe(self, audio_path: str, ...) -> str:
-        # Implementação
-        pass
-
-# 2. Registrar na factory (services/stt/factory.py)
-# O registro é automático ao importar - basta adicionar na lista _register_all()
-
-# 3. Adicionar dependências em requirements.txt
-# novo-provider-sdk>=1.0.0
+# Aplicar migrations
+docker exec -it voice-ai-service python -m scripts.apply_migrations
 ```
-
-### 2. Modificar Schema do Banco
-
-```sql
--- database/migrations/007_add_new_field.sql
-
--- Garantir idempotência
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'v_voice_secretaries' 
-        AND column_name = 'new_field'
-    ) THEN
-        ALTER TABLE v_voice_secretaries 
-        ADD COLUMN new_field VARCHAR(255);
-    END IF;
-END $$;
-
--- Índice se necessário
-CREATE INDEX IF NOT EXISTS idx_voice_secretaries_new_field 
-ON v_voice_secretaries(new_field) 
-WHERE new_field IS NOT NULL;
-```
-
-### 3. Adicionar Endpoint na API
-
-```python
-# api/new_endpoint.py
-from fastapi import APIRouter, Depends
-from models.request import BaseRequest
-
-router = APIRouter(prefix="/api/v1/new", tags=["New Feature"])
-
-@router.post("/action")
-async def new_action(request: NewRequest):
-    # Sempre validar domain_uuid
-    if not request.domain_uuid:
-        raise HTTPException(400, "domain_uuid required")
-    
-    # Implementação
-    pass
-```
-
-## Checklist de Code Review
-
-- [ ] Multi-tenant: domain_uuid usado em todas as queries
-- [ ] Não quebra funcionalidades existentes
-- [ ] Testes unitários adicionados
-- [ ] Linting passou (ruff check)
-- [ ] Typing correto (mypy)
-- [ ] Documentação atualizada se necessário
-- [ ] Migrations são idempotentes
-- [ ] Secrets não expostos em código
 
 ## Deploy
-
-### Desenvolvimento Local
-
-```bash
-# Terminal 1: Backend Python
-cd voice-ai-service && uvicorn main:app --reload --port 8100
-
-# Terminal 2: Logs FreeSWITCH
-tail -f /var/log/freeswitch/freeswitch.log | grep SECRETARY_AI
-```
 
 ### Produção
 
 ```bash
-# Systemd service para voice-ai-service
-sudo systemctl enable voice-ai
-sudo systemctl start voice-ai
+# Build da imagem
+./scripts/docker-build.sh --prod
 
-# Verificar status
-sudo systemctl status voice-ai
+# Push para registry
+docker tag voice-ai-ivr-voice-ai-service:latest registry.example.com/voice-ai:latest
+docker push registry.example.com/voice-ai:latest
+
+# No servidor de produção
+docker compose -f docker-compose.yml pull
+docker compose -f docker-compose.yml up -d
 ```
+
+### Checklist de Deploy
+
+- [ ] Variáveis de ambiente configuradas
+- [ ] PostgreSQL acessível
+- [ ] Migrations aplicadas
+- [ ] API Keys válidas
+- [ ] FreeSWITCH integrado
+- [ ] Health checks passando
+- [ ] Logs configurados
+- [ ] Backup de dados
 
 ## Troubleshooting
 
-### Erro: "Provider not found"
-- Verificar se o provider está registrado na factory
-- Verificar se a dependência está instalada
+### Container não inicia
 
-### Erro: "domain_uuid required"
-- Garantir que FreeSWITCH está passando domain_uuid
-- Verificar variável de canal: `session:getVariable("domain_uuid")`
+```bash
+# Ver logs
+docker logs voice-ai-service --tail 100
 
-### Erro: "RAG context empty"
-- Verificar se documentos foram processados
-- Verificar status em `v_voice_document_chunks`
-- Testar embedding manualmente: `POST /embeddings/test`
+# Verificar variáveis
+docker exec voice-ai-service env | grep -E "DATABASE|REDIS"
+```
+
+### Erro de conexão com PostgreSQL
+
+```bash
+# Verificar se host.docker.internal resolve
+docker exec voice-ai-service ping host.docker.internal
+
+# Ou usar IP direto
+DATABASE_URL=postgresql://user:pass@192.168.1.100/fusionpbx
+```
+
+### STT/TTS não funciona
+
+```bash
+# Verificar API keys
+docker exec voice-ai-service python -c "from config.settings import settings; print(settings.OPENAI_API_KEY[:10])"
+
+# Testar provider diretamente
+docker exec -it voice-ai-service python
+>>> from services.stt.factory import create_stt_provider
+>>> stt = create_stt_provider("openai_whisper", {"api_key": "..."})
+```
+
+---
+*Gerado em: 2026-01-12*

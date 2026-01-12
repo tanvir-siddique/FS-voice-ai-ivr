@@ -1,83 +1,141 @@
 # Project Overview - Voice AI IVR
 
-## Visão Geral
+## Summary
 
-**Voice AI IVR** é um módulo de Secretária Virtual com Inteligência Artificial para FreeSWITCH/FusionPBX. Transforma chamadas telefônicas em conversas naturais usando tecnologias de STT (Speech-to-Text), TTS (Text-to-Speech), LLM (Large Language Models) e RAG (Retrieval Augmented Generation).
+**Voice AI IVR** é uma solução de Secretária Virtual Inteligente para FreeSWITCH/FusionPBX. O sistema oferece dois modos de operação:
 
-## Problema Resolvido
+- **v1 (Turn-based)**: Latência 2-5s, custo baixo, ideal para IVRs simples
+- **v2 (Realtime)**: Latência 300-500ms, full-duplex, barge-in, conversa natural
 
-Tradicionalmente, URAs (IVR) são sistemas robóticos com menus rígidos ("Pressione 1 para..."). Este módulo cria uma **secretária virtual que conversa naturalmente**, entende o contexto da empresa através de documentos carregados (RAG), e pode:
-- Responder perguntas sobre a empresa
-- Transferir chamadas para departamentos/ramais corretos
-- Criar tickets no OmniPlay (sistema omnichannel)
-- Funcionar 24/7 sem intervenção humana
+## Objetivos do Projeto
 
-## Arquitetura
+1. **Conversação Natural** - Parecer um atendente humano, não um robô
+2. **Multi-Tenant** - Isolamento total por domain_uuid (FusionPBX)
+3. **Multi-Provider** - Suporte a OpenAI, Azure, Google, AWS, ElevenLabs, etc.
+4. **RAG** - Base de conhecimento própria por tenant
+5. **Integração OmniPlay** - Criar tickets automaticamente (opcional)
+
+## Stack Tecnológica
+
+| Componente | Tecnologia |
+|------------|------------|
+| **Backend API** | Python 3.11 + FastAPI |
+| **Realtime Bridge** | Python asyncio + websockets |
+| **Scripts FreeSWITCH** | Lua 5.1 |
+| **UI Admin** | PHP 7.4+ (FusionPBX) |
+| **Banco de Dados** | PostgreSQL (shared com FusionPBX) |
+| **Cache/Session** | Redis 7 |
+| **Vector Store** | ChromaDB / pgvector |
+| **Containerização** | Docker Compose |
+
+## Modos de Operação
+
+### v1 - Turn-based
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   FreeSWITCH    │    │ Voice AI Service│    │   PostgreSQL    │
-│   (mod_lua)     │◄──►│   (FastAPI)     │◄──►│   (FusionPBX)   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                      │
-         │                      ▼
-         │              ┌───────────────┐
-         │              │ AI Providers  │
-         │              │ STT/TTS/LLM   │
-         │              └───────────────┘
-         ▼
-┌─────────────────┐
-│   FusionPBX     │
-│ (Interface Web) │
-└─────────────────┘
+Cliente fala → Grava WAV → STT → LLM → TTS → Reproduz
+                    └── Latência: 2-5 segundos por turno
 ```
 
-## Componentes Principais
+**Ideal para:**
+- IVRs simples com menu
+- FAQ automatizado
+- Alto volume, baixo orçamento
 
-### 1. Voice AI Service (Python/FastAPI)
-- **Localização**: `voice-ai-service/`
-- **Responsabilidade**: Processamento de áudio (STT), síntese de voz (TTS), chat com IA (LLM), busca em documentos (RAG)
-- **Endpoints**: `/transcribe`, `/synthesize`, `/chat`, `/documents`, `/conversations`, `/webhooks`
+### v2 - Realtime
 
-### 2. Scripts FreeSWITCH (Lua)
-- **Localização**: `freeswitch/scripts/`
-- **Responsabilidade**: Orquestrar o fluxo de chamada (gravar, transcrever, processar, falar)
-- **Script Principal**: `secretary_ai.lua`
+```
+Cliente fala ─────────────┐
+                          │ WebSocket
+                          ▼ Bidirecional
+                    ┌──────────┐
+                    │ AI Bridge│ ←→ OpenAI Realtime / ElevenLabs / Gemini
+                    └──────────┘
+                          │
+IA responde ←─────────────┘
+        └── Latência: 300-500ms, Full-duplex
+```
 
-### 3. App FusionPBX (PHP)
-- **Localização**: `fusionpbx-app/voice_secretary/`
-- **Responsabilidade**: Interface web para configurar secretárias, providers, documentos, regras
-- **Páginas**: Secretárias, Documentos, Regras de Transferência, Histórico, Providers, Configurações
+**Ideal para:**
+- Atendimento premium
+- Conversas complexas
+- Suporte técnico
 
-### 4. Database (PostgreSQL)
-- **Localização**: `database/migrations/`
-- **Tabelas**: `v_voice_ai_providers`, `v_voice_secretaries`, `v_voice_documents`, `v_voice_document_chunks`, `v_voice_transfer_rules`, `v_voice_conversations`, `v_voice_messages`
+## Estrutura do Projeto
 
-## Multi-Tenant
-
-⚠️ **CRÍTICO**: O sistema é 100% multi-tenant. Cada domínio FusionPBX tem:
-- Suas próprias secretárias configuradas
-- Seus próprios documentos na base de conhecimento
-- Seus próprios providers de IA
-- Isolamento total de dados via `domain_uuid`
+```
+voice-ai-ivr/
+├── voice-ai-service/        # Backend Python
+│   ├── api/                  # Endpoints FastAPI
+│   ├── services/             # Providers (STT/TTS/LLM/Embeddings)
+│   │   ├── stt/              # Speech-to-Text
+│   │   ├── tts/              # Text-to-Speech
+│   │   ├── llm/              # Large Language Models
+│   │   ├── embeddings/       # Vector embeddings
+│   │   └── rag/              # RAG components
+│   ├── models/               # Pydantic models
+│   └── tests/                # Testes unitários
+├── freeswitch/               # Scripts Lua + Dialplan
+│   ├── scripts/              # secretary_ai.lua, libs
+│   └── dialplan/             # XML extensions
+├── fusionpbx-app/            # Páginas PHP
+│   └── voice_secretary/      # UI admin
+├── database/                 # SQL migrations
+├── scripts/                  # Docker helpers
+├── openspec/                 # Documentação OpenSpec
+└── docker-compose.yml        # Orquestração
+```
 
 ## Providers Suportados
 
-| Tipo | Providers |
-|------|-----------|
-| **STT** | Whisper Local, Whisper API, Azure Speech, Google Cloud, AWS Transcribe, Deepgram |
-| **TTS** | Piper Local, Coqui Local, OpenAI, ElevenLabs, Azure Neural, Google Cloud, AWS Polly, Play.ht |
-| **LLM** | OpenAI, Azure OpenAI, Anthropic Claude, Google Gemini, AWS Bedrock, Groq, Ollama, LM Studio |
-| **Embeddings** | OpenAI, Azure OpenAI, Cohere, Voyage AI, Local (sentence-transformers) |
+### STT (Speech-to-Text)
+- OpenAI Whisper API
+- faster-whisper (local)
+- Azure Speech
+- Google Cloud STT
+- AWS Transcribe
+- Deepgram Nova
 
-## Tecnologias
+### TTS (Text-to-Speech)
+- OpenAI TTS
+- ElevenLabs
+- Azure Neural TTS
+- Google Cloud TTS
+- AWS Polly
+- Piper TTS (local)
+- Coqui TTS (local)
 
-- **Backend Service**: Python 3.10+, FastAPI, asyncpg, httpx
-- **FreeSWITCH**: Lua scripts (mod_lua)
-- **FusionPBX**: PHP 7.4+
-- **Database**: PostgreSQL 13+ com pgvector
-- **Deploy**: systemd, Docker (opcional)
+### LLM
+- OpenAI GPT-4o
+- Anthropic Claude
+- Google Gemini
+- Groq (Llama)
+- Azure OpenAI
+- AWS Bedrock
+- Ollama (local)
+- LM Studio (local)
 
-## Status do Projeto
+### Embeddings
+- OpenAI text-embedding-3
+- Azure OpenAI
+- Cohere Embed
+- Voyage AI
+- sentence-transformers (local)
 
-**~95% completo** - Faltam apenas testes de integração e deploy em produção.
+## Integrações Externas
+
+| Sistema | Tipo | Propósito |
+|---------|------|-----------|
+| FusionPBX | Database | Configurações, domains |
+| FreeSWITCH | ESL/Lua | Controle de chamadas |
+| OmniPlay | Webhook | Criação de tickets |
+| AI Providers | API | STT/TTS/LLM |
+
+## Links Importantes
+
+- **OpenSpec**: `/openspec/changes/` - Proposals e specs
+- **API Docs**: http://localhost:8100/docs (Swagger)
+- **FusionPBX**: `/fusionpbx-app/voice_secretary/`
+
+---
+*Gerado em: 2026-01-12*

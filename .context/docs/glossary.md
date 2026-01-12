@@ -1,124 +1,81 @@
 # Glossary - Voice AI IVR
 
-## Termos de Negócio
+## Termos de Domínio
 
-### Secretária Virtual
-Sistema de IA que atende chamadas telefônicas de forma conversacional, simulando uma secretária humana. Pode responder perguntas, transferir chamadas e registrar interações.
+### Domain / Tenant
+Representa uma empresa/cliente no FusionPBX. Cada domain tem `domain_uuid` único.
+- **Multi-tenant**: Sistema compartilhado com isolamento por domain
 
-### URA / IVR
-**Unidade de Resposta Audível** / **Interactive Voice Response**. Sistema tradicional de menus telefônicos ("Pressione 1 para..."). Este projeto visa substituir URAs robóticas por conversas naturais.
+### Secretary / Secretária Virtual
+Entidade que representa uma IA atendendo chamadas. Configurada por ramal.
+- Pode ter prompt personalizado
+- Escolhe modo: turn-based ou realtime
 
-### Tenant / Domínio
-Uma organização/empresa isolada no sistema multi-tenant. Cada tenant tem seus próprios dados, configurações e usuários. Identificado por `domain_uuid`.
-
-### Ramal / Extension
-Número interno de telefone dentro de um PBX. Ex: ramal 200 para vendas, ramal 300 para suporte.
-
-### Transferência
-Ação de redirecionar uma chamada para outro destino (ramal, fila, número externo).
+### Extension / Ramal
+Número interno que aciona a secretária (ex: 8000)
 
 ## Termos Técnicos
 
 ### STT (Speech-to-Text)
-Tecnologia que converte áudio falado em texto. Exemplos: Whisper, Azure Speech, Google Speech-to-Text.
+Conversão de áudio para texto. Providers: Whisper, Azure Speech, Google STT
 
 ### TTS (Text-to-Speech)
-Tecnologia que converte texto em áudio falado. Exemplos: ElevenLabs, Piper, Azure Neural TTS.
+Síntese de voz. Providers: OpenAI TTS, ElevenLabs, Piper
 
 ### LLM (Large Language Model)
-Modelo de linguagem de grande escala treinado em vastos conjuntos de dados. Capaz de entender contexto e gerar respostas coerentes. Exemplos: GPT-4, Claude, Gemini.
+IA que processa texto. Providers: GPT-4, Claude, Gemini
 
 ### RAG (Retrieval Augmented Generation)
-Técnica que combina busca em documentos com geração de texto por LLM. Permite que a IA responda com base em conhecimento específico da empresa.
+Técnica para alimentar LLM com documentos externos (knowledge base)
 
-### Embedding
-Representação vetorial de texto em um espaço de alta dimensão. Permite medir similaridade semântica entre textos.
+### Embeddings
+Representação vetorial de texto para busca semântica
 
 ### Vector Store
-Banco de dados otimizado para armazenar e buscar embeddings. Exemplos: pgvector, ChromaDB, Pinecone.
+Banco de dados para embeddings (ChromaDB, pgvector)
 
-### Chunk
-Pedaço de um documento maior, tipicamente 500-1000 tokens. Documentos são divididos em chunks para processamento RAG.
+### VAD (Voice Activity Detection)
+Detecção automática de quando usuário está falando
 
-### FreeSWITCH
-Software de telefonia de código aberto. Funciona como PBX, gateway, switch. Suporta SIP, WebRTC, diversos codecs.
+### Barge-in
+Capacidade de interromper a IA enquanto ela fala
 
-### FusionPBX
-Interface web PHP para gerenciar FreeSWITCH. Fornece multi-tenancy, interface amigável, provisioning de telefones.
+### Full-duplex
+Comunicação bidirecional simultânea (ambos falam ao mesmo tempo)
 
-### mod_lua
-Módulo do FreeSWITCH que permite executar scripts Lua dentro do processamento de chamadas.
+### Turn-based
+Comunicação em turnos (um fala, depois o outro)
 
 ### ESL (Event Socket Library)
-API do FreeSWITCH para controle externo via socket TCP. Permite aplicações externas controlarem chamadas.
+API do FreeSWITCH para controle externo
 
-### Dialplan
-Configuração XML do FreeSWITCH que define o roteamento de chamadas. Determina qual script/ação executar para cada chamada.
+### Media Bug
+Mecanismo do FreeSWITCH para interceptar áudio RTP
 
-### Session
-No FreeSWITCH, representa uma chamada ativa. Contém informações como caller_id, domain_uuid, variáveis de canal.
+## Componentes do Sistema
 
-## Providers
-
-### OpenAI
-Empresa que desenvolve GPT-4, Whisper, TTS. API comercial de alta qualidade.
-
-### Anthropic
-Empresa que desenvolve Claude. Focada em IA segura e alinhada.
-
-### Azure Cognitive Services
-Suite de IA da Microsoft. Inclui Speech (STT/TTS), OpenAI (LLM), Embeddings.
-
-### Google Cloud AI
-Suite de IA do Google. Inclui Speech-to-Text, Text-to-Speech, Gemini (LLM).
-
-### AWS AI
-Suite de IA da Amazon. Inclui Transcribe (STT), Polly (TTS), Bedrock (LLM).
-
-### ElevenLabs
-Especialista em síntese de voz realista. Conhecido por vozes expressivas e clonagem.
-
-### Deepgram
-Especialista em transcrição de áudio. Conhecido por baixa latência e alta precisão.
-
-### Groq
-Provedor de inferência LLM ultra-rápida. Usa hardware proprietário (LPU).
-
-### Ollama
-Software para rodar LLMs localmente. Não requer API key ou internet.
-
-### Piper
-TTS de código aberto. Roda localmente, várias vozes em português.
+| Termo | Descrição |
+|-------|-----------|
+| voice-ai-service | API REST (v1 turn-based) |
+| voice-ai-realtime | Bridge WebSocket (v2 realtime) |
+| mod_audio_stream | Módulo FreeSWITCH para streaming |
+| secretary_ai.lua | Script Lua principal |
+| ProviderManager | Gerenciador multi-tenant de providers |
+| SessionManager | Contexto de conversação |
 
 ## Acrônimos
 
-| Sigla | Significado |
-|-------|-------------|
-| API | Application Programming Interface |
-| CRUD | Create, Read, Update, Delete |
-| JWT | JSON Web Token |
+| Acrônimo | Significado |
+|----------|-------------|
+| IVR | Interactive Voice Response |
+| URA | Unidade de Resposta Audível (IVR em português) |
 | PBX | Private Branch Exchange |
+| PSTN | Public Switched Telephone Network |
 | SIP | Session Initiation Protocol |
+| RTP | Real-time Transport Protocol |
+| WS | WebSocket |
+| PCM | Pulse Code Modulation (formato de áudio) |
 | UUID | Universally Unique Identifier |
-| JSONB | JSON Binary (PostgreSQL) |
-| REST | Representational State Transfer |
-| TLS | Transport Layer Security |
-| mTLS | Mutual TLS |
 
-## Convenções de Código
-
-### Prefixos de Tabelas
-- `v_voice_*` - Tabelas do módulo Voice AI
-- `v_domains` - Tabela de domínios (tenants) do FusionPBX
-
-### Sufixos de UUID
-- `*_uuid` - Identificador único (Primary Key ou Foreign Key)
-- `domain_uuid` - Sempre referencia o tenant
-
-### Nomenclatura de Arquivos
-- `services/stt/*.py` - Providers de STT
-- `services/tts/*.py` - Providers de TTS
-- `services/llm/*.py` - Providers de LLM
-- `services/rag/*.py` - Componentes de RAG
-- `api/*.py` - Endpoints FastAPI
-- `models/*.py` - Schemas Pydantic
+---
+*Gerado em: 2026-01-12*

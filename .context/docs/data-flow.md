@@ -1,202 +1,222 @@
 # Data Flow - Voice AI IVR
 
-## Fluxo Principal: Chamada Telefônica
-
-```mermaid
-sequenceDiagram
-    participant C as Cliente
-    participant FS as FreeSWITCH
-    participant LUA as secretary_ai.lua
-    participant API as Voice AI Service
-    participant DB as PostgreSQL
-    participant AI as AI Providers
-    
-    C->>FS: Chamada telefônica
-    FS->>LUA: Executa script (domain_uuid)
-    LUA->>DB: Carrega config secretária
-    LUA->>API: POST /synthesize (saudação)
-    API->>AI: TTS Provider
-    AI-->>API: Audio file
-    API-->>LUA: audio_path
-    LUA->>C: Reproduz saudação
-    
-    loop Conversa
-        C->>LUA: Fala
-        LUA->>LUA: Grava áudio
-        LUA->>API: POST /transcribe
-        API->>AI: STT Provider
-        AI-->>API: Texto
-        API-->>LUA: transcription
-        
-        LUA->>API: POST /chat
-        API->>DB: Busca embeddings (RAG)
-        API->>AI: LLM Provider
-        AI-->>API: Resposta + ação
-        API-->>LUA: response
-        
-        LUA->>API: POST /synthesize
-        API->>AI: TTS Provider
-        AI-->>API: Audio
-        API-->>LUA: audio_path
-        LUA->>C: Reproduz resposta
-        
-        alt action == "transfer"
-            LUA->>FS: Transfere para ramal
-        else action == "hangup"
-            LUA->>API: POST /conversations (salva)
-            LUA->>C: Desliga
-        end
-    end
-```
-
-## Fluxo de Upload de Documento
-
-```mermaid
-sequenceDiagram
-    participant U as Usuário
-    participant PHP as FusionPBX PHP
-    participant API as Voice AI Service
-    participant DB as PostgreSQL
-    participant AI as Embeddings Provider
-    
-    U->>PHP: Upload arquivo (PDF/DOCX/TXT)
-    PHP->>PHP: Valida e salva arquivo
-    PHP->>DB: INSERT v_voice_documents
-    PHP->>API: POST /documents/process
-    
-    API->>API: Extrai texto
-    API->>API: Chunking (500 tokens)
-    
-    loop Para cada chunk
-        API->>AI: Gera embedding
-        AI-->>API: vector[1536]
-        API->>DB: INSERT v_voice_document_chunks
-    end
-    
-    API->>DB: UPDATE status='completed'
-    API-->>PHP: Success
-    PHP-->>U: Documento processado
-```
-
-## Fluxo de Busca RAG
-
-```mermaid
-flowchart LR
-    Q[Pergunta do Cliente]
-    E[Embedding Query]
-    V[(Vector Store)]
-    C[Chunks Relevantes]
-    L[LLM + Contexto]
-    R[Resposta]
-    
-    Q --> E --> V --> C --> L --> R
-```
-
-**Detalhes:**
-1. Pergunta do cliente é transformada em embedding
-2. Busca vetorial (cosine similarity) encontra top-k chunks
-3. Chunks com score > 0.5 são incluídos no contexto
-4. LLM recebe: system_prompt + RAG_context + histórico + pergunta
-
-## Estrutura de Dados
-
-### Tabelas PostgreSQL
+## Fluxo Principal - Turn-based (v1)
 
 ```
-v_voice_ai_providers
-├── provider_uuid (PK)
-├── domain_uuid (FK) ──────┐
-├── provider_type          │
-├── provider_name          │
-└── config (JSONB)         │
-                           │
-v_voice_secretaries        │
-├── voice_secretary_uuid   │
-├── domain_uuid (FK) ──────┤
-├── stt_provider_uuid (FK) │
-├── tts_provider_uuid (FK) │
-├── llm_provider_uuid (FK) │
-└── system_prompt          │
-                           │
-v_voice_documents          │
-├── document_uuid          │
-├── domain_uuid (FK) ──────┤
-├── file_path              │
-└── processing_status      │
-                           │
-v_voice_document_chunks    │
-├── chunk_uuid             │
-├── domain_uuid (FK) ──────┤
-├── document_uuid (FK)     │
-├── content                │
-└── embedding (vector)     │
-                           │
-v_voice_conversations      │
-├── conversation_uuid      │
-├── domain_uuid (FK) ──────┤
-├── caller_id              │
-└── final_action           │
-                           │
-v_voice_messages           │
-├── message_uuid           │
-├── domain_uuid (FK) ──────┘
-├── conversation_uuid (FK)
-├── role (user/assistant)
-└── content
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CHAMADA TELEFÔNICA                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. ENTRADA DA CHAMADA                                                   │
+│  ┌──────────────┐                                                        │
+│  │  PSTN/SIP    │ ──→ FreeSWITCH ──→ Dialplan ──→ secretary_ai.lua      │
+│  │  Gateway     │                                                        │
+│  └──────────────┘                                                        │
+│                                                                          │
+│  2. SAUDAÇÃO                                                             │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Lua: Carrega config do PostgreSQL                                │   │
+│  │  Lua: Sintetiza saudação via HTTP → voice-ai-service:8100/synth   │   │
+│  │  Lua: session:streamFile(greeting.wav)                            │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  3. LOOP DE CONVERSAÇÃO                                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                                                                   │   │
+│  │  ┌─────────┐   ┌──────────────┐   ┌─────────────────────────┐   │   │
+│  │  │ Cliente │ → │ record_file  │ → │ POST /transcribe        │   │   │
+│  │  │  fala   │   │ input.wav    │   │ (STT Provider)          │   │   │
+│  │  └─────────┘   └──────────────┘   └────────────┬────────────┘   │   │
+│  │                                                 │                │   │
+│  │                                                 ▼                │   │
+│  │  ┌─────────────────────────────────────────────────────────┐    │   │
+│  │  │ POST /chat                                               │    │   │
+│  │  │ • Busca contexto RAG (documentos relevantes)            │    │   │
+│  │  │ • Adiciona histórico da sessão                          │    │   │
+│  │  │ • LLM gera resposta                                     │    │   │
+│  │  │ • Detecta ação: TRANSFER, HANGUP, CONTINUE              │    │   │
+│  │  └────────────────────────────────────────────┬────────────┘    │   │
+│  │                                                │                │   │
+│  │                                                ▼                │   │
+│  │  ┌─────────────────────────────────────────────────────────┐    │   │
+│  │  │ POST /synthesize                                         │    │   │
+│  │  │ → TTS Provider → response.wav                           │    │   │
+│  │  └────────────────────────────────────────────┬────────────┘    │   │
+│  │                                                │                │   │
+│  │                                                ▼                │   │
+│  │  ┌─────────────────────────────────────────────────────────┐    │   │
+│  │  │ session:streamFile(response.wav)                         │    │   │
+│  │  │ → Cliente ouve a resposta                               │    │   │
+│  │  └─────────────────────────────────────────────────────────┘    │   │
+│  │                                                                  │   │
+│  │  ← Repete até TRANSFER ou HANGUP                                │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  4. AÇÕES FINAIS                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  TRANSFER: session:transfer(ramal) → PBX roteia                  │   │
+│  │  HANGUP: session:hangup() → Webhook OmniPlay (opcional)          │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Integrações Externas
+## Fluxo Principal - Realtime (v2)
 
-### AI Providers
-
-| Provider | Protocolo | Autenticação | Timeout |
-|----------|-----------|--------------|---------|
-| OpenAI | HTTPS | Bearer Token | 60s |
-| Anthropic | HTTPS | X-API-Key | 60s |
-| Azure OpenAI | HTTPS | api-key header | 60s |
-| Google Gemini | HTTPS | API Key | 60s |
-| AWS Bedrock | HTTPS | IAM Signature | 60s |
-| Groq | HTTPS | Bearer Token | 30s |
-| ElevenLabs | HTTPS | xi-api-key | 60s |
-| Deepgram | HTTPS | Token | 60s |
-| Ollama | HTTP (local) | None | 120s |
-| LM Studio | HTTP (local) | None | 120s |
-
-### OmniPlay Webhook
-
-```json
-{
-  "event": "voice_ai_conversation",
-  "domain_uuid": "xxx",
-  "conversation_uuid": "xxx",
-  "caller_id": "+5511999999999",
-  "secretary_name": "Atendimento IA",
-  "summary": "Cliente perguntou sobre horário...",
-  "action": "transfer",
-  "transfer_target": "200",
-  "duration_seconds": 120,
-  "messages": [
-    {"role": "user", "content": "..."},
-    {"role": "assistant", "content": "..."}
-  ],
-  "timestamp": "2026-01-12T10:30:00Z"
-}
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     CHAMADA REALTIME (FULL-DUPLEX)                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. ENTRADA                                                              │
+│  ┌──────────────┐                                                        │
+│  │  PSTN/SIP    │ ──→ FreeSWITCH ──→ Dialplan ──→ mod_audio_stream      │
+│  │  Gateway     │                                                        │
+│  └──────────────┘                                                        │
+│                                                                          │
+│  2. CONEXÃO WEBSOCKET                                                    │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  mod_audio_stream conecta: ws://localhost:8080/stream/{uuid}      │   │
+│  │  Bridge carrega config do PostgreSQL                             │   │
+│  │  Bridge conecta ao provider (OpenAI Realtime, ElevenLabs, etc)   │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  3. STREAMING BIDIRECIONAL (SIMULTÂNEO)                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                                                                   │   │
+│  │     CLIENTE ────────────────────────────► AI PROVIDER            │   │
+│  │       │                                        │                  │   │
+│  │       │ Audio PCM 16kHz                       │ Audio PCM        │   │
+│  │       │ (contínuo)                            │ (contínuo)       │   │
+│  │       │                                        │                  │   │
+│  │       ◄────────────────────────────────────────                  │   │
+│  │                                                                   │   │
+│  │  • Full-duplex: ambos falam ao mesmo tempo                       │   │
+│  │  • VAD: detecta quando cliente parou de falar                    │   │
+│  │  • Barge-in: cliente pode interromper IA                         │   │
+│  │  • Latência: ~300ms                                              │   │
+│  │                                                                   │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  4. FUNCTION CALLING (AÇÕES)                                             │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  AI retorna function_call via WebSocket:                          │   │
+│  │  • transfer_call(ramal) → ESL: uuid_transfer                     │   │
+│  │  • create_ticket(data) → Webhook OmniPlay                        │   │
+│  │  • end_call() → ESL: uuid_kill                                   │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Observabilidade
+## Fluxo de Upload de Documento (RAG)
 
-### Logs
-- **Python**: structlog com formato JSON
-- **Lua**: freeswitch.consoleLog com prefixo `[SECRETARY_AI]`
-- **PHP**: error_log para tentativas de manipulação de domain_uuid
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         UPLOAD DE DOCUMENTO                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. UPLOAD                                                               │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Admin (FusionPBX) → POST /documents/upload                       │   │
+│  │  • PDF, DOCX, TXT                                                 │   │
+│  │  • Validação de tamanho e tipo                                   │   │
+│  │  • Salva metadata no PostgreSQL                                  │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  2. PROCESSAMENTO (Assíncrono)                                           │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  • Extração de texto (pypdf, python-docx)                         │   │
+│  │  • Chunking (1000 tokens, overlap 200)                           │   │
+│  │  • Geração de embeddings (OpenAI/Local)                          │   │
+│  │  • Armazenamento no Vector Store                                 │   │
+│  │  • Atualiza status: processing → ready                           │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  3. BUSCA (Durante chat)                                                 │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Query do usuário → Embedding → Similarity Search → Top K chunks │   │
+│  │  Chunks adicionados ao context do LLM                            │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-### Métricas (sugeridas)
-- `voice_ai_calls_total` - Total de chamadas
-- `voice_ai_transcription_latency_ms` - Latência STT
-- `voice_ai_synthesis_latency_ms` - Latência TTS
-- `voice_ai_llm_tokens_total` - Tokens usados por tenant
-- `voice_ai_transfers_total` - Transferências por departamento
+## Fluxo de Autenticação Multi-Tenant
 
-### Health Checks
-- `GET /health` - Service alive
-- `GET /api/v1/webhooks/health` - Webhook service
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       VALIDAÇÃO MULTI-TENANT                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────┐    ┌─────────────────────────────────────────────┐     │
+│  │ FreeSWITCH  │───►│ Lua: session:getVariable("domain_uuid")     │     │
+│  │ (call data) │    └─────────────────────────────────────────────┘     │
+│  └─────────────┘                      │                                  │
+│                                       ▼                                  │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ HTTP Request para voice-ai-service                               │    │
+│  │ Header: X-Domain-UUID: {domain_uuid}                            │    │
+│  │ Body: { "domain_uuid": "{domain_uuid}", ... }                   │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                       │                                  │
+│                                       ▼                                  │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ Middleware de Validação                                          │    │
+│  │ • Valida UUID format                                            │    │
+│  │ • Verifica domain existe no PostgreSQL                          │    │
+│  │ • Aplica rate limiting por domain                               │    │
+│  │ • Carrega providers específicos do domain                       │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Integração OmniPlay (Webhook)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      WEBHOOK OMNIPLAY (OPCIONAL)                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Ao final da chamada:                                                    │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  POST https://omniplay.example.com/api/voice-webhook              │   │
+│  │                                                                   │   │
+│  │  {                                                                │   │
+│  │    "event": "call_completed",                                     │   │
+│  │    "call_uuid": "abc-123",                                        │   │
+│  │    "domain_uuid": "def-456",                                      │   │
+│  │    "caller_id": "+5511999999999",                                 │   │
+│  │    "secretary_name": "Recepção",                                  │   │
+│  │    "duration_seconds": 120,                                       │   │
+│  │    "transcript": [...],                                           │   │
+│  │    "resolution": "transferred",                                   │   │
+│  │    "transferred_to": "1001"                                       │   │
+│  │  }                                                                │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  OmniPlay pode:                                                          │
+│  • Criar ticket automaticamente                                          │
+│  • Associar ao contato pelo caller_id                                   │
+│  • Anexar transcrição                                                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Comunicação entre Componentes
+
+| De | Para | Protocolo | Dados |
+|----|------|-----------|-------|
+| FreeSWITCH Lua | voice-ai-service | HTTP REST | JSON |
+| mod_audio_stream | voice-ai-realtime | WebSocket | PCM 16kHz |
+| voice-ai-service | PostgreSQL | asyncpg | SQL |
+| voice-ai-service | Redis | Redis protocol | Session cache |
+| voice-ai-service | ChromaDB | HTTP | Vectors |
+| voice-ai-service | AI Providers | HTTP/WS | API calls |
+| voice-ai-realtime | OpenAI Realtime | WebSocket | Audio + JSON |
+| Lua script | OmniPlay | HTTP REST | Webhook JSON |
+
+---
+*Gerado em: 2026-01-12*

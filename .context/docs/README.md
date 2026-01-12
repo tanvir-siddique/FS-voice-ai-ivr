@@ -1,71 +1,61 @@
-# Voice AI IVR - Documentation Index
+# 📚 Documentation Index - Voice AI IVR
 
-Bem-vindo à base de conhecimento do Voice AI IVR!
+Bem-vindo à documentação do **Voice AI IVR** - Secretária Virtual Inteligente para FreeSWITCH/FusionPBX.
 
-## Visão Rápida
+## 🚀 Quick Links
 
-**Voice AI IVR** é um módulo de Secretária Virtual com Inteligência Artificial para FreeSWITCH/FusionPBX. Transforma URAs robóticas em conversas naturais.
+| Documento | Descrição |
+|-----------|-----------|
+| [Project Overview](./project-overview.md) | Visão geral do projeto, stack, modos de operação |
+| [Architecture](./architecture.md) | Arquitetura técnica, componentes, padrões |
+| [Data Flow](./data-flow.md) | Fluxos de dados, turn-based vs realtime |
+| [Development Workflow](./development-workflow.md) | Setup, comandos, branching |
+| [Testing Strategy](./testing-strategy.md) | Testes unitários, integração, E2E |
+| [Security](./security.md) | Multi-tenant, API keys, validação |
+| [Glossary](./glossary.md) | Termos técnicos e de domínio |
+| [Tooling](./tooling.md) | Scripts, IDE, debugging |
 
-## Documentação
-
-### Início Rápido
-- [Project Overview](./project-overview.md) - O que é, como funciona, status
-
-### Arquitetura
-- [Architecture](./architecture.md) - Diagramas, padrões, decisões técnicas
-- [Data Flow](./data-flow.md) - Fluxos de dados, integrações, observabilidade
-
-### Desenvolvimento
-- [Development Workflow](./development-workflow.md) - Setup, comandos, workflow
-- [Testing Strategy](./testing-strategy.md) - Testes unitários, integração, e2e
-
-### Referência
-- [Glossary](./glossary.md) - Termos, acrônimos, convenções
-- [Security](./security.md) - Multi-tenant, secrets, validação
-
-### Ferramentas
-- [Tooling](./tooling.md) - Linting, formatação, CI/CD
-
-## Playbooks de Agentes
-
-Instruções específicas para cada tipo de tarefa:
-
-| Agente | Descrição |
-|--------|-----------|
-| [Backend Specialist](../agents/backend-specialist.md) | Python/FastAPI, providers, async |
-| [Database Specialist](../agents/database-specialist.md) | PostgreSQL, migrations, pgvector |
-| [Feature Developer](../agents/feature-developer.md) | Novas funcionalidades end-to-end |
-| [Code Reviewer](../agents/code-reviewer.md) | Checklist de review, red flags |
-| [Test Writer](../agents/test-writer.md) | pytest, fixtures, cobertura |
-
-## Estrutura do Projeto
+## 📁 Estrutura do Projeto
 
 ```
 voice-ai-ivr/
-├── voice-ai-service/     # 🐍 Python FastAPI - Core IA
-├── freeswitch/           # 📞 Lua scripts - Telefonia
-├── fusionpbx-app/        # 🌐 PHP - Interface web
-├── database/             # 🗃️ SQL migrations
-├── deploy/               # 🚀 Configs de deploy
-├── docs/                 # 📚 Documentação adicional
-└── .context/             # 🤖 Esta documentação
+├── voice-ai-service/      # Backend Python (FastAPI)
+├── freeswitch/            # Scripts Lua + Dialplan XML
+├── fusionpbx-app/         # UI PHP para FusionPBX
+├── database/              # Migrations SQL
+├── scripts/               # Shell scripts utilitários
+├── openspec/              # Documentação OpenSpec
+├── .context/              # Esta documentação
+└── docker-compose.yml     # Orquestração Docker
 ```
 
-## Links Rápidos
+## 🎯 Modos de Operação
 
-- [OpenSpec Proposal](../../openspec/changes/add-voice-ai-ivr/proposal.md)
-- [OpenSpec Tasks](../../openspec/changes/add-voice-ai-ivr/tasks.md)
-- [Requirements.txt](../../voice-ai-service/requirements.txt)
+### v1 - Turn-based
+- Latência: 2-5 segundos
+- Custo: Baixo
+- Ideal para: IVRs simples, FAQ
 
-## Manutenção
+### v2 - Realtime
+- Latência: 300-500ms
+- Full-duplex, barge-in
+- Ideal para: Atendimento premium
 
-Esta documentação é gerada e mantida com auxílio do AI Context MCP.
+## 🔗 Links Externos
 
-Para atualizar:
-```bash
-# Regenerar scaffolding
-mcp_ai-context_initializeContext
+- [OpenSpec Proposals](/openspec/changes/)
+- [API Docs](http://localhost:8100/docs)
+- [GitHub](https://github.com/julianotarga/voice-ai-ivr)
 
-# Preencher com análise do código
-mcp_ai-context_fillScaffolding
-```
+## 📊 Status do Projeto
+
+| Componente | Status |
+|------------|--------|
+| v1 Turn-based API | ✅ Implementado |
+| v2 Realtime Bridge | 🔄 Em desenvolvimento |
+| FusionPBX UI | 🔄 Em desenvolvimento |
+| Docker | ✅ Implementado |
+| Testes | 🔄 Em andamento |
+
+---
+*Última atualização: 2026-01-12*
