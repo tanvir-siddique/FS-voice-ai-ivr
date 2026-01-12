@@ -4,7 +4,8 @@
 - **Proposed**: 2026-01-12
 - **Author**: OmniPlay Engineering
 - **Priority**: Critical
-- **Supersedes**: add-voice-ai-ivr (turn-based approach)
+- **Extends**: add-voice-ai-ivr (v1 turn-based continua funcionando)
+- **Backwards Compatible**: ✅ Sim
 
 ---
 
@@ -418,6 +419,260 @@ CREATE INDEX idx_conv_realtime_date ON v_voice_conversations_realtime(domain_uui
 - ✅ **FusionPBX 5.x** - Páginas de configuração
 - ✅ **Multi-tenant** - Isolamento total por domain
 - ✅ **Fallback** - Se realtime falhar, usa v1 turn-based
+- ✅ **Docker** - Todos os serviços em containers
+
+---
+
+## Arquitetura Docker
+
+### Visão Geral
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              SERVIDOR HOST                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────────┐                                        │
+│  │  FreeSWITCH + FusionPBX         │  ← Instalado no HOST (bare metal)      │
+│  │  - mod_audio_stream             │                                        │
+│  │  - Dialplan XML                 │                                        │
+│  │  - PostgreSQL (FusionPBX)       │                                        │
+│  └─────────────────┬───────────────┘                                        │
+│                    │ ws://localhost:8080                                     │
+│                    │ ws://localhost:8100                                     │
+│                    ▼                                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                        DOCKER COMPOSE                                │    │
+│  ├─────────────────────────────────────────────────────────────────────┤    │
+│  │                                                                      │    │
+│  │  ┌─────────────────────┐  ┌─────────────────────┐                   │    │
+│  │  │ voice-ai-realtime   │  │ voice-ai-service    │                   │    │
+│  │  │ (Bridge WebSocket)  │  │ (API Turn-based v1) │                   │    │
+│  │  │ Port: 8080          │  │ Port: 8100          │                   │    │
+│  │  │                     │  │                     │                   │    │
+│  │  │ • OpenAI Realtime   │  │ • STT endpoints     │                   │    │
+│  │  │ • ElevenLabs Conv   │  │ • TTS endpoints     │                   │    │
+│  │  │ • Gemini Live       │  │ • Chat endpoints    │                   │    │
+│  │  │ • Custom Pipeline   │  │ • RAG/Documents     │                   │    │
+│  │  └─────────────────────┘  └─────────────────────┘                   │    │
+│  │           │                        │                                 │    │
+│  │           └────────────┬───────────┘                                 │    │
+│  │                        ▼                                             │    │
+│  │  ┌─────────────────────┐  ┌─────────────────────┐                   │    │
+│  │  │ redis               │  │ chromadb (opcional) │                   │    │
+│  │  │ Port: 6379          │  │ Port: 8000          │                   │    │
+│  │  │ • Rate limiting     │  │ • Vector store      │                   │    │
+│  │  │ • Session cache     │  │ • RAG embeddings    │                   │    │
+│  │  └─────────────────────┘  └─────────────────────┘                   │    │
+│  │                                                                      │    │
+│  │  ┌─────────────────────┐  ┌─────────────────────┐                   │    │
+│  │  │ ollama (opcional)   │  │ piper-tts (opcional)│                   │    │
+│  │  │ Port: 11434         │  │ (interno)           │                   │    │
+│  │  │ • LLM local         │  │ • TTS local         │                   │    │
+│  │  └─────────────────────┘  └─────────────────────┘                   │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### docker-compose.yml (Atualizado)
+
+```yaml
+services:
+  # =========================================================================
+  # Voice AI Realtime Bridge (NOVO)
+  # =========================================================================
+  voice-ai-realtime:
+    build:
+      context: ./voice-ai-service
+      dockerfile: Dockerfile.realtime
+    container_name: voice-ai-realtime
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://fusionpbx:password@host.docker.internal/fusionpbx
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    volumes:
+      - voice-ai-logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - voice-ai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =========================================================================
+  # Voice AI Service (v1 Turn-based - Mantido para compatibilidade)
+  # =========================================================================
+  voice-ai-service:
+    build:
+      context: ./voice-ai-service
+      dockerfile: Dockerfile
+    container_name: voice-ai-service
+    ports:
+      - "8100:8100"
+    # ... (configuração existente mantida)
+
+  # Outros serviços (redis, chromadb, ollama) mantidos...
+```
+
+---
+
+## Coexistência v1 (Turn-based) e v2 (Realtime)
+
+### Arquitetura de Coexistência
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                         FREESWITCH DIALPLAN                            │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │  Extensão 8XXX → Secretária Virtual                              │  │
+│  │                                                                   │  │
+│  │  1. Buscar config: SELECT * FROM v_voice_secretaries             │  │
+│  │     WHERE extension = $1 AND domain_uuid = $2                    │  │
+│  │                                                                   │  │
+│  │  2. Verificar campo: processing_mode                             │  │
+│  │                                                                   │  │
+│  │     ┌────────────────────┐      ┌────────────────────┐           │  │
+│  │     │ mode = 'realtime'  │      │ mode = 'turn_based'│           │  │
+│  │     │                    │      │                    │           │  │
+│  │     │ → mod_audio_stream │      │ → Lua script v1    │           │  │
+│  │     │ → ws://bridge:8080 │      │ → HTTP API :8100   │           │  │
+│  │     └────────────────────┘      └────────────────────┘           │  │
+│  │                                                                   │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                        │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+### Campo `processing_mode` na Tabela
+
+```sql
+-- Adicionar campo à tabela existente
+ALTER TABLE v_voice_secretaries 
+ADD COLUMN processing_mode VARCHAR(20) DEFAULT 'turn_based'
+CHECK (processing_mode IN ('turn_based', 'realtime', 'auto'));
+
+-- Valores possíveis:
+-- 'turn_based' : Usa v1 (Lua + HTTP API) - DEFAULT
+-- 'realtime'   : Usa v2 (mod_audio_stream + WebSocket)
+-- 'auto'       : Tenta realtime, fallback para turn_based
+```
+
+### Dialplan Unificado
+
+```xml
+<extension name="voice_ai_secretary">
+  <condition field="destination_number" expression="^(8\d{3})$">
+    <!-- Obter configuração do banco -->
+    <action application="set" data="secretary_extension=$1"/>
+    <action application="lua" data="get_secretary_mode.lua"/>
+    
+    <!-- Roteamento baseado no modo -->
+    <action application="execute_extension" 
+            data="voice_ai_${processing_mode}" 
+            inline="true"/>
+  </condition>
+</extension>
+
+<!-- Modo Realtime (v2) -->
+<extension name="voice_ai_realtime">
+  <condition>
+    <action application="set" data="STREAM_PLAYBACK=true"/>
+    <action application="set" data="STREAM_SAMPLE_RATE=16000"/>
+    <action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8080/stream/${domain_uuid}/${uuid} mono 16k"/>
+    <action application="answer"/>
+    <action application="park"/>
+  </condition>
+</extension>
+
+<!-- Modo Turn-based (v1) -->
+<extension name="voice_ai_turn_based">
+  <condition>
+    <action application="answer"/>
+    <action application="lua" data="secretary_ai.lua"/>
+  </condition>
+</extension>
+```
+
+---
+
+## Escolha do Administrador (UI FusionPBX)
+
+### Tela de Configuração da Secretária
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  SECRETÁRIA VIRTUAL - CONFIGURAÇÃO                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Nome: [Recepção Principal          ]                                   │
+│  Ramal: [8000]                                                          │
+│                                                                          │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  MODO DE PROCESSAMENTO                                                   │
+│  ─────────────────────────────────────────────────────────────────────  │
+│                                                                          │
+│  ○ Turn-based (v1)                                                      │
+│    └─ Latência: 2-5 segundos                                            │
+│    └─ Custo: Mais baixo ($0.02-0.04/min)                                │
+│    └─ Ideal para: IVRs simples, FAQ                                     │
+│                                                                          │
+│  ● Realtime (v2) ✨ RECOMENDADO                                         │
+│    └─ Latência: 300-500ms                                               │
+│    └─ Custo: Moderado ($0.04-0.12/min)                                  │
+│    └─ Ideal para: Conversas naturais, atendimento premium               │
+│    └─ Recursos: Barge-in, full-duplex                                   │
+│                                                                          │
+│  ○ Automático                                                           │
+│    └─ Tenta realtime, fallback para turn-based se falhar                │
+│                                                                          │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  CONFIGURAÇÃO DO MODO REALTIME                                           │
+│  ─────────────────────────────────────────────────────────────────────  │
+│                                                                          │
+│  Provider: [OpenAI Realtime API     ▼]                                  │
+│  Voz:      [Alloy                   ▼]                                  │
+│                                                                          │
+│  VAD Threshold: [0.5] (0.0 = mais sensível, 1.0 = menos sensível)       │
+│  Silêncio para fim de fala: [500] ms                                    │
+│                                                                          │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  CONFIGURAÇÃO DO MODO TURN-BASED                                         │
+│  ─────────────────────────────────────────────────────────────────────  │
+│                                                                          │
+│  STT Provider: [OpenAI Whisper      ▼]                                  │
+│  LLM Provider: [GPT-4o-mini         ▼]                                  │
+│  TTS Provider: [OpenAI TTS          ▼]                                  │
+│                                                                          │
+│  [💾 Salvar]  [🔊 Testar Voz]  [📞 Testar Chamada]                      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Benefícios da Escolha
+
+| Cenário | Modo Recomendado | Justificativa |
+|---------|------------------|---------------|
+| IVR simples (menu numérico) | Turn-based | Custo baixo, latência aceitável |
+| FAQ automatizado | Turn-based | Respostas pré-definidas |
+| Atendimento premium | **Realtime** | Experiência natural |
+| Suporte técnico | **Realtime** | Conversas longas, interrupções |
+| Agendamento | **Realtime** | Fluxo conversacional |
+| Alto volume, baixo budget | Turn-based | Custo prioritário |
+| Poucos atendimentos, alta qualidade | **Realtime** | Experiência prioritária |
 
 ---
 

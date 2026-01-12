@@ -26,10 +26,23 @@
 - [ ] 0.2.4 Criar `realtime_settings.py` com configurações
 
 ### 0.3 Docker Updates
-- [ ] 0.3.1 Adicionar serviço `voice-ai-realtime` ao docker-compose
-- [ ] 0.3.2 Configurar porta 8080 para WebSocket
-- [ ] 0.3.3 Adicionar healthcheck específico para realtime
-- [ ] 0.3.4 Criar script de inicialização
+- [ ] 0.3.1 Criar `Dockerfile.realtime` para o bridge realtime
+- [ ] 0.3.2 Adicionar serviço `voice-ai-realtime` ao docker-compose
+- [ ] 0.3.3 Configurar porta 8080 para WebSocket realtime
+- [ ] 0.3.4 Manter serviço `voice-ai-service` (v1) na porta 8100
+- [ ] 0.3.5 Configurar network compartilhada entre serviços
+- [ ] 0.3.6 Adicionar healthcheck específico para realtime
+- [ ] 0.3.7 Criar script de inicialização unificado
+- [ ] 0.3.8 Documentar variáveis de ambiente
+
+### 0.4 Coexistência v1/v2
+- [ ] 0.4.1 Adicionar campo `processing_mode` na tabela v_voice_secretaries
+- [ ] 0.4.2 Criar migration para novo campo
+- [ ] 0.4.3 Criar script Lua `get_secretary_mode.lua`
+- [ ] 0.4.4 Atualizar dialplan para roteamento dinâmico
+- [ ] 0.4.5 Implementar fallback automático (realtime → turn_based)
+- [ ] 0.4.6 Testar transição entre modos
+- [ ] 0.4.7 Documentar comportamento de cada modo
 
 ---
 
@@ -164,14 +177,17 @@
 - [ ] 5.1.3 Testar roteamento de chamadas
 - [ ] 5.1.4 Documentar configuração
 
-### 5.2 PHP Pages - Secretárias Realtime
-- [ ] 5.2.1 Criar `secretary_realtime.php` - Listagem
-- [ ] 5.2.2 Criar `secretary_realtime_edit.php` - Criar/Editar
-- [ ] 5.2.3 Implementar seletor de provider (OpenAI, ElevenLabs, Gemini, Custom)
-- [ ] 5.2.4 Implementar seletor de voz por provider
-- [ ] 5.2.5 Implementar editor de prompt do sistema
-- [ ] 5.2.6 Implementar configuração de VAD (threshold, silence)
-- [ ] 5.2.7 Implementar preview de voz (testar TTS)
+### 5.2 PHP Pages - Secretárias (Unificado v1/v2)
+- [ ] 5.2.1 Atualizar `secretary_edit.php` - Adicionar seletor de modo
+- [ ] 5.2.2 Implementar radio buttons: Turn-based / Realtime / Auto
+- [ ] 5.2.3 Implementar campos condicionais por modo
+- [ ] 5.2.4 Mostrar estimativa de custo por modo
+- [ ] 5.2.5 Mostrar recursos disponíveis por modo (barge-in, etc)
+- [ ] 5.2.6 Implementar seletor de provider realtime (OpenAI, ElevenLabs, Gemini, Custom)
+- [ ] 5.2.7 Implementar seletor de voz por provider
+- [ ] 5.2.8 Implementar configuração de VAD (threshold, silence)
+- [ ] 5.2.9 Implementar preview de voz (testar TTS)
+- [ ] 5.2.10 Implementar botão "Testar Chamada" para validação
 
 ### 5.3 PHP Pages - Conversas Realtime
 - [ ] 5.3.1 Criar `conversations_realtime.php` - Listagem
