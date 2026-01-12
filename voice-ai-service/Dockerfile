@@ -10,7 +10,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # -----------------------------------------------------------------------------
 # Stage 2: Production - Minimal runtime image
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as production
+FROM python:3.11-slim AS production
 
 LABEL maintainer="OmniPlay <contato@omniplay.com.br>"
 LABEL description="Voice AI Service - Secretária Virtual com IA"
@@ -90,7 +90,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100"]
 # -----------------------------------------------------------------------------
 # Stage 3: Development - With dev tools
 # -----------------------------------------------------------------------------
-FROM production as development
+FROM production AS development
 
 USER root
 
