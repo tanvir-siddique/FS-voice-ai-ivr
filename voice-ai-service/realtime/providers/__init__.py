@@ -4,11 +4,21 @@
 
 from .base import BaseRealtimeProvider, ProviderEvent, ProviderEventType, RealtimeConfig
 from .factory import RealtimeProviderFactory
+from .openai_realtime import OpenAIRealtimeProvider
+from .elevenlabs_conv import ElevenLabsConversationalProvider
+from .gemini_live import GeminiLiveProvider
+from .custom_pipeline import CustomPipelineProvider
 
 __all__ = [
+    # Base
     "BaseRealtimeProvider",
     "ProviderEvent",
     "ProviderEventType",
     "RealtimeConfig",
     "RealtimeProviderFactory",
+    # Providers
+    "OpenAIRealtimeProvider",
+    "ElevenLabsConversationalProvider",
+    "GeminiLiveProvider",
+    "CustomPipelineProvider",
 ]

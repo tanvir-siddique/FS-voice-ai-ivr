@@ -12,6 +12,9 @@ from typing import Any, Dict, Type
 
 from .base import BaseRealtimeProvider, RealtimeConfig
 from .openai_realtime import OpenAIRealtimeProvider
+from .elevenlabs_conv import ElevenLabsConversationalProvider
+from .gemini_live import GeminiLiveProvider
+from .custom_pipeline import CustomPipelineProvider
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +24,23 @@ class RealtimeProviderFactory:
     Factory para criar providers realtime.
     
     Segue Factory Pattern conforme .context/agents/backend-specialist.md
+    
+    Providers disponíveis:
+    - openai: OpenAI Realtime API (GPT-4o-realtime)
+    - elevenlabs: ElevenLabs Conversational AI
+    - gemini: Google Gemini 2.0 Flash Live
+    - custom: Pipeline custom (Deepgram + Groq + Piper)
     """
     
     _providers: Dict[str, Type[BaseRealtimeProvider]] = {
         "openai": OpenAIRealtimeProvider,
         "openai_realtime": OpenAIRealtimeProvider,
-        # Futuros:
-        # "elevenlabs": ElevenLabsConversationalProvider,
-        # "gemini": GeminiLiveProvider,
-        # "custom": CustomPipelineProvider,
+        "elevenlabs": ElevenLabsConversationalProvider,
+        "elevenlabs_conversational": ElevenLabsConversationalProvider,
+        "gemini": GeminiLiveProvider,
+        "gemini_live": GeminiLiveProvider,
+        "custom": CustomPipelineProvider,
+        "custom_pipeline": CustomPipelineProvider,
     }
     
     @classmethod

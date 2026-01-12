@@ -92,31 +92,31 @@
 - [ ] 2.2.10 Testes de integração com OpenAI
 
 ### 2.3 ElevenLabs Conversational AI
-- [ ] 2.3.1 Criar `realtime/providers/elevenlabs_conv.py`
-- [ ] 2.3.2 Implementar conexão WebSocket para `wss://api.elevenlabs.io/v1/convai`
-- [ ] 2.3.3 Implementar `conversation_config_override`
-- [ ] 2.3.4 Implementar envio de áudio (`user_audio_chunk`)
-- [ ] 2.3.5 Implementar handler para `audio` events
-- [ ] 2.3.6 Implementar handler para `agent_response` (transcript)
-- [ ] 2.3.7 Implementar interrupção
+- [x] 2.3.1 Criar `realtime/providers/elevenlabs_conv.py`
+- [x] 2.3.2 Implementar conexão WebSocket para `wss://api.elevenlabs.io/v1/convai`
+- [x] 2.3.3 Implementar `conversation_config_override`
+- [x] 2.3.4 Implementar envio de áudio (`user_audio_chunk`)
+- [x] 2.3.5 Implementar handler para `audio` events
+- [x] 2.3.6 Implementar handler para `agent_response` (transcript)
+- [x] 2.3.7 Implementar interrupção
 - [ ] 2.3.8 Testes de integração com ElevenLabs
 
 ### 2.4 Google Gemini 2.0 Flash
-- [ ] 2.4.1 Criar `realtime/providers/gemini_live.py`
-- [ ] 2.4.2 Instalar SDK: `google-genai`
-- [ ] 2.4.3 Implementar conexão via `client.aio.live.connect`
-- [ ] 2.4.4 Configurar `response_modalities: ["AUDIO"]`
-- [ ] 2.4.5 Implementar envio de áudio streaming
-- [ ] 2.4.6 Implementar recebimento de áudio streaming
+- [x] 2.4.1 Criar `realtime/providers/gemini_live.py`
+- [x] 2.4.2 Instalar SDK: `google-genai`
+- [x] 2.4.3 Implementar conexão via `client.aio.live.connect`
+- [x] 2.4.4 Configurar `response_modalities: ["AUDIO"]`
+- [x] 2.4.5 Implementar envio de áudio streaming
+- [x] 2.4.6 Implementar recebimento de áudio streaming
 - [ ] 2.4.7 Testes de integração com Gemini
 
 ### 2.5 Custom Pipeline (Low-cost)
-- [ ] 2.5.1 Criar `realtime/providers/custom_pipeline.py`
-- [ ] 2.5.2 Integrar Deepgram Nova STT (streaming)
-- [ ] 2.5.3 Integrar Groq para LLM (baixa latência)
-- [ ] 2.5.4 Integrar Piper TTS local (streaming)
-- [ ] 2.5.5 Implementar orquestração entre componentes
-- [ ] 2.5.6 Implementar Silero VAD local
+- [x] 2.5.1 Criar `realtime/providers/custom_pipeline.py`
+- [x] 2.5.2 Integrar Deepgram Nova STT (streaming)
+- [x] 2.5.3 Integrar Groq para LLM (baixa latência)
+- [x] 2.5.4 Integrar Piper TTS local (streaming)
+- [x] 2.5.5 Implementar orquestração entre componentes
+- [x] 2.5.6 Implementar Silero VAD local
 - [ ] 2.5.7 Testes de latência end-to-end
 
 ---
