@@ -1,0 +1,42 @@
+[Unit]
+Description=Voice AI Service - Secretária Virtual com IA
+Documentation=https://github.com/omniplay/voice-ai-ivr
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=freeswitch
+Group=freeswitch
+WorkingDirectory=/opt/voice-ai-service
+Environment=PATH=/opt/voice-ai-service/venv/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+# Configuração
+EnvironmentFile=-/opt/voice-ai-service/.env
+
+# Comando de início
+ExecStart=/opt/voice-ai-service/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8089
+
+# Reinício automático
+Restart=always
+RestartSec=5
+
+# Limites
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Segurança
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/voice-ai-service/data /tmp/voice-ai
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voice-ai-service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,183 @@
+<?php
+/**
+ * Voice Secretary App Languages
+ * Brazilian Portuguese translations
+ */
+
+// Title
+$text['title-voice_secretary']['en-us'] = "Voice Secretary";
+$text['title-voice_secretary']['pt-br'] = "Secretária Virtual";
+
+$text['title-voice_secretaries']['en-us'] = "Voice Secretaries";
+$text['title-voice_secretaries']['pt-br'] = "Secretárias Virtuais";
+
+$text['title-ai_providers']['en-us'] = "AI Providers";
+$text['title-ai_providers']['pt-br'] = "Provedores de IA";
+
+$text['title-documents']['en-us'] = "Knowledge Base";
+$text['title-documents']['pt-br'] = "Base de Conhecimento";
+
+$text['title-conversations']['en-us'] = "Conversation History";
+$text['title-conversations']['pt-br'] = "Histórico de Conversas";
+
+// Descriptions
+$text['description-voice_secretary']['en-us'] = "AI-powered virtual secretary for phone calls";
+$text['description-voice_secretary']['pt-br'] = "Secretária virtual com IA para atendimento telefônico";
+
+// Labels - Secretary
+$text['label-secretary_name']['en-us'] = "Secretary Name";
+$text['label-secretary_name']['pt-br'] = "Nome da Secretária";
+
+$text['label-company_name']['en-us'] = "Company Name";
+$text['label-company_name']['pt-br'] = "Nome da Empresa";
+
+$text['label-personality_prompt']['en-us'] = "Personality Prompt";
+$text['label-personality_prompt']['pt-br'] = "Prompt de Personalidade";
+
+$text['label-greeting_message']['en-us'] = "Greeting Message";
+$text['label-greeting_message']['pt-br'] = "Mensagem de Saudação";
+
+$text['label-farewell_message']['en-us'] = "Farewell Message";
+$text['label-farewell_message']['pt-br'] = "Mensagem de Despedida";
+
+$text['label-transfer_extension']['en-us'] = "Transfer Extension";
+$text['label-transfer_extension']['pt-br'] = "Ramal de Transferência";
+
+$text['label-max_turns']['en-us'] = "Max Conversation Turns";
+$text['label-max_turns']['pt-br'] = "Máximo de Turnos na Conversa";
+
+// Labels - Providers
+$text['label-provider_type']['en-us'] = "Provider Type";
+$text['label-provider_type']['pt-br'] = "Tipo de Provedor";
+
+$text['label-provider_name']['en-us'] = "Provider";
+$text['label-provider_name']['pt-br'] = "Provedor";
+
+$text['label-provider_stt']['en-us'] = "Speech-to-Text (STT)";
+$text['label-provider_stt']['pt-br'] = "Reconhecimento de Voz (STT)";
+
+$text['label-provider_tts']['en-us'] = "Text-to-Speech (TTS)";
+$text['label-provider_tts']['pt-br'] = "Síntese de Voz (TTS)";
+
+$text['label-provider_llm']['en-us'] = "Language Model (LLM)";
+$text['label-provider_llm']['pt-br'] = "Modelo de Linguagem (LLM)";
+
+$text['label-provider_embeddings']['en-us'] = "Embeddings";
+$text['label-provider_embeddings']['pt-br'] = "Embeddings";
+
+$text['label-api_key']['en-us'] = "API Key";
+$text['label-api_key']['pt-br'] = "Chave da API";
+
+$text['label-is_default']['en-us'] = "Default Provider";
+$text['label-is_default']['pt-br'] = "Provedor Padrão";
+
+// Labels - Documents
+$text['label-document_name']['en-us'] = "Document Name";
+$text['label-document_name']['pt-br'] = "Nome do Documento";
+
+$text['label-document_type']['en-us'] = "Document Type";
+$text['label-document_type']['pt-br'] = "Tipo de Documento";
+
+$text['label-chunk_count']['en-us'] = "Chunks";
+$text['label-chunk_count']['pt-br'] = "Fragmentos";
+
+// Labels - Conversations
+$text['label-caller_id']['en-us'] = "Caller ID";
+$text['label-caller_id']['pt-br'] = "Número do Chamador";
+
+$text['label-start_time']['en-us'] = "Start Time";
+$text['label-start_time']['pt-br'] = "Início";
+
+$text['label-end_time']['en-us'] = "End Time";
+$text['label-end_time']['pt-br'] = "Fim";
+
+$text['label-total_turns']['en-us'] = "Turns";
+$text['label-total_turns']['pt-br'] = "Turnos";
+
+$text['label-final_action']['en-us'] = "Final Action";
+$text['label-final_action']['pt-br'] = "Ação Final";
+
+// Actions
+$text['action-resolved']['en-us'] = "Resolved";
+$text['action-resolved']['pt-br'] = "Resolvido";
+
+$text['action-transferred']['en-us'] = "Transferred";
+$text['action-transferred']['pt-br'] = "Transferido";
+
+$text['action-timeout']['en-us'] = "Timeout";
+$text['action-timeout']['pt-br'] = "Tempo Esgotado";
+
+// Buttons
+$text['button-add']['en-us'] = "Add";
+$text['button-add']['pt-br'] = "Adicionar";
+
+$text['button-save']['en-us'] = "Save";
+$text['button-save']['pt-br'] = "Salvar";
+
+$text['button-delete']['en-us'] = "Delete";
+$text['button-delete']['pt-br'] = "Excluir";
+
+$text['button-back']['en-us'] = "Back";
+$text['button-back']['pt-br'] = "Voltar";
+
+$text['button-upload']['en-us'] = "Upload";
+$text['button-upload']['pt-br'] = "Enviar";
+
+$text['button-test']['en-us'] = "Test";
+$text['button-test']['pt-br'] = "Testar";
+
+// Messages
+$text['message-add']['en-us'] = "Record added successfully.";
+$text['message-add']['pt-br'] = "Registro adicionado com sucesso.";
+
+$text['message-update']['en-us'] = "Record updated successfully.";
+$text['message-update']['pt-br'] = "Registro atualizado com sucesso.";
+
+$text['message-delete']['en-us'] = "Record deleted successfully.";
+$text['message-delete']['pt-br'] = "Registro excluído com sucesso.";
+
+$text['message-required']['en-us'] = "Please provide a value for this field.";
+$text['message-required']['pt-br'] = "Por favor, preencha este campo.";
+
+// Provider types
+$text['option-stt']['en-us'] = "Speech-to-Text";
+$text['option-stt']['pt-br'] = "Reconhecimento de Voz";
+
+$text['option-tts']['en-us'] = "Text-to-Speech";
+$text['option-tts']['pt-br'] = "Síntese de Voz";
+
+$text['option-llm']['en-us'] = "Language Model";
+$text['option-llm']['pt-br'] = "Modelo de Linguagem";
+
+$text['option-embeddings']['en-us'] = "Embeddings";
+$text['option-embeddings']['pt-br'] = "Embeddings";
+
+// Provider names
+$text['provider-whisper_local']['en-us'] = "Whisper (Local)";
+$text['provider-whisper_local']['pt-br'] = "Whisper (Local)";
+
+$text['provider-whisper_api']['en-us'] = "OpenAI Whisper";
+$text['provider-whisper_api']['pt-br'] = "OpenAI Whisper";
+
+$text['provider-piper_local']['en-us'] = "Piper (Local)";
+$text['provider-piper_local']['pt-br'] = "Piper (Local)";
+
+$text['provider-openai_tts']['en-us'] = "OpenAI TTS";
+$text['provider-openai_tts']['pt-br'] = "OpenAI TTS";
+
+$text['provider-elevenlabs']['en-us'] = "ElevenLabs";
+$text['provider-elevenlabs']['pt-br'] = "ElevenLabs";
+
+$text['provider-openai']['en-us'] = "OpenAI (GPT-4)";
+$text['provider-openai']['pt-br'] = "OpenAI (GPT-4)";
+
+$text['provider-anthropic']['en-us'] = "Anthropic Claude";
+$text['provider-anthropic']['pt-br'] = "Anthropic Claude";
+
+$text['provider-groq']['en-us'] = "Groq (Fast)";
+$text['provider-groq']['pt-br'] = "Groq (Rápido)";
+
+$text['provider-ollama_local']['en-us'] = "Ollama (Local)";
+$text['provider-ollama_local']['pt-br'] = "Ollama (Local)";
+
+?>

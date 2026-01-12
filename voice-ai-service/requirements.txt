@@ -1,0 +1,134 @@
+# Voice AI Service - Dependencies
+# Python 3.10+
+
+# ============================================
+# FRAMEWORK
+# ============================================
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# ============================================
+# DATABASE
+# ============================================
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0.25
+psycopg2-binary>=2.9.9
+
+# ============================================
+# STT PROVIDERS
+# ============================================
+# Whisper Local
+faster-whisper>=0.10.0
+# whisper-cpp-python  # Alternative
+
+# OpenAI (Whisper API)
+openai>=1.10.0
+
+# Azure Speech
+azure-cognitiveservices-speech>=1.35.0
+
+# Google Cloud
+google-cloud-speech>=2.23.0
+
+# AWS
+boto3>=1.34.0
+
+# Deepgram
+deepgram-sdk>=3.0.0
+
+# ============================================
+# TTS PROVIDERS
+# ============================================
+# Piper (local) - installed separately via pip install piper-tts
+# piper-tts>=1.2.0
+
+# Coqui TTS (local)
+# TTS>=0.22.0  # Large, install separately if needed
+
+# ElevenLabs
+elevenlabs>=0.2.27
+
+# Azure Neural TTS (same as Speech SDK above)
+# Uses azure-cognitiveservices-speech
+
+# Google Cloud TTS
+google-cloud-texttospeech>=2.16.0
+
+# AWS Polly (uses boto3 above)
+
+# Play.ht (uses httpx for API calls)
+
+# ============================================
+# LLM PROVIDERS
+# ============================================
+# OpenAI (already installed above)
+# openai>=1.10.0
+
+# Anthropic
+anthropic>=0.18.0
+
+# Google Gemini
+google-generativeai>=0.4.0
+
+# Groq
+groq>=0.4.0
+
+# Ollama (local)
+ollama>=0.1.6
+
+# ============================================
+# EMBEDDINGS & RAG
+# ============================================
+# OpenAI embeddings (already installed)
+
+# Local embeddings
+sentence-transformers>=2.3.0
+
+# Cohere
+cohere>=4.45.0
+
+# Voyage AI (uses httpx for API calls)
+
+# Vector store
+chromadb>=0.4.22
+# sqlite-vec  # Alternative lightweight
+
+# Document processing
+pypdf>=4.0.0
+python-docx>=1.1.0
+unstructured>=0.12.0
+
+# Text processing
+tiktoken>=0.5.2
+langchain>=0.1.0
+langchain-community>=0.0.13
+
+# ============================================
+# UTILITIES
+# ============================================
+httpx>=0.26.0
+aiofiles>=23.2.1
+python-dotenv>=1.0.0
+tenacity>=8.2.3
+structlog>=24.1.0
+
+# ============================================
+# AUDIO PROCESSING
+# ============================================
+soundfile>=0.12.1
+numpy>=1.26.0
+scipy>=1.12.0
+pydub>=0.25.1
+
+# ============================================
+# DEVELOPMENT
+# ============================================
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+black>=24.1.0
+ruff>=0.2.0
+mypy>=1.8.0

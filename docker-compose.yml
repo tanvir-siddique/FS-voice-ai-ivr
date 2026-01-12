@@ -1,0 +1,292 @@
+# =============================================================================
+# Voice AI IVR - Docker Compose
+# =============================================================================
+# 
+# Arquitetura:
+# - FreeSWITCH/FusionPBX: Instalado no HOST (bare metal)
+# - Voice AI Service: Container Docker
+# - Redis: Container Docker (rate limiting, cache)
+# - Ollama: Container Docker (LLM local - opcional)
+# - ChromaDB: Container Docker (vector store dev - opcional)
+#
+# O PostgreSQL do FusionPBX é acessado via network_mode: host ou IP do host
+#
+# Uso:
+#   Produção:    docker compose up -d
+#   Dev:         docker compose --profile dev up -d
+#   Com Ollama:  docker compose --profile ollama up -d
+#   Tudo:        docker compose --profile dev --profile ollama up -d
+#
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ===========================================================================
+  # Voice AI Service - Main Application
+  # ===========================================================================
+  voice-ai-service:
+    build:
+      context: ./voice-ai-service
+      dockerfile: Dockerfile
+      target: production
+    container_name: voice-ai-service
+    restart: unless-stopped
+    
+    ports:
+      - "${VOICE_AI_PORT:-8100}:8100"
+    
+    environment:
+      # Application
+      - HOST=0.0.0.0
+      - PORT=8100
+      - DEBUG=${DEBUG:-false}
+      
+      # Database - FusionPBX PostgreSQL (no host)
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-fusionpbx}
+      - DB_USER=${DB_USER:-fusionpbx}
+      - DB_PASS=${DB_PASS}
+      
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # AI Providers (API Keys)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY:-}
+      - AZURE_SPEECH_REGION=${AZURE_SPEECH_REGION:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - COHERE_API_KEY=${COHERE_API_KEY:-}
+      
+      # Ollama (local LLM)
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      
+      # Piper TTS (local)
+      - PIPER_DATA_DIR=/app/data/piper
+      
+      # Whisper (local)
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+    
+    volumes:
+      # Data persistence
+      - voice-ai-data:/app/data
+      - voice-ai-logs:/app/logs
+      # Audio files shared with FreeSWITCH
+      - ${FREESWITCH_SOUNDS_DIR:-/var/lib/freeswitch/sounds}:/freeswitch/sounds:ro
+      - ${FREESWITCH_RECORDINGS_DIR:-/var/lib/freeswitch/recordings}:/freeswitch/recordings
+    
+    extra_hosts:
+      # Acesso ao host (para PostgreSQL do FusionPBX)
+      - "host.docker.internal:host-gateway"
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - voice-ai-network
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ===========================================================================
+  # Redis - Cache and Rate Limiting
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: voice-ai-redis
+    restart: unless-stopped
+    
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    
+    volumes:
+      - redis-data:/data
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    
+    networks:
+      - voice-ai-network
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Ollama - Local LLM (Optional - use profile 'ollama')
+  # ===========================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: voice-ai-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+      - dev
+    
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    
+    volumes:
+      - ollama-data:/root/.ollama
+    
+    # GPU support (uncomment if available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    networks:
+      - voice-ai-network
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # ChromaDB - Vector Store (Optional - use profile 'dev')
+  # ===========================================================================
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: voice-ai-chromadb
+    restart: unless-stopped
+    profiles:
+      - dev
+      - chromadb
+    
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    
+    environment:
+      - CHROMA_SERVER_AUTH_CREDENTIALS=${CHROMA_AUTH:-}
+      - CHROMA_SERVER_AUTH_PROVIDER=${CHROMA_AUTH_PROVIDER:-}
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+    
+    volumes:
+      - chroma-data:/chroma/chroma
+    
+    networks:
+      - voice-ai-network
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ===========================================================================
+  # Voice AI Service - Development Mode
+  # ===========================================================================
+  voice-ai-dev:
+    build:
+      context: ./voice-ai-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: voice-ai-dev
+    profiles:
+      - dev
+    
+    ports:
+      - "${VOICE_AI_PORT:-8100}:8100"
+    
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8100
+      - DEBUG=true
+      - DB_HOST=${DB_HOST:-host.docker.internal}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-fusionpbx}
+      - DB_USER=${DB_USER:-fusionpbx}
+      - DB_PASS=${DB_PASS}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    
+    volumes:
+      # Code mount for hot reload
+      - ./voice-ai-service:/app
+      - voice-ai-data:/app/data
+      - voice-ai-logs:/app/logs
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    
+    depends_on:
+      - redis
+    
+    networks:
+      - voice-ai-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  voice-ai-data:
+    driver: local
+  voice-ai-logs:
+    driver: local
+  redis-data:
+    driver: local
+  ollama-data:
+    driver: local
+  chroma-data:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  voice-ai-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

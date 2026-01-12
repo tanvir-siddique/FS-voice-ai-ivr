@@ -1,0 +1,37 @@
+# Logrotate configuration for Voice AI Service
+# Copy to /etc/logrotate.d/voice-ai-service
+
+/var/log/voice-ai-service/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 voice-ai voice-ai
+    sharedscripts
+    postrotate
+        systemctl reload voice-ai-service > /dev/null 2>&1 || true
+    endscript
+}
+
+# Logs do uvicorn/FastAPI
+/var/log/voice-ai-service/access.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 voice-ai voice-ai
+}
+
+/var/log/voice-ai-service/error.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 voice-ai voice-ai
+}

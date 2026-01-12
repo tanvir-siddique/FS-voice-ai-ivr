@@ -1,0 +1,123 @@
+"""
+OpenAI LLM Provider.
+
+Supports GPT-4o, GPT-4o-mini, GPT-4-turbo, and other OpenAI models.
+Uses the official OpenAI Python SDK with async support.
+"""
+
+from typing import List, Optional
+
+from openai import AsyncOpenAI
+
+from .base import BaseLLM, Message, ChatResult
+
+
+class OpenAILLM(BaseLLM):
+    """
+    OpenAI LLM provider using the official SDK.
+    
+    Config:
+        api_key: OpenAI API key (required)
+        model: Model name (default: gpt-4o-mini)
+        organization: Optional organization ID
+        base_url: Optional custom base URL (for proxies)
+    """
+    
+    provider_name = "openai"
+    
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self._client: Optional[AsyncOpenAI] = None
+    
+    def _get_client(self) -> AsyncOpenAI:
+        """Get or create OpenAI client."""
+        if self._client is None:
+            self._client = AsyncOpenAI(
+                api_key=self.config.get("api_key"),
+                organization=self.config.get("organization"),
+                base_url=self.config.get("base_url"),
+            )
+        return self._client
+    
+    async def chat(
+        self,
+        messages: List[Message],
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        system_prompt: Optional[str] = None,
+    ) -> ChatResult:
+        """
+        Generate chat completion using OpenAI.
+        
+        Args:
+            messages: Conversation history
+            temperature: Creativity (0.0 to 1.0)
+            max_tokens: Maximum tokens in response
+            system_prompt: Optional system prompt to prepend
+            
+        Returns:
+            ChatResult with generated response
+        """
+        client = self._get_client()
+        
+        # Build messages list
+        api_messages = []
+        
+        # Add system prompt if provided
+        if system_prompt:
+            api_messages.append({
+                "role": "system",
+                "content": system_prompt,
+            })
+        
+        # Add conversation messages
+        for msg in messages:
+            api_messages.append({
+                "role": msg.role,
+                "content": msg.content,
+            })
+        
+        # Get model from config or use default
+        model = self.config.get("model", "gpt-4o-mini")
+        
+        # Call OpenAI API
+        response = await client.chat.completions.create(
+            model=model,
+            messages=api_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        
+        # Extract response
+        choice = response.choices[0]
+        response_text = choice.message.content or ""
+        
+        # Parse action from response
+        action, extension, department = self.parse_action(response_text)
+        
+        # Calculate tokens used
+        tokens_used = 0
+        if response.usage:
+            tokens_used = response.usage.total_tokens
+        
+        return ChatResult(
+            text=response_text,
+            action=action,
+            transfer_extension=extension,
+            transfer_department=department,
+            tokens_used=tokens_used,
+            finish_reason=choice.finish_reason,
+        )
+    
+    async def is_available(self) -> bool:
+        """Check if OpenAI is available."""
+        if not self.config.get("api_key"):
+            return False
+        
+        try:
+            client = self._get_client()
+            # Simple test - list models
+            await client.models.list()
+            return True
+        except Exception:
+            return False

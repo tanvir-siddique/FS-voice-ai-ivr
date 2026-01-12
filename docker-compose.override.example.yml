@@ -1,0 +1,72 @@
+# =============================================================================
+# Docker Compose Override Example
+# =============================================================================
+# Copy to docker-compose.override.yml for local customizations
+# This file is automatically merged with docker-compose.yml
+#
+# cp docker-compose.override.example.yml docker-compose.override.yml
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ===========================================================================
+  # Voice AI Service - Custom Configuration
+  # ===========================================================================
+  voice-ai-service:
+    # Use local image instead of building
+    # image: voice-ai-service:latest
+    
+    # Override environment
+    environment:
+      - DEBUG=true
+    
+    # Additional volumes for development
+    volumes:
+      # Mount local code for development
+      # - ./voice-ai-service:/app
+      
+      # Custom models directory
+      # - ./models:/app/models:ro
+      
+      # Google Cloud credentials
+      # - ./credentials:/app/credentials:ro
+      pass
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # ===========================================================================
+  # Ollama - GPU Support
+  # ===========================================================================
+  ollama:
+    # Enable GPU support (requires nvidia-docker)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Override default model
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+
+  # ===========================================================================
+  # Redis - Custom Configuration
+  # ===========================================================================
+  redis:
+    # Increase memory limit
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
