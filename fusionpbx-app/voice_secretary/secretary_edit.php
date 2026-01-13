@@ -65,11 +65,11 @@
 
 		//collect form data
 		$form_data = [
-			'secretary_name' => $_POST['secretary_name'] ?? '',
-			'company_name' => $_POST['company_name'] ?? '',
-			'system_prompt' => $_POST['system_prompt'] ?? '',
-			'greeting_message' => $_POST['greeting_message'] ?? '',
-			'farewell_message' => $_POST['farewell_message'] ?? '',
+			'secretary_name' => trim($_POST['secretary_name'] ?? ''),
+			'company_name' => trim($_POST['company_name'] ?? ''),
+			'system_prompt' => trim($_POST['system_prompt'] ?? ''),
+			'greeting_message' => trim($_POST['greeting_message'] ?? ''),
+			'farewell_message' => trim($_POST['farewell_message'] ?? ''),
 			'processing_mode' => $_POST['processing_mode'] ?? 'turn_based',
 			'realtime_provider_uuid' => !empty($_POST['realtime_provider_uuid']) ? $_POST['realtime_provider_uuid'] : null,
 			'extension' => $_POST['extension'] ?? '',
@@ -223,10 +223,12 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-enabled'] ?? 'Enabled')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	$enabled = $data['enabled'] ?? 'true';
+	//normalize enabled value to string for comparison
+	$enabled_raw = $data['enabled'] ?? 'true';
+	$is_enabled = ($enabled_raw === true || $enabled_raw === 'true' || $enabled_raw === 't' || $enabled_raw === '1' || $enabled_raw === 1);
 	echo "		<select class='formfld' name='enabled'>\n";
-	echo "			<option value='true' ".($enabled == 'true' || $enabled === true ? 'selected' : '').">".$text['label-true']."</option>\n";
-	echo "			<option value='false' ".($enabled == 'false' || $enabled === false ? 'selected' : '').">".$text['label-false']."</option>\n";
+	echo "			<option value='true' ".($is_enabled ? 'selected' : '').">".$text['label-true']."</option>\n";
+	echo "			<option value='false' ".(!$is_enabled ? 'selected' : '').">".$text['label-false']."</option>\n";
 	echo "		</select>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
@@ -274,7 +276,7 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-personality_prompt'] ?? 'Personality Prompt')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<textarea class='formfld' name='system_prompt' rows='8' style='width: 100%; min-height: 200px;'>".escape($data['personality_prompt'] ?? '')."</textarea>\n";
+	echo "		<textarea class='formfld' name='system_prompt' rows='8' style='width: 100%; min-height: 200px;'>".escape(trim($data['personality_prompt'] ?? ''))."</textarea>\n";
 	echo "		<br />".($text['description-personality_prompt'] ?? 'Instructions for the AI personality.')."\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
