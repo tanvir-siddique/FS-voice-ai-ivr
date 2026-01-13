@@ -124,14 +124,17 @@ class voice_secretary {
      * @param mixed $uuids Single UUID string or array of UUIDs
      * @param string $domain_uuid Domain UUID for security
      */
-    public function delete($uuids, $domain_uuid) {
-        if (!is_array($uuids)) {
-            $uuids = [$uuids];
+    public function delete($records, $domain_uuid) {
+        if (!is_array($records)) {
+            $records = [$records];
         }
         
         $database = new database;
         
-        foreach ($uuids as $secretary_uuid) {
+        foreach ($records as $record) {
+            //extract UUID from record (can be array with 'uuid' key or direct UUID string)
+            $secretary_uuid = is_array($record) ? ($record['uuid'] ?? null) : $record;
+            
             if (is_uuid($secretary_uuid)) {
                 $sql = "DELETE FROM v_voice_secretaries 
                         WHERE voice_secretary_uuid = :secretary_uuid 
@@ -153,14 +156,17 @@ class voice_secretary {
      * @param mixed $uuids Single UUID string or array of UUIDs
      * @param string $domain_uuid Domain UUID for security
      */
-    public function toggle($uuids, $domain_uuid) {
-        if (!is_array($uuids)) {
-            $uuids = [$uuids];
+    public function toggle($records, $domain_uuid) {
+        if (!is_array($records)) {
+            $records = [$records];
         }
         
         $database = new database;
         
-        foreach ($uuids as $secretary_uuid) {
+        foreach ($records as $record) {
+            //extract UUID from record (can be array with 'uuid' key or direct UUID string)
+            $secretary_uuid = is_array($record) ? ($record['uuid'] ?? null) : $record;
+            
             if (is_uuid($secretary_uuid)) {
                 //get current status
                 $sql = "SELECT enabled FROM v_voice_secretaries 

@@ -170,12 +170,17 @@
 			
 			if (permission_exists('voice_secretary_edit')) {
 				echo "	<td class='no-link center'>";
-				$enabled = $row['enabled'] ?? 'true';
-				echo button::create(['type'=>'submit','class'=>'link','label'=>$text['label-'.$enabled],'title'=>$text['button-toggle'],'onclick'=>"list_self_check('checkbox_".$x."'); list_action_set('toggle'); list_form_submit('form_list')"]);
+				//normalize enabled value
+				$enabled_raw = $row['enabled'] ?? 'true';
+				$is_enabled = ($enabled_raw === true || $enabled_raw === 'true' || $enabled_raw === 't' || $enabled_raw === '1' || $enabled_raw === 1);
+				$enabled_label = $is_enabled ? 'true' : 'false';
+				echo button::create(['type'=>'submit','class'=>'link','label'=>$text['label-'.$enabled_label],'title'=>$text['button-toggle'],'onclick'=>"list_self_check('checkbox_".$x."'); list_action_set('toggle'); list_form_submit('form_list')"]);
 			}
 			else {
 				echo "	<td class='center'>";
-				echo $text['label-'.($row['enabled'] ?? 'true')];
+				$enabled_raw = $row['enabled'] ?? 'true';
+				$is_enabled = ($enabled_raw === true || $enabled_raw === 'true' || $enabled_raw === 't' || $enabled_raw === '1' || $enabled_raw === 1);
+				echo $text['label-'.($is_enabled ? 'true' : 'false')];
 			}
 			echo "	</td>\n";
 			echo "	<td class='hide-sm-dn'>".(!empty($row['insert_date']) ? date('d/m/Y H:i', strtotime($row['insert_date'])) : '')."</td>\n";
