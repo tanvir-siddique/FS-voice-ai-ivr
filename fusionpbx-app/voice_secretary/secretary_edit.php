@@ -82,21 +82,56 @@
 			message::add($text['message-name_required'] ?? 'Name is required', 'negative');
 		} 
 		else {
-			try {
-				if ($action === 'add') {
-					$secretary_obj->create($form_data, $domain_uuid);
-					message::add($text['message-add'] ?? 'Secretary created successfully');
-				} 
-				else {
-					$secretary_obj->update($secretary_uuid, $form_data, $domain_uuid);
-					message::add($text['message-update'] ?? 'Secretary updated successfully');
-				}
-				header('Location: secretary.php');
-				exit;
-			} 
-			catch (Exception $e) {
-				message::add(($text['message-error'] ?? 'Error') . ': ' . $e->getMessage(), 'negative');
+			// Build array for FusionPBX database save
+			if ($action === 'add') {
+				$secretary_uuid = uuid();
 			}
+			
+			$array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+			$array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+			$array['v_voice_secretaries'][0]['secretary_name'] = $form_data['secretary_name'];
+			$array['v_voice_secretaries'][0]['company_name'] = $form_data['company_name'] ?: null;
+			$array['v_voice_secretaries'][0]['extension'] = $form_data['extension'] ?: null;
+			$array['v_voice_secretaries'][0]['processing_mode'] = $form_data['processing_mode'];
+			$array['v_voice_secretaries'][0]['personality_prompt'] = $form_data['system_prompt'] ?: null;
+			$array['v_voice_secretaries'][0]['greeting_message'] = $form_data['greeting_message'] ?: null;
+			$array['v_voice_secretaries'][0]['farewell_message'] = $form_data['farewell_message'] ?: null;
+			$array['v_voice_secretaries'][0]['stt_provider_uuid'] = $form_data['stt_provider_uuid'] ?: null;
+			$array['v_voice_secretaries'][0]['tts_provider_uuid'] = $form_data['tts_provider_uuid'] ?: null;
+			$array['v_voice_secretaries'][0]['llm_provider_uuid'] = $form_data['llm_provider_uuid'] ?: null;
+			$array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = $form_data['embeddings_provider_uuid'] ?: null;
+			$array['v_voice_secretaries'][0]['realtime_provider_uuid'] = $form_data['realtime_provider_uuid'] ?: null;
+			$array['v_voice_secretaries'][0]['tts_voice_id'] = $form_data['tts_voice'] ?: null;
+			$array['v_voice_secretaries'][0]['language'] = $form_data['language'];
+			$array['v_voice_secretaries'][0]['max_turns'] = $form_data['max_turns'];
+			$array['v_voice_secretaries'][0]['transfer_extension'] = $form_data['transfer_extension'];
+			$array['v_voice_secretaries'][0]['is_enabled'] = $form_data['is_active'] ? 'true' : 'false';
+			$array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $form_data['webhook_url'] ?: null;
+			
+			// Add permissions
+			$p = permissions::new();
+			$p->add('voice_secretary_add', 'temp');
+			$p->add('voice_secretary_edit', 'temp');
+			
+			// Save using FusionPBX database class
+			$database = new database;
+			$database->app_name = 'voice_secretary';
+			$database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+			$database->save($array);
+			unset($array);
+			
+			// Remove temp permissions
+			$p->delete('voice_secretary_add', 'temp');
+			$p->delete('voice_secretary_edit', 'temp');
+			
+			// Set message and redirect
+			if ($action === 'add') {
+				message::add($text['message-add'] ?? 'Secretary created successfully');
+			} else {
+				message::add($text['message-update'] ?? 'Secretary updated successfully');
+			}
+			header('Location: secretary.php');
+			exit;
 		}
 	}
 
