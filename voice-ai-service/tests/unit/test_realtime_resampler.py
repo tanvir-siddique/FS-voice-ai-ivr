@@ -135,6 +135,106 @@ class TestResampler:
         assert samples.max() <= 32767
 
 
+class TestAudioBuffer:
+    """Testes para o AudioBuffer com warmup."""
+    
+    @pytest.fixture
+    def buffer_200ms(self):
+        """Buffer com 200ms de warmup a 16kHz."""
+        from realtime.utils.resampler import AudioBuffer
+        return AudioBuffer(warmup_ms=200, sample_rate=16000)
+    
+    def test_buffer_initialization(self, buffer_200ms):
+        """Testa inicialização do buffer."""
+        assert buffer_200ms.warmup_ms == 200
+        assert buffer_200ms.sample_rate == 16000
+        # 200ms * 16 samples/ms * 2 bytes = 6400 bytes
+        assert buffer_200ms.warmup_bytes == 6400
+        assert buffer_200ms.is_warming_up is True
+    
+    def test_buffer_warmup_phase(self, buffer_200ms):
+        """Testa que buffer não libera durante warmup."""
+        # Enviar menos que 6400 bytes
+        chunk = np.random.randint(-32768, 32767, 1000, dtype=np.int16).tobytes()
+        
+        result = buffer_200ms.add(chunk)
+        
+        # Durante warmup, retorna vazio
+        assert result == b""
+        assert buffer_200ms.is_warming_up is True
+        assert buffer_200ms.buffered_bytes == len(chunk)
+    
+    def test_buffer_warmup_complete(self, buffer_200ms):
+        """Testa liberação após warmup completo."""
+        # Enviar mais que 6400 bytes (200ms de áudio)
+        chunk = np.random.randint(-32768, 32767, 4000, dtype=np.int16).tobytes()  # 8000 bytes
+        
+        result = buffer_200ms.add(chunk)
+        
+        # Deve liberar todo o buffer
+        assert len(result) == 8000
+        assert buffer_200ms.is_warming_up is False
+    
+    def test_buffer_after_warmup(self, buffer_200ms):
+        """Testa que passa direto após warmup."""
+        # Completar warmup
+        big_chunk = np.random.randint(-32768, 32767, 4000, dtype=np.int16).tobytes()
+        buffer_200ms.add(big_chunk)
+        
+        # Novo chunk deve passar direto
+        new_chunk = np.random.randint(-32768, 32767, 100, dtype=np.int16).tobytes()
+        result = buffer_200ms.add(new_chunk)
+        
+        assert result == new_chunk
+    
+    def test_buffer_flush(self, buffer_200ms):
+        """Testa flush do buffer."""
+        chunk = np.random.randint(-32768, 32767, 1000, dtype=np.int16).tobytes()
+        buffer_200ms.add(chunk)
+        
+        # Flush deve retornar tudo
+        result = buffer_200ms.flush()
+        assert len(result) == len(chunk)
+        
+        # Buffer deve estar vazio
+        assert buffer_200ms.buffered_bytes == 0
+    
+    def test_buffer_reset(self, buffer_200ms):
+        """Testa reset do buffer."""
+        chunk = np.random.randint(-32768, 32767, 4000, dtype=np.int16).tobytes()
+        buffer_200ms.add(chunk)  # Completa warmup
+        
+        buffer_200ms.reset()
+        
+        assert buffer_200ms.is_warming_up is True
+        assert buffer_200ms.buffered_bytes == 0
+    
+    def test_buffer_empty_input(self, buffer_200ms):
+        """Testa com input vazio."""
+        result = buffer_200ms.add(b"")
+        assert result == b""
+    
+    def test_buffer_multiple_small_chunks(self, buffer_200ms):
+        """Testa acumulação de múltiplos chunks pequenos."""
+        chunk_size = 640  # 20ms a 16kHz
+        
+        # Enviar 9 chunks (180ms) - ainda não completa warmup
+        for _ in range(9):
+            chunk = np.random.randint(-32768, 32767, chunk_size // 2, dtype=np.int16).tobytes()
+            result = buffer_200ms.add(chunk)
+            assert result == b""
+        
+        assert buffer_200ms.is_warming_up is True
+        
+        # 10º chunk completa warmup (200ms)
+        chunk = np.random.randint(-32768, 32767, chunk_size // 2, dtype=np.int16).tobytes()
+        result = buffer_200ms.add(chunk)
+        
+        # Deve liberar todo buffer acumulado
+        assert len(result) == chunk_size * 10
+        assert buffer_200ms.is_warming_up is False
+
+
 class TestResamplerEdgeCases:
     """Testes de casos extremos."""
     

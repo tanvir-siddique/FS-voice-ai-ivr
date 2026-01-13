@@ -208,14 +208,29 @@ class RealtimeSession:
         await self._provider.send_audio(audio_bytes)
     
     async def _handle_audio_output(self, audio_bytes: bytes) -> None:
-        """Processa áudio do provider."""
+        """
+        Processa áudio do provider.
+        
+        Inclui resampling e buffer warmup de 200ms para playback suave.
+        Baseado em: https://github.com/os11k/freeswitch-elevenlabs-bridge
+        """
         if not audio_bytes:
             return
         
-        if self._resampler and self._resampler.output_resampler.needs_resample:
+        if self._resampler:
+            # resample_output já inclui o buffer warmup
             audio_bytes = self._resampler.resample_output(audio_bytes)
         
-        if self._on_audio_output:
+        # Durante warmup, resample_output retorna b""
+        if audio_bytes and self._on_audio_output:
+            await self._on_audio_output(audio_bytes)
+    
+    async def _handle_audio_output_direct(self, audio_bytes: bytes) -> None:
+        """
+        Envia áudio diretamente sem passar pelo buffer.
+        Usado para flush do buffer restante.
+        """
+        if audio_bytes and self._on_audio_output:
             await self._on_audio_output(audio_bytes)
     
     async def interrupt(self) -> None:
@@ -244,13 +259,24 @@ class RealtimeSession:
         """Processa evento do provider."""
         self._last_activity = time.time()
         
-        if event.type == ProviderEventType.AUDIO_DELTA:
+        if event.type == ProviderEventType.RESPONSE_STARTED:
+            # Reset buffer para nova resposta (warmup 200ms)
+            if self._resampler:
+                self._resampler.reset_output_buffer()
+            logger.debug("Response started, buffer reset for warmup")
+        
+        elif event.type == ProviderEventType.AUDIO_DELTA:
             self._assistant_speaking = True
             if event.audio_bytes:
                 await self._handle_audio_output(event.audio_bytes)
         
         elif event.type == ProviderEventType.AUDIO_DONE:
             self._assistant_speaking = False
+            # Flush buffer restante ao final do áudio
+            if self._resampler:
+                remaining = self._resampler.flush_output()
+                if remaining:
+                    await self._handle_audio_output_direct(remaining)
         
         elif event.type == ProviderEventType.TRANSCRIPT_DELTA:
             if event.transcript:

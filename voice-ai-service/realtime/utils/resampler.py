@@ -63,22 +63,145 @@ class Resampler:
         return np.interp(indices, np.arange(len(samples)), samples).astype(np.int16)
 
 
+class AudioBuffer:
+    """
+    Buffer de áudio com warmup para playback suave.
+    
+    Baseado em: https://github.com/os11k/freeswitch-elevenlabs-bridge
+    
+    O warmup acumula áudio inicial antes de começar a enviar,
+    evitando cortes e garantindo playback contínuo.
+    """
+    
+    def __init__(
+        self, 
+        warmup_ms: int = 200,
+        sample_rate: int = 16000,
+        bytes_per_sample: int = 2  # PCM16
+    ):
+        """
+        Args:
+            warmup_ms: Tempo de warmup em milissegundos (default: 200ms)
+            sample_rate: Taxa de amostragem em Hz
+            bytes_per_sample: Bytes por sample (2 para PCM16)
+        """
+        self.warmup_ms = warmup_ms
+        self.sample_rate = sample_rate
+        self.bytes_per_sample = bytes_per_sample
+        
+        # Calcular tamanho do buffer de warmup
+        samples_per_ms = sample_rate / 1000
+        self.warmup_bytes = int(warmup_ms * samples_per_ms * bytes_per_sample)
+        
+        self._buffer = bytearray()
+        self._warmup_complete = False
+        self._total_buffered = 0
+        
+        logger.debug(f"AudioBuffer: warmup={warmup_ms}ms, {self.warmup_bytes} bytes")
+    
+    def add(self, audio_bytes: bytes) -> bytes:
+        """
+        Adiciona áudio ao buffer.
+        
+        Durante warmup: acumula e retorna vazio
+        Após warmup: retorna áudio imediatamente
+        
+        Returns:
+            bytes: Áudio para enviar (vazio durante warmup)
+        """
+        if not audio_bytes:
+            return b""
+        
+        self._total_buffered += len(audio_bytes)
+        
+        if not self._warmup_complete:
+            self._buffer.extend(audio_bytes)
+            
+            if len(self._buffer) >= self.warmup_bytes:
+                self._warmup_complete = True
+                result = bytes(self._buffer)
+                self._buffer.clear()
+                logger.debug(f"AudioBuffer: warmup complete, flushing {len(result)} bytes")
+                return result
+            
+            return b""  # Ainda em warmup
+        
+        # Warmup já completou, passar direto
+        return audio_bytes
+    
+    def flush(self) -> bytes:
+        """
+        Força envio de todo o buffer restante.
+        Usar ao final da sessão.
+        """
+        if self._buffer:
+            result = bytes(self._buffer)
+            self._buffer.clear()
+            return result
+        return b""
+    
+    def reset(self) -> None:
+        """Reseta o buffer para nova sessão."""
+        self._buffer.clear()
+        self._warmup_complete = False
+        self._total_buffered = 0
+    
+    @property
+    def is_warming_up(self) -> bool:
+        return not self._warmup_complete
+    
+    @property
+    def buffered_bytes(self) -> int:
+        return len(self._buffer)
+    
+    @property
+    def buffered_ms(self) -> float:
+        samples = len(self._buffer) / self.bytes_per_sample
+        return (samples / self.sample_rate) * 1000
+
+
 class ResamplerPair:
     """
     Par de resamplers para comunicação bidirecional.
     
     - Input: FreeSWITCH (16kHz) -> Provider (24kHz)
     - Output: Provider (24kHz) -> FreeSWITCH (16kHz)
+    
+    Inclui buffer de warmup no output para playback suave.
     """
     
-    def __init__(self, freeswitch_rate: int = 16000, provider_rate: int = 24000):
+    def __init__(
+        self, 
+        freeswitch_rate: int = 16000, 
+        provider_rate: int = 24000,
+        output_warmup_ms: int = 200
+    ):
         self.input_resampler = Resampler(freeswitch_rate, provider_rate)
         self.output_resampler = Resampler(provider_rate, freeswitch_rate)
+        
+        # Buffer de warmup para output (FS)
+        self.output_buffer = AudioBuffer(
+            warmup_ms=output_warmup_ms,
+            sample_rate=freeswitch_rate
+        )
     
     def resample_input(self, audio_bytes: bytes) -> bytes:
         """FS -> Provider"""
         return self.input_resampler.process(audio_bytes)
     
     def resample_output(self, audio_bytes: bytes) -> bytes:
-        """Provider -> FS"""
-        return self.output_resampler.process(audio_bytes)
+        """Provider -> FS (com warmup buffer)"""
+        resampled = self.output_resampler.process(audio_bytes)
+        return self.output_buffer.add(resampled)
+    
+    def flush_output(self) -> bytes:
+        """Força envio do buffer restante."""
+        return self.output_buffer.flush()
+    
+    def reset_output_buffer(self) -> None:
+        """Reseta buffer para nova resposta."""
+        self.output_buffer.reset()
+    
+    @property
+    def is_output_warming_up(self) -> bool:
+        return self.output_buffer.is_warming_up
