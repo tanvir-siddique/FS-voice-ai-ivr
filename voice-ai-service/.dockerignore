@@ -68,12 +68,13 @@ temp/
 *.key
 credentials/
 
-# Large files
+# Large files (ML model weights)
 *.onnx
 *.bin
 *.pt
 *.pth
-models/
+# Note: Do NOT exclude models/ - it contains our Pydantic request/response models
+# ML models are stored in data/whisper/, data/piper/, etc.
 
 # OS
 .DS_Store
