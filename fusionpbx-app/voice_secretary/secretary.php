@@ -35,6 +35,24 @@
 		exit;
 	}
 
+//process delete action
+	if ($_POST['action'] == 'delete' && permission_exists('voice_secretary_delete')) {
+		$array = $_POST['secretaries'] ?? [];
+		if (is_array($array) && count($array) > 0) {
+			$secretary = new voice_secretary;
+			$deleted = 0;
+			foreach ($array as $uuid) {
+				if (is_uuid($uuid)) {
+					$result = $secretary->delete($uuid, $domain_uuid);
+					if ($result) $deleted++;
+				}
+			}
+			$_SESSION['message'] = "Deleted $deleted secretary(ies).";
+			header('Location: secretary.php');
+			exit;
+		}
+	}
+
 //get data
 	$secretary = new voice_secretary;
 	$secretaries = $secretary->get_list($domain_uuid);
@@ -61,6 +79,9 @@
 	</div>
 	<div style="clear: both;"></div>
 </div>
+
+<form id="form_list" method="post">
+<input type="hidden" id="action" name="action" value="">
 
 <table class="list">
 	<tr class="list-header">
@@ -146,6 +167,8 @@ echo modal::create([
 ]);
 ?>
 <?php } ?>
+
+</form>
 
 <?php
 
