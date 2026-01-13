@@ -49,6 +49,8 @@ def get_available_providers() -> list:
 # Auto-register providers when imported
 def _register_all():
     """Register all available Embeddings providers."""
+    import importlib
+    
     provider_classes = [
         ("openai_embeddings", "openai", "OpenAIEmbeddings"),
         ("openai", "openai", "OpenAIEmbeddings"),  # Alias
@@ -59,8 +61,6 @@ def _register_all():
         ("local_embeddings", "local", "LocalEmbeddings"),
         ("local", "local", "LocalEmbeddings"),  # Alias
     ]
-    
-    import importlib
     
     for name, module_name, class_name in provider_classes:
         try:

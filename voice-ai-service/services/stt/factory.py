@@ -49,7 +49,8 @@ def get_available_providers() -> list:
 # Auto-register providers when imported
 def _register_all():
     """Register all available STT providers."""
-    # Import all providers - they will be registered if their dependencies are available
+    import importlib
+    
     provider_classes = [
         ("whisper_local", "whisper_local", "WhisperLocalSTT"),
         ("whisper_api", "whisper_api", "OpenAIWhisperSTT"),
@@ -58,8 +59,6 @@ def _register_all():
         ("aws_transcribe", "aws_transcribe", "AWSTranscribeSTT"),
         ("deepgram", "deepgram", "DeepgramSTT"),
     ]
-    
-    import importlib
     
     for name, module_name, class_name in provider_classes:
         try:

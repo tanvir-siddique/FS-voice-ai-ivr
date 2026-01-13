@@ -49,6 +49,8 @@ def get_available_providers() -> list:
 # Auto-register providers when imported
 def _register_all():
     """Register all available LLM providers."""
+    import importlib
+    
     provider_classes = [
         ("openai", "openai", "OpenAILLM"),
         ("azure_openai", "azure_openai", "AzureOpenAILLM"),
@@ -59,8 +61,6 @@ def _register_all():
         ("ollama_local", "ollama_local", "OllamaLLM"),
         ("lmstudio_local", "lmstudio_local", "LMStudioLLM"),
     ]
-    
-    import importlib
     
     for name, module_name, class_name in provider_classes:
         try:
