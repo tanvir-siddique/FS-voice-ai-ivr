@@ -120,18 +120,77 @@ class voice_secretary {
     }
     
     /**
-     * Delete secretary
+     * Delete secretary(ies)
+     * @param mixed $uuids Single UUID string or array of UUIDs
+     * @param string $domain_uuid Domain UUID for security
      */
-    public function delete($secretary_uuid, $domain_uuid) {
-        $sql = "DELETE FROM v_voice_secretaries 
-                WHERE voice_secretary_uuid = :secretary_uuid 
-                AND domain_uuid = :domain_uuid";
-        
-        $parameters['secretary_uuid'] = $secretary_uuid;
-        $parameters['domain_uuid'] = $domain_uuid;
+    public function delete($uuids, $domain_uuid) {
+        if (!is_array($uuids)) {
+            $uuids = [$uuids];
+        }
         
         $database = new database;
-        $database->execute($sql, $parameters);
+        
+        foreach ($uuids as $secretary_uuid) {
+            if (is_uuid($secretary_uuid)) {
+                $sql = "DELETE FROM v_voice_secretaries 
+                        WHERE voice_secretary_uuid = :secretary_uuid 
+                        AND domain_uuid = :domain_uuid";
+                
+                $parameters = [];
+                $parameters['secretary_uuid'] = $secretary_uuid;
+                $parameters['domain_uuid'] = $domain_uuid;
+                
+                $database->execute($sql, $parameters);
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Toggle enabled status for secretary(ies)
+     * @param mixed $uuids Single UUID string or array of UUIDs
+     * @param string $domain_uuid Domain UUID for security
+     */
+    public function toggle($uuids, $domain_uuid) {
+        if (!is_array($uuids)) {
+            $uuids = [$uuids];
+        }
+        
+        $database = new database;
+        
+        foreach ($uuids as $secretary_uuid) {
+            if (is_uuid($secretary_uuid)) {
+                //get current status
+                $sql = "SELECT enabled FROM v_voice_secretaries 
+                        WHERE voice_secretary_uuid = :secretary_uuid 
+                        AND domain_uuid = :domain_uuid";
+                
+                $parameters = [];
+                $parameters['secretary_uuid'] = $secretary_uuid;
+                $parameters['domain_uuid'] = $domain_uuid;
+                
+                $row = $database->select($sql, $parameters, 'row');
+                
+                if ($row) {
+                    //toggle status
+                    $new_status = ($row['enabled'] == 'true' || $row['enabled'] === true) ? 'false' : 'true';
+                    
+                    $sql_update = "UPDATE v_voice_secretaries 
+                                   SET enabled = :enabled 
+                                   WHERE voice_secretary_uuid = :secretary_uuid 
+                                   AND domain_uuid = :domain_uuid";
+                    
+                    $parameters_update = [];
+                    $parameters_update['enabled'] = $new_status;
+                    $parameters_update['secretary_uuid'] = $secretary_uuid;
+                    $parameters_update['domain_uuid'] = $domain_uuid;
+                    
+                    $database->execute($sql_update, $parameters_update);
+                }
+            }
+        }
         
         return true;
     }
