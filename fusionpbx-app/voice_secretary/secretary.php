@@ -105,7 +105,7 @@
 					?>
 				</td>
 				<td class="center">
-					<?php if ($row['is_enabled'] ?? true) { ?>
+					<?php if (($row['enabled'] ?? ($row['is_enabled'] ?? true)) == true) { ?>
 						<span class="badge badge-success"><?php echo $text['label-enabled'] ?? 'Enabled'; ?></span>
 					<?php } else { ?>
 						<span class="badge badge-secondary"><?php echo $text['label-disabled'] ?? 'Disabled'; ?></span>

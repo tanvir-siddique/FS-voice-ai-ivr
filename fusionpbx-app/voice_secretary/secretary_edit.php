@@ -105,7 +105,7 @@
 			$array['v_voice_secretaries'][0]['language'] = $form_data['language'];
 			$array['v_voice_secretaries'][0]['max_turns'] = $form_data['max_turns'];
 			$array['v_voice_secretaries'][0]['transfer_extension'] = $form_data['transfer_extension'];
-			$array['v_voice_secretaries'][0]['is_enabled'] = $form_data['is_active'] ? 'true' : 'false';
+			$array['v_voice_secretaries'][0]['enabled'] = $form_data['is_active'] ? 'true' : 'false';
 			$array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $form_data['webhook_url'] ?: null;
 			
 			// Add permissions
@@ -224,8 +224,9 @@
 		</td>
 		<td class="vtable" align="left">
 			<select class="formfld" name="is_active">
-				<option value="1" <?php echo (($data['is_enabled'] ?? true) == true) ? 'selected' : ''; ?>><?php echo $text['label-true'] ?? 'True'; ?></option>
-				<option value="0" <?php echo (($data['is_enabled'] ?? true) == false) ? 'selected' : ''; ?>><?php echo $text['label-false'] ?? 'False'; ?></option>
+				<?php $enabled_value = ($data['enabled'] ?? ($data['is_enabled'] ?? true)); ?>
+				<option value="1" <?php echo ($enabled_value == true) ? 'selected' : ''; ?>><?php echo $text['label-true'] ?? 'True'; ?></option>
+				<option value="0" <?php echo ($enabled_value == false) ? 'selected' : ''; ?>><?php echo $text['label-false'] ?? 'False'; ?></option>
 			</select>
 		</td>
 	</tr>

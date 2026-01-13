@@ -74,8 +74,8 @@ class voice_secretary {
         $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
         $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
         $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $array['v_voice_secretaries'][0]['is_enabled'] = $data['is_active'] ?? true;
         $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
+        $array['v_voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
         
         $database = new database;
         $database->app_name = 'voice_secretary';
@@ -107,8 +107,8 @@ class voice_secretary {
         $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
         $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
         $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $array['v_voice_secretaries'][0]['is_enabled'] = $data['is_active'] ?? true;
         $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
+        $array['v_voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
         
         $database = new database;
         $database->app_name = 'voice_secretary';
