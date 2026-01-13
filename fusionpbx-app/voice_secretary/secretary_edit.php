@@ -134,6 +134,13 @@
 			$database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 			$database->save($array);
 			$db_message = $database->message ?? null;
+			$db_message_str = null;
+			if (is_array($db_message)) {
+				$db_message_str = print_r($db_message, true);
+			}
+			else if ($db_message !== null) {
+				$db_message_str = (string)$db_message;
+			}
 			unset($array);
 			
 			// Remove temp permissions
@@ -160,8 +167,8 @@
 
 			if (!$persisted_ok) {
 				// Log no error_log do PHP para facilitar debug no servidor
-				if (!empty($db_message)) {
-					error_log("[voice_secretary] database->message: ".$db_message);
+				if (!empty($db_message_str)) {
+					error_log("[voice_secretary] database->message: ".$db_message_str);
 				}
 				error_log("[voice_secretary] save_failed_or_not_persisted. expected_mode=".$expected_mode.
 					" expected_rt=".($expected_rt ?: 'null').
@@ -172,7 +179,7 @@
 				);
 
 				message::add("Falha ao persistir no banco. Verifique logs do PHP-FPM/Nginx. ".
-					(!empty($db_message) ? "Mensagem do banco: ".$db_message : ""), "negative");
+					(!empty($db_message_str) ? "Mensagem do banco: ".substr($db_message_str, 0, 300) : ""), "negative");
 				// Não redirecionar: manter na página para ver o erro
 			}
 			else {
