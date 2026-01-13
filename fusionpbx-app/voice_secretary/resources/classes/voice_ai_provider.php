@@ -10,8 +10,6 @@
 
 class voice_ai_provider {
     
-    private $database;
-    
     /**
      * Available provider types
      */
@@ -65,19 +63,13 @@ class voice_ai_provider {
     ];
     
     /**
-     * Constructor
-     */
-    public function __construct() {
-        $this->database = new database;
-    }
-    
-    /**
      * List all providers for a domain
      */
     public function get_list($domain_uuid, $type = null) {
         $sql = "SELECT * FROM v_voice_ai_providers 
                 WHERE domain_uuid = :domain_uuid";
         
+        $parameters = [];
         $parameters['domain_uuid'] = $domain_uuid;
         
         if ($type) {
@@ -87,27 +79,27 @@ class voice_ai_provider {
         
         $sql .= " ORDER BY provider_type ASC, priority ASC, provider_name ASC";
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        return $this->database->execute('all', PDO::FETCH_ASSOC);
+        $database = new database;
+        return $database->select($sql, $parameters, 'all');
     }
     
     /**
      * Get single provider by UUID
      */
-    public function get($provider_uuid, $domain_uuid) {
+    public function get($provider_uuid, $domain_uuid = null) {
         $sql = "SELECT * FROM v_voice_ai_providers 
-                WHERE voice_ai_provider_uuid = :provider_uuid 
-                AND domain_uuid = :domain_uuid";
+                WHERE voice_ai_provider_uuid = :provider_uuid";
         
+        $parameters = [];
         $parameters['provider_uuid'] = $provider_uuid;
-        $parameters['domain_uuid'] = $domain_uuid;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $result = $this->database->execute('all', PDO::FETCH_ASSOC);
+        if ($domain_uuid) {
+            $sql .= " AND domain_uuid = :domain_uuid";
+            $parameters['domain_uuid'] = $domain_uuid;
+        }
         
-        return isset($result[0]) ? $result[0] : null;
+        $database = new database;
+        return $database->select($sql, $parameters, 'row');
     }
     
     /**
@@ -119,6 +111,11 @@ class voice_ai_provider {
         // Validate type
         if (!in_array($data['provider_type'], self::TYPES)) {
             throw new Exception("Invalid provider type: " . $data['provider_type']);
+        }
+        
+        // If setting as default, unset other defaults of same type
+        if (!empty($data['is_default'])) {
+            $this->unset_defaults($data['provider_type'], $domain_uuid);
         }
         
         $sql = "INSERT INTO v_voice_ai_providers (
@@ -143,23 +140,18 @@ class voice_ai_provider {
             NOW()
         )";
         
+        $parameters = [];
         $parameters['provider_uuid'] = $provider_uuid;
         $parameters['domain_uuid'] = $domain_uuid;
         $parameters['provider_type'] = $data['provider_type'];
         $parameters['provider_name'] = $data['provider_name'];
-        $parameters['config'] = json_encode($data['config'] ?? []);
-        $parameters['is_enabled'] = $data['is_enabled'] ?? true;
-        $parameters['is_default'] = $data['is_default'] ?? false;
-        $parameters['priority'] = $data['priority'] ?? 10;
+        $parameters['config'] = is_array($data['config'] ?? null) ? json_encode($data['config']) : ($data['config'] ?? '{}');
+        $parameters['is_enabled'] = !empty($data['is_enabled']) ? 'true' : 'false';
+        $parameters['is_default'] = !empty($data['is_default']) ? 'true' : 'false';
+        $parameters['priority'] = intval($data['priority'] ?? 10);
         
-        // If setting as default, unset other defaults of same type
-        if (!empty($data['is_default'])) {
-            $this->unset_defaults($data['provider_type'], $domain_uuid);
-        }
-        
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->execute($sql, $parameters);
         
         return $provider_uuid;
     }
@@ -185,34 +177,45 @@ class voice_ai_provider {
             WHERE voice_ai_provider_uuid = :provider_uuid 
             AND domain_uuid = :domain_uuid";
         
+        $parameters = [];
         $parameters['provider_uuid'] = $provider_uuid;
         $parameters['domain_uuid'] = $domain_uuid;
-        $parameters['config'] = json_encode($data['config'] ?? []);
-        $parameters['is_enabled'] = $data['is_enabled'] ?? true;
-        $parameters['is_default'] = $data['is_default'] ?? false;
-        $parameters['priority'] = $data['priority'] ?? 10;
+        $parameters['config'] = is_array($data['config'] ?? null) ? json_encode($data['config']) : ($data['config'] ?? '{}');
+        $parameters['is_enabled'] = !empty($data['is_enabled']) ? 'true' : 'false';
+        $parameters['is_default'] = !empty($data['is_default']) ? 'true' : 'false';
+        $parameters['priority'] = intval($data['priority'] ?? 10);
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->execute($sql, $parameters);
         
         return true;
     }
     
     /**
-     * Delete provider
+     * Delete provider(s)
+     * @param mixed $uuids Single UUID string or array of UUIDs
+     * @param string $domain_uuid Domain UUID for security
      */
-    public function delete($provider_uuid, $domain_uuid) {
-        $sql = "DELETE FROM v_voice_ai_providers 
-                WHERE voice_ai_provider_uuid = :provider_uuid 
-                AND domain_uuid = :domain_uuid";
+    public function delete($uuids, $domain_uuid) {
+        if (!is_array($uuids)) {
+            $uuids = [$uuids];
+        }
         
-        $parameters['provider_uuid'] = $provider_uuid;
-        $parameters['domain_uuid'] = $domain_uuid;
+        $database = new database;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        foreach ($uuids as $provider_uuid) {
+            if (is_uuid($provider_uuid)) {
+                $sql = "DELETE FROM v_voice_ai_providers 
+                        WHERE voice_ai_provider_uuid = :provider_uuid 
+                        AND domain_uuid = :domain_uuid";
+                
+                $parameters = [];
+                $parameters['provider_uuid'] = $provider_uuid;
+                $parameters['domain_uuid'] = $domain_uuid;
+                
+                $database->execute($sql, $parameters);
+            }
+        }
         
         return true;
     }
@@ -222,16 +225,16 @@ class voice_ai_provider {
      */
     private function unset_defaults($type, $domain_uuid) {
         $sql = "UPDATE v_voice_ai_providers 
-                SET is_default = false 
+                SET is_default = 'false' 
                 WHERE domain_uuid = :domain_uuid 
                 AND provider_type = :type";
         
+        $parameters = [];
         $parameters['domain_uuid'] = $domain_uuid;
         $parameters['type'] = $type;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->execute($sql, $parameters);
     }
     
     /**
@@ -254,45 +257,127 @@ class voice_ai_provider {
             'google_speech' => [
                 ['name' => 'credentials_path', 'label' => 'Credentials JSON Path', 'type' => 'text', 'required' => true],
             ],
+            'aws_transcribe' => [
+                ['name' => 'aws_access_key_id', 'label' => 'AWS Access Key ID', 'type' => 'password', 'required' => true],
+                ['name' => 'aws_secret_access_key', 'label' => 'AWS Secret Access Key', 'type' => 'password', 'required' => true],
+                ['name' => 'region_name', 'label' => 'Region', 'type' => 'text', 'default' => 'us-east-1'],
+            ],
             'deepgram' => [
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['nova-2', 'nova', 'enhanced', 'base']],
             ],
             // TTS providers
+            'piper_local' => [
+                ['name' => 'model_path', 'label' => 'Model Path', 'type' => 'text'],
+                ['name' => 'voice', 'label' => 'Voice', 'type' => 'text', 'default' => 'pt_BR-faber-medium'],
+            ],
+            'coqui_local' => [
+                ['name' => 'model_name', 'label' => 'Model Name', 'type' => 'text', 'default' => 'tts_models/multilingual/multi-dataset/xtts_v2'],
+            ],
             'openai_tts' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['tts-1', 'tts-1-hd']],
                 ['name' => 'voice', 'label' => 'Voice', 'type' => 'select', 'options' => ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']],
             ],
             'elevenlabs' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'voice_id', 'label' => 'Voice ID', 'type' => 'text'],
+                ['name' => 'model_id', 'label' => 'Model', 'type' => 'select', 'options' => ['eleven_multilingual_v2', 'eleven_turbo_v2_5', 'eleven_turbo_v2']],
+            ],
+            'azure_neural' => [
+                ['name' => 'subscription_key', 'label' => 'Subscription Key', 'type' => 'password', 'required' => true],
+                ['name' => 'region', 'label' => 'Region', 'type' => 'text', 'default' => 'brazilsouth'],
+                ['name' => 'voice_name', 'label' => 'Voice Name', 'type' => 'text', 'default' => 'pt-BR-FranciscaNeural'],
+            ],
+            'google_tts' => [
+                ['name' => 'credentials_path', 'label' => 'Credentials JSON Path', 'type' => 'text', 'required' => true],
+                ['name' => 'voice_name', 'label' => 'Voice Name', 'type' => 'text', 'default' => 'pt-BR-Standard-A'],
+            ],
+            'aws_polly' => [
+                ['name' => 'aws_access_key_id', 'label' => 'AWS Access Key ID', 'type' => 'password', 'required' => true],
+                ['name' => 'aws_secret_access_key', 'label' => 'AWS Secret Access Key', 'type' => 'password', 'required' => true],
+                ['name' => 'region_name', 'label' => 'Region', 'type' => 'text', 'default' => 'us-east-1'],
+                ['name' => 'voice_id', 'label' => 'Voice ID', 'type' => 'text', 'default' => 'Camila'],
+            ],
+            'playht' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'user_id', 'label' => 'User ID', 'type' => 'text', 'required' => true],
+                ['name' => 'voice', 'label' => 'Voice', 'type' => 'text'],
             ],
             // LLM providers
             'openai' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']],
             ],
-            'anthropic' => [
+            'azure_openai' => [
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
-                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307']],
+                ['name' => 'endpoint', 'label' => 'Endpoint URL', 'type' => 'text', 'required' => true],
+                ['name' => 'deployment_name', 'label' => 'Deployment Name', 'type' => 'text', 'required' => true],
+                ['name' => 'api_version', 'label' => 'API Version', 'type' => 'text', 'default' => '2024-02-15-preview'],
+            ],
+            'anthropic' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307']],
+            ],
+            'google_gemini' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash']],
+            ],
+            'groq' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768']],
             ],
             'ollama_local' => [
                 ['name' => 'base_url', 'label' => 'Ollama URL', 'type' => 'text', 'default' => 'http://localhost:11434'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'llama3'],
             ],
+            'lmstudio_local' => [
+                ['name' => 'base_url', 'label' => 'LM Studio URL', 'type' => 'text', 'default' => 'http://localhost:1234/v1'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'text'],
+            ],
+            // Embeddings providers
+            'openai_embeddings' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['text-embedding-3-small', 'text-embedding-3-large', 'text-embedding-ada-002']],
+            ],
+            'azure_embeddings' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'endpoint', 'label' => 'Endpoint URL', 'type' => 'text', 'required' => true],
+                ['name' => 'deployment_name', 'label' => 'Deployment Name', 'type' => 'text', 'required' => true],
+            ],
+            'cohere' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['embed-multilingual-v3.0', 'embed-english-v3.0']],
+            ],
+            'voyage' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'select', 'options' => ['voyage-3', 'voyage-3-lite', 'voyage-multilingual-2']],
+            ],
+            'local_embeddings' => [
+                ['name' => 'model_name', 'label' => 'Model Name', 'type' => 'text', 'default' => 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'],
+            ],
             // Realtime providers
             'openai_realtime' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gpt-4o-realtime-preview'],
+                ['name' => 'voice', 'label' => 'Voice', 'type' => 'select', 'options' => ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']],
             ],
             'elevenlabs_conv' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
-                ['name' => 'agent_id', 'label' => 'Agent ID', 'type' => 'text'],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
+                ['name' => 'agent_id', 'label' => 'Agent ID', 'type' => 'text', 'required' => true],
+                ['name' => 'voice_id', 'label' => 'Voice ID', 'type' => 'text'],
             ],
             'gemini_live' => [
-                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gemini-2.0-flash-exp'],
+                ['name' => 'voice', 'label' => 'Voice', 'type' => 'select', 'options' => ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck']],
+            ],
+            'custom_pipeline' => [
+                ['name' => 'stt_provider', 'label' => 'STT Provider', 'type' => 'select', 'options' => ['deepgram', 'whisper_local']],
+                ['name' => 'llm_provider', 'label' => 'LLM Provider', 'type' => 'select', 'options' => ['groq', 'ollama']],
+                ['name' => 'tts_provider', 'label' => 'TTS Provider', 'type' => 'select', 'options' => ['piper', 'coqui']],
+                ['name' => 'deepgram_key', 'label' => 'Deepgram API Key', 'type' => 'password'],
+                ['name' => 'groq_key', 'label' => 'Groq API Key', 'type' => 'password'],
             ],
         ];
         
