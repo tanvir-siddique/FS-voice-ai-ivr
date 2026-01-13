@@ -91,6 +91,12 @@ class RealtimeServer:
         """
         path = websocket.request.path if hasattr(websocket, 'request') else ""
         
+        # Health Check Endpoint
+        if path == "/health":
+            # Aceita handshake e fecha imediatamente com código normal (1000)
+            await websocket.close(1000, "OK")
+            return
+        
         # Parsear path: /stream/{domain_uuid}/{call_uuid}
         parts = path.strip("/").split("/")
         if len(parts) < 3 or parts[0] != "stream":
