@@ -4,6 +4,7 @@ Google Gemini LLM Provider.
 Uses Google's Gemini models for chat completions.
 """
 
+import os
 from typing import List, Optional
 
 from .base import BaseLLM, Message, ChatResult
@@ -22,7 +23,6 @@ class GoogleGeminiLLM(BaseLLM):
     
     def __init__(self, config: dict):
         super().__init__(config)
-        import os
         # Fallback para env var GOOGLE_API_KEY
         self.api_key = config.get("api_key") or os.environ.get("GOOGLE_API_KEY", "")
         self.model = config.get("model", "gemini-1.5-flash")

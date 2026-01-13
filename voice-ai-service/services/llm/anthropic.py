@@ -109,12 +109,9 @@ class AnthropicLLM(BaseLLM):
     
     async def is_available(self) -> bool:
         """Check if Anthropic is available."""
-        if not self.config.get("api_key"):
-            return False
-        
         try:
-            # We can't easily test without making a request
-            # Just verify we can create a client
+            # Tenta criar o client (usa env var ANTHROPIC_API_KEY se config vazio)
+            # Anthropic não tem endpoint de list models, apenas verificamos se o client cria
             self._get_client()
             return True
         except Exception:

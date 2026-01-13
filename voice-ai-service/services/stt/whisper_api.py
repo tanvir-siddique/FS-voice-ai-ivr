@@ -93,13 +93,9 @@ class OpenAIWhisperSTT(BaseSTT):
     
     async def is_available(self) -> bool:
         """Check if OpenAI Whisper API is available."""
-        if not self.config.get("api_key"):
-            return False
-        
         try:
+            # Tenta criar o client (usa env var OPENAI_API_KEY se config vazio)
             client = self._get_client()
-            # Can't easily test Whisper without an audio file
-            # Just verify we can create a client
             await client.models.list()
             return True
         except Exception:
