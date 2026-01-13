@@ -33,7 +33,7 @@ BEGIN
     ) THEN
         ALTER TABLE v_voice_secretaries 
         ADD COLUMN realtime_provider_uuid UUID 
-        REFERENCES v_voice_ai_providers(provider_uuid);
+        REFERENCES v_voice_ai_providers(voice_ai_provider_uuid);
         
         COMMENT ON COLUMN v_voice_secretaries.realtime_provider_uuid IS 
             'Provider para modo realtime (OpenAI Realtime, ElevenLabs, etc)';
@@ -43,20 +43,54 @@ END $$;
 -- Add 'realtime' as valid provider_type
 DO $$
 BEGIN
-    -- Check current constraint
+    -- Drop old constraint (pode ter nomes diferentes)
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'chk_provider_type'
+    ) THEN
+        ALTER TABLE v_voice_ai_providers DROP CONSTRAINT chk_provider_type;
+    END IF;
+    
     IF EXISTS (
         SELECT 1 FROM pg_constraint 
         WHERE conname = 'v_voice_ai_providers_provider_type_check'
     ) THEN
-        -- Drop old constraint
         ALTER TABLE v_voice_ai_providers 
         DROP CONSTRAINT v_voice_ai_providers_provider_type_check;
     END IF;
     
     -- Add new constraint with 'realtime' type
     ALTER TABLE v_voice_ai_providers 
-    ADD CONSTRAINT v_voice_ai_providers_provider_type_check 
+    ADD CONSTRAINT chk_provider_type 
     CHECK (provider_type IN ('stt', 'tts', 'llm', 'embeddings', 'realtime'));
+END $$;
+
+-- Add 'realtime' providers to chk_provider_name
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_provider_name'
+    ) THEN
+        ALTER TABLE v_voice_ai_providers DROP CONSTRAINT chk_provider_name;
+    END IF;
+    
+    ALTER TABLE v_voice_ai_providers ADD CONSTRAINT chk_provider_name
+        CHECK (provider_name IN (
+            -- STT Providers
+            'whisper_local', 'whisper_api', 'azure_speech', 'google_speech', 
+            'aws_transcribe', 'deepgram',
+            -- TTS Providers
+            'piper_local', 'coqui_local', 'openai_tts', 'elevenlabs', 
+            'azure_neural', 'google_tts', 'aws_polly', 'playht',
+            -- LLM Providers
+            'openai', 'azure_openai', 'anthropic', 'google_gemini', 
+            'aws_bedrock', 'groq', 'ollama_local', 'lmstudio_local',
+            -- Embeddings Providers
+            'openai_embeddings', 'azure_embeddings', 'cohere', 'voyage', 
+            'local_embeddings',
+            -- Realtime Providers (NEW)
+            'openai_realtime', 'elevenlabs_conversational', 'gemini_live', 'custom_pipeline'
+        ));
 END $$;
 
 -- Add is_enabled field if not exists
