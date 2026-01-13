@@ -56,26 +56,27 @@ class voice_secretary {
     public function create($data, $domain_uuid) {
         $secretary_uuid = uuid();
         
-        $array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
-        $array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
-        $array['v_voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
-        $array['v_voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
-        $array['v_voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
-        $array['v_voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
-        $array['v_voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
-        $array['v_voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? 'Olá! Como posso ajudar?';
-        $array['v_voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? 'Foi um prazer ajudar! Até logo!';
-        $array['v_voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
-        $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
-        $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
-        $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
-        $array['v_voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
+        // FusionPBX padrão: use o nome lógico do array (voice_secretaries) para salvar em v_voice_secretaries
+        $array['voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+        $array['voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+        $array['voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
+        $array['voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
+        $array['voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
+        $array['voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
+        $array['voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
+        $array['voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? 'Olá! Como posso ajudar?';
+        $array['voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? 'Foi um prazer ajudar! Até logo!';
+        $array['voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
+        $array['voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
+        $array['voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
+        $array['voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
+        $array['voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
+        $array['voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
         
         $database = new database;
         $database->app_name = 'voice_secretary';
@@ -89,26 +90,26 @@ class voice_secretary {
      * Update existing secretary
      */
     public function update($secretary_uuid, $data, $domain_uuid) {
-        $array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
-        $array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
-        $array['v_voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
-        $array['v_voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
-        $array['v_voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
-        $array['v_voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
-        $array['v_voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
-        $array['v_voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? null;
-        $array['v_voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? null;
-        $array['v_voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
-        $array['v_voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
-        $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
-        $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
-        $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
-        $array['v_voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
+        $array['voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+        $array['voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+        $array['voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
+        $array['voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
+        $array['voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
+        $array['voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
+        $array['voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
+        $array['voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? null;
+        $array['voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? null;
+        $array['voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
+        $array['voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
+        $array['voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
+        $array['voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
+        $array['voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
+        $array['voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
+        $array['voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
         
         $database = new database;
         $database->app_name = 'voice_secretary';

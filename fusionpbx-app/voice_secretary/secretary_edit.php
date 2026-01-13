@@ -40,6 +40,10 @@
 	$action = 'add';
 	$data = [];
 
+//create token (FusionPBX padrão)
+	$object = new token;
+	$token = $object->create($_SERVER['PHP_SELF']);
+
 //check if editing existing
 	if (isset($_GET['id']) && is_uuid($_GET['id'])) {
 		$action = 'edit';
@@ -55,6 +59,14 @@
 
 //process form submission
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && count($_POST) > 0) {
+		//validate token (FusionPBX padrão)
+		$token_obj = new token;
+		if (!$token_obj->validate($_SERVER['PHP_SELF'])) {
+			message::add($text['message-invalid_token'] ?? 'Invalid token', 'negative');
+			header('Location: secretary.php');
+			exit;
+		}
+
 		//collect form data
 		$form_data = [
 			'secretary_name' => $_POST['secretary_name'] ?? '',
@@ -87,26 +99,29 @@
 				$secretary_uuid = uuid();
 			}
 			
-			$array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
-			$array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
-			$array['v_voice_secretaries'][0]['secretary_name'] = $form_data['secretary_name'];
-			$array['v_voice_secretaries'][0]['company_name'] = $form_data['company_name'] ?: null;
-			$array['v_voice_secretaries'][0]['extension'] = $form_data['extension'] ?: null;
-			$array['v_voice_secretaries'][0]['processing_mode'] = $form_data['processing_mode'];
-			$array['v_voice_secretaries'][0]['personality_prompt'] = $form_data['system_prompt'] ?: null;
-			$array['v_voice_secretaries'][0]['greeting_message'] = $form_data['greeting_message'] ?: null;
-			$array['v_voice_secretaries'][0]['farewell_message'] = $form_data['farewell_message'] ?: null;
-			$array['v_voice_secretaries'][0]['stt_provider_uuid'] = $form_data['stt_provider_uuid'] ?: null;
-			$array['v_voice_secretaries'][0]['tts_provider_uuid'] = $form_data['tts_provider_uuid'] ?: null;
-			$array['v_voice_secretaries'][0]['llm_provider_uuid'] = $form_data['llm_provider_uuid'] ?: null;
-			$array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = $form_data['embeddings_provider_uuid'] ?: null;
-			$array['v_voice_secretaries'][0]['realtime_provider_uuid'] = $form_data['realtime_provider_uuid'] ?: null;
-			$array['v_voice_secretaries'][0]['tts_voice_id'] = $form_data['tts_voice'] ?: null;
-			$array['v_voice_secretaries'][0]['language'] = $form_data['language'];
-			$array['v_voice_secretaries'][0]['max_turns'] = $form_data['max_turns'];
-			$array['v_voice_secretaries'][0]['transfer_extension'] = $form_data['transfer_extension'];
-			$array['v_voice_secretaries'][0]['enabled'] = $form_data['is_active'] ? 'true' : 'false';
-			$array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $form_data['webhook_url'] ?: null;
+			// IMPORTANT: FusionPBX database->save() usa o nome lógico do array (ex.: ring_groups),
+			// não o nome físico da tabela (v_ring_groups). Então aqui usamos 'voice_secretaries'
+			// para salvar em 'v_voice_secretaries'.
+			$array['voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+			$array['voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+			$array['voice_secretaries'][0]['secretary_name'] = $form_data['secretary_name'];
+			$array['voice_secretaries'][0]['company_name'] = $form_data['company_name'] ?: null;
+			$array['voice_secretaries'][0]['extension'] = $form_data['extension'] ?: null;
+			$array['voice_secretaries'][0]['processing_mode'] = $form_data['processing_mode'];
+			$array['voice_secretaries'][0]['personality_prompt'] = $form_data['system_prompt'] ?: null;
+			$array['voice_secretaries'][0]['greeting_message'] = $form_data['greeting_message'] ?: null;
+			$array['voice_secretaries'][0]['farewell_message'] = $form_data['farewell_message'] ?: null;
+			$array['voice_secretaries'][0]['stt_provider_uuid'] = $form_data['stt_provider_uuid'] ?: null;
+			$array['voice_secretaries'][0]['tts_provider_uuid'] = $form_data['tts_provider_uuid'] ?: null;
+			$array['voice_secretaries'][0]['llm_provider_uuid'] = $form_data['llm_provider_uuid'] ?: null;
+			$array['voice_secretaries'][0]['embeddings_provider_uuid'] = $form_data['embeddings_provider_uuid'] ?: null;
+			$array['voice_secretaries'][0]['realtime_provider_uuid'] = $form_data['realtime_provider_uuid'] ?: null;
+			$array['voice_secretaries'][0]['tts_voice_id'] = $form_data['tts_voice'] ?: null;
+			$array['voice_secretaries'][0]['language'] = $form_data['language'];
+			$array['voice_secretaries'][0]['max_turns'] = $form_data['max_turns'];
+			$array['voice_secretaries'][0]['transfer_extension'] = $form_data['transfer_extension'];
+			$array['voice_secretaries'][0]['enabled'] = $form_data['is_active'] ? 'true' : 'false';
+			$array['voice_secretaries'][0]['omniplay_webhook_url'] = $form_data['webhook_url'] ?: null;
 			
 			// Add permissions
 			$p = permissions::new();
@@ -153,6 +168,7 @@
 ?>
 
 <form method="post" name="frm" id="frm">
+<input type="hidden" name="<?php echo $token['name']; ?>" value="<?php echo $token['hash']; ?>">
 
 <div class="action_bar" id="action_bar">
 	<div class="heading">

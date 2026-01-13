@@ -20,14 +20,15 @@ $result = $database->select($sql, $parameters, 'row');
 if ($result['count'] == 0) {
     // Insert default Whisper Local provider
     $provider_uuid = uuid();
-    $array['v_voice_ai_providers'][0]['voice_ai_provider_uuid'] = $provider_uuid;
-    $array['v_voice_ai_providers'][0]['domain_uuid'] = $domain_uuid;
-    $array['v_voice_ai_providers'][0]['provider_type'] = 'stt';
-    $array['v_voice_ai_providers'][0]['provider_name'] = 'whisper_local';
-    $array['v_voice_ai_providers'][0]['config'] = json_encode(['model' => 'base', 'device' => 'cpu']);
-    $array['v_voice_ai_providers'][0]['is_default'] = true;
-    $array['v_voice_ai_providers'][0]['is_enabled'] = true;
-    $array['v_voice_ai_providers'][0]['priority'] = 0;
+    // FusionPBX padrão: nome lógico do array (voice_ai_providers) -> tabela v_voice_ai_providers
+    $array['voice_ai_providers'][0]['voice_ai_provider_uuid'] = $provider_uuid;
+    $array['voice_ai_providers'][0]['domain_uuid'] = $domain_uuid;
+    $array['voice_ai_providers'][0]['provider_type'] = 'stt';
+    $array['voice_ai_providers'][0]['provider_name'] = 'whisper_local';
+    $array['voice_ai_providers'][0]['config'] = json_encode(['model' => 'base', 'device' => 'cpu']);
+    $array['voice_ai_providers'][0]['is_default'] = true;
+    $array['voice_ai_providers'][0]['is_enabled'] = true;
+    $array['voice_ai_providers'][0]['priority'] = 0;
     
     $database->app_name = 'voice_secretary';
     $database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
@@ -42,15 +43,17 @@ $result = $database->select($sql, $parameters, 'row');
 
 if ($result['count'] == 0) {
     $provider_uuid = uuid();
-    $array['v_voice_ai_providers'][0]['voice_ai_provider_uuid'] = $provider_uuid;
-    $array['v_voice_ai_providers'][0]['domain_uuid'] = $domain_uuid;
-    $array['v_voice_ai_providers'][0]['provider_type'] = 'tts';
-    $array['v_voice_ai_providers'][0]['provider_name'] = 'piper_local';
-    $array['v_voice_ai_providers'][0]['config'] = json_encode(['model' => 'pt_BR-faber-medium']);
-    $array['v_voice_ai_providers'][0]['is_default'] = true;
-    $array['v_voice_ai_providers'][0]['is_enabled'] = true;
-    $array['v_voice_ai_providers'][0]['priority'] = 0;
+    $array['voice_ai_providers'][0]['voice_ai_provider_uuid'] = $provider_uuid;
+    $array['voice_ai_providers'][0]['domain_uuid'] = $domain_uuid;
+    $array['voice_ai_providers'][0]['provider_type'] = 'tts';
+    $array['voice_ai_providers'][0]['provider_name'] = 'piper_local';
+    $array['voice_ai_providers'][0]['config'] = json_encode(['model' => 'pt_BR-faber-medium']);
+    $array['voice_ai_providers'][0]['is_default'] = true;
+    $array['voice_ai_providers'][0]['is_enabled'] = true;
+    $array['voice_ai_providers'][0]['priority'] = 0;
     
+    $database->app_name = 'voice_secretary';
+    $database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
     $database->save($array);
     unset($array);
 }
