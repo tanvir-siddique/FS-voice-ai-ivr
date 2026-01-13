@@ -52,6 +52,23 @@ DO $$ BEGIN
     THEN
         ALTER TABLE v_voice_secretaries ADD COLUMN vad_threshold DECIMAL(3,2) DEFAULT 0.5;
     END IF;
+
+    -- FusionPBX padrão: auditoria usada pelo database->save()
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'v_voice_secretaries' AND column_name = 'insert_user')
+    THEN
+        ALTER TABLE v_voice_secretaries ADD COLUMN insert_user UUID;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'v_voice_secretaries' AND column_name = 'update_user')
+    THEN
+        ALTER TABLE v_voice_secretaries ADD COLUMN update_user UUID;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'v_voice_secretaries' AND column_name = 'update_date')
+    THEN
+        ALTER TABLE v_voice_secretaries ADD COLUMN update_date TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+    END IF;
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_voice_secretaries_domain ON v_voice_secretaries(domain_uuid);

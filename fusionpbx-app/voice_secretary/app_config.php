@@ -140,10 +140,20 @@ $apps[$x]['db'][0]['fields'][$y]['type']['sqlite'] = "date";
 $apps[$x]['db'][0]['fields'][$y]['type']['mysql'] = "timestamp";
 $apps[$x]['db'][0]['fields'][$y]['default'] = "now()";
 $y++;
+$apps[$x]['db'][0]['fields'][$y]['name'] = "insert_user";
+$apps[$x]['db'][0]['fields'][$y]['type']['pgsql'] = "uuid";
+$apps[$x]['db'][0]['fields'][$y]['type']['sqlite'] = "text";
+$apps[$x]['db'][0]['fields'][$y]['type']['mysql'] = "char(36)";
+$y++;
 $apps[$x]['db'][0]['fields'][$y]['name'] = "update_date";
 $apps[$x]['db'][0]['fields'][$y]['type']['pgsql'] = "timestamptz";
 $apps[$x]['db'][0]['fields'][$y]['type']['sqlite'] = "date";
 $apps[$x]['db'][0]['fields'][$y]['type']['mysql'] = "timestamp";
+$y++;
+$apps[$x]['db'][0]['fields'][$y]['name'] = "update_user";
+$apps[$x]['db'][0]['fields'][$y]['type']['pgsql'] = "uuid";
+$apps[$x]['db'][0]['fields'][$y]['type']['sqlite'] = "text";
+$apps[$x]['db'][0]['fields'][$y]['type']['mysql'] = "char(36)";
 
 // Secretaries table
 $apps[$x]['db'][1]['table']['name'] = "v_voice_secretaries";
@@ -237,6 +247,22 @@ $apps[$x]['db'][1]['fields'][$y]['type']['pgsql'] = "timestamptz";
 $apps[$x]['db'][1]['fields'][$y]['type']['sqlite'] = "date";
 $apps[$x]['db'][1]['fields'][$y]['type']['mysql'] = "timestamp";
 $apps[$x]['db'][1]['fields'][$y]['default'] = "now()";
+$y++;
+$apps[$x]['db'][1]['fields'][$y]['name'] = "insert_user";
+$apps[$x]['db'][1]['fields'][$y]['type']['pgsql'] = "uuid";
+$apps[$x]['db'][1]['fields'][$y]['type']['sqlite'] = "text";
+$apps[$x]['db'][1]['fields'][$y]['type']['mysql'] = "char(36)";
+$y++;
+$apps[$x]['db'][1]['fields'][$y]['name'] = "update_date";
+$apps[$x]['db'][1]['fields'][$y]['type']['pgsql'] = "timestamptz";
+$apps[$x]['db'][1]['fields'][$y]['type']['sqlite'] = "date";
+$apps[$x]['db'][1]['fields'][$y]['type']['mysql'] = "timestamp";
+$apps[$x]['db'][1]['fields'][$y]['default'] = "now()";
+$y++;
+$apps[$x]['db'][1]['fields'][$y]['name'] = "update_user";
+$apps[$x]['db'][1]['fields'][$y]['type']['pgsql'] = "uuid";
+$apps[$x]['db'][1]['fields'][$y]['type']['sqlite'] = "text";
+$apps[$x]['db'][1]['fields'][$y]['type']['mysql'] = "char(36)";
 
 // Documents table
 $apps[$x]['db'][2]['table']['name'] = "v_voice_documents";
