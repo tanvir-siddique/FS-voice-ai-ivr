@@ -8,10 +8,10 @@
  * @package voice_secretary
  */
 
-// Include required files
-require_once "root.php";
-require_once "resources/require.php";
-require_once "resources/check_auth.php";
+// FusionPBX includes
+$includes_root = dirname(__DIR__, 2);
+require_once $includes_root . "/resources/require.php";
+require_once $includes_root . "/resources/check_auth.php";
 
 // Check permission
 if (permission_exists('voice_secretary_view')) {
@@ -21,16 +21,19 @@ if (permission_exists('voice_secretary_view')) {
     exit;
 }
 
-// Include classes
-require_once "resources/classes/voice_ai_provider.php";
+// Get domain_uuid from session
+$domain_uuid = $_SESSION['domain_uuid'] ?? null;
+if (!$domain_uuid) {
+    echo "Error: domain_uuid not found in session.";
+    exit;
+}
 
-// Validate multi-tenant
-require_once "resources/classes/domain_validator.php";
-domain_validator::init();
+// Include class
+require_once __DIR__ . "/resources/classes/voice_ai_provider.php";
 
 // Get providers
 $provider_obj = new voice_ai_provider();
-$providers = $provider_obj->list();
+$providers = $provider_obj->get_list($domain_uuid);
 
 // Group by type
 $grouped = [
@@ -38,29 +41,32 @@ $grouped = [
     'tts' => [],
     'llm' => [],
     'embeddings' => [],
+    'realtime' => [],
 ];
 
-foreach ($providers as $p) {
-    $type = $p['provider_type'];
-    if (isset($grouped[$type])) {
-        $grouped[$type][] = $p;
+if (is_array($providers)) {
+    foreach ($providers as $p) {
+        $type = $p['provider_type'];
+        if (isset($grouped[$type])) {
+            $grouped[$type][] = $p;
+        }
     }
 }
 
 // Include header
-$document['title'] = $text['title-providers'];
-require_once "resources/header.php";
+$document['title'] = $text['title-providers'] ?? 'AI Providers';
+require_once $includes_root . "/resources/header.php";
 ?>
 
 <div class="action_bar" id="action_bar">
     <div class="heading">
-        <b><?php echo $text['title-providers']; ?></b>
+        <b><?php echo $text['title-providers'] ?? 'AI Providers'; ?></b>
     </div>
     <div class="actions">
         <?php if (permission_exists('voice_secretary_add')) { ?>
             <button type="button" onclick="window.location='providers_edit.php'" class="btn btn-default btn-sm">
-                <span class="fas fa-plus-square fa-fw"></span>
-                <?php echo $text['button-add']; ?>
+                <span class="fas fa-plus fa-fw"></span>
+                <?php echo $text['button-add'] ?? 'Add'; ?>
             </button>
         <?php } ?>
     </div>
@@ -73,6 +79,7 @@ $type_labels = [
     'tts' => ['Text-to-Speech (TTS)', 'fas fa-volume-up'],
     'llm' => ['Large Language Models (LLM)', 'fas fa-brain'],
     'embeddings' => ['Embeddings', 'fas fa-vector-square'],
+    'realtime' => ['Realtime Providers', 'fas fa-bolt'],
 ];
 
 foreach ($grouped as $type => $type_providers) {
@@ -87,52 +94,50 @@ foreach ($grouped as $type => $type_providers) {
     
     <table class="list">
         <tr class="list-header">
-            <th><?php echo $text['label-provider_name']; ?></th>
-            <th><?php echo $text['label-priority']; ?></th>
-            <th><?php echo $text['label-default']; ?></th>
-            <th><?php echo $text['label-status']; ?></th>
+            <th><?php echo $text['label-provider_name'] ?? 'Provider'; ?></th>
+            <th><?php echo $text['label-priority'] ?? 'Priority'; ?></th>
+            <th><?php echo $text['label-default'] ?? 'Default'; ?></th>
+            <th><?php echo $text['label-status'] ?? 'Status'; ?></th>
             <th></th>
         </tr>
         <?php if (!empty($type_providers)) { ?>
-            <?php foreach ($type_providers as $p) { 
-                $display_name = voice_ai_provider::PROVIDERS[$type][$p['provider_name']] ?? $p['provider_name'];
-            ?>
+            <?php foreach ($type_providers as $p) { ?>
                 <tr class="list-row">
                     <td>
                         <?php if (permission_exists('voice_secretary_edit')) { ?>
-                            <a href="providers_edit.php?id=<?php echo urlencode($p['provider_uuid']); ?>">
-                                <?php echo escape($display_name); ?>
+                            <a href="providers_edit.php?id=<?php echo urlencode($p['voice_ai_provider_uuid']); ?>">
+                                <?php echo escape($p['provider_name']); ?>
                             </a>
                         <?php } else { ?>
-                            <?php echo escape($display_name); ?>
+                            <?php echo escape($p['provider_name']); ?>
                         <?php } ?>
                     </td>
-                    <td><?php echo intval($p['priority']); ?></td>
+                    <td><?php echo intval($p['priority'] ?? 0); ?></td>
                     <td>
-                        <?php if ($p['is_default']) { ?>
-                            <span class="badge badge-primary"><?php echo $text['label-yes']; ?></span>
+                        <?php if ($p['is_default'] ?? false) { ?>
+                            <span class="badge bg-primary"><?php echo $text['label-yes'] ?? 'Yes'; ?></span>
                         <?php } ?>
                     </td>
                     <td>
-                        <?php if ($p['is_active']) { ?>
-                            <span class="badge badge-success"><?php echo $text['label-active']; ?></span>
+                        <?php if ($p['is_enabled'] ?? true) { ?>
+                            <span class="badge bg-success"><?php echo $text['label-active'] ?? 'Active'; ?></span>
                         <?php } else { ?>
-                            <span class="badge badge-secondary"><?php echo $text['label-inactive']; ?></span>
+                            <span class="badge bg-secondary"><?php echo $text['label-inactive'] ?? 'Inactive'; ?></span>
                         <?php } ?>
                     </td>
                     <td>
                         <button type="button" class="btn btn-default btn-xs" 
-                                onclick="testProvider('<?php echo $p['provider_uuid']; ?>')">
+                                onclick="testProvider('<?php echo $p['voice_ai_provider_uuid']; ?>')">
                             <span class="fas fa-plug fa-fw"></span>
-                            <?php echo $text['button-test']; ?>
+                            <?php echo $text['button-test'] ?? 'Test'; ?>
                         </button>
                     </td>
                 </tr>
             <?php } ?>
         <?php } else { ?>
             <tr>
-                <td colspan="5" class="no_data_found">
-                    <?php echo $text['message-no_providers']; ?>
+                <td colspan="5" class="no-results-found">
+                    <?php echo $text['message-no_providers'] ?? 'No providers configured for this type.'; ?>
                 </td>
             </tr>
         <?php } ?>
@@ -147,18 +152,17 @@ function testProvider(uuid) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                alert('<?php echo $text['message-provider_ok']; ?>');
+                alert('<?php echo $text['message-provider_ok'] ?? 'Provider is working!'; ?>');
             } else {
-                alert('<?php echo $text['message-provider_failed']; ?>: ' + data.message);
+                alert('<?php echo $text['message-provider_failed'] ?? 'Provider test failed'; ?>: ' + (data.message || 'Unknown error'));
             }
         })
         .catch(error => {
-            alert('<?php echo $text['message-test_error']; ?>');
+            alert('<?php echo $text['message-test_error'] ?? 'Test error'; ?>');
         });
 }
 </script>
 
 <?php
-// Include footer
-require_once "resources/footer.php";
+require_once $includes_root . "/resources/footer.php";
 ?>

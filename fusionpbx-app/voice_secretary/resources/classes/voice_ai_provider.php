@@ -3,22 +3,19 @@
  * Voice AI Provider Class
  * 
  * CRUD operations for AI providers (STT, TTS, LLM, Embeddings).
- * ⚠️ MULTI-TENANT: ALL operations MUST use domain_uuid from session.
+ * ⚠️ MULTI-TENANT: ALL operations MUST use domain_uuid parameter.
  *
  * @package voice_secretary
  */
 
-require_once "domain_validator.php";
-
 class voice_ai_provider {
     
     private $database;
-    private $domain_uuid;
     
     /**
      * Available provider types
      */
-    const TYPES = ['stt', 'tts', 'llm', 'embeddings'];
+    const TYPES = ['stt', 'tts', 'llm', 'embeddings', 'realtime'];
     
     /**
      * Available providers by type
@@ -59,25 +56,29 @@ class voice_ai_provider {
             'voyage' => 'Voyage AI',
             'local_embeddings' => 'Local (sentence-transformers)',
         ],
+        'realtime' => [
+            'openai_realtime' => 'OpenAI Realtime API',
+            'elevenlabs_conv' => 'ElevenLabs Conversational',
+            'gemini_live' => 'Google Gemini Live',
+            'custom_pipeline' => 'Custom Pipeline (Deepgram+Groq+Piper)',
+        ],
     ];
     
     /**
      * Constructor
      */
     public function __construct() {
-        $this->database = database::new();
-        $this->domain_uuid = domain_validator::require_domain_uuid();
+        $this->database = new database;
     }
     
     /**
-     * List all providers for current domain
+     * List all providers for a domain
      */
-    public function list($type = null) {
+    public function get_list($domain_uuid, $type = null) {
         $sql = "SELECT * FROM v_voice_ai_providers 
                 WHERE domain_uuid = :domain_uuid";
         
-        $parameters = [];
-        domain_validator::add_to_parameters($parameters);
+        $parameters['domain_uuid'] = $domain_uuid;
         
         if ($type) {
             $sql .= " AND provider_type = :type";
@@ -86,80 +87,79 @@ class voice_ai_provider {
         
         $sql .= " ORDER BY provider_type ASC, priority ASC, provider_name ASC";
         
-        return $this->database->select($sql, $parameters);
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        return $this->database->execute('all', PDO::FETCH_ASSOC);
     }
     
     /**
      * Get single provider by UUID
      */
-    public function get($provider_uuid) {
+    public function get($provider_uuid, $domain_uuid) {
         $sql = "SELECT * FROM v_voice_ai_providers 
-                WHERE provider_uuid = :provider_uuid 
+                WHERE voice_ai_provider_uuid = :provider_uuid 
                 AND domain_uuid = :domain_uuid";
         
-        $parameters = [
-            'provider_uuid' => $provider_uuid
-        ];
-        domain_validator::add_to_parameters($parameters);
+        $parameters['provider_uuid'] = $provider_uuid;
+        $parameters['domain_uuid'] = $domain_uuid;
         
-        $rows = $this->database->select($sql, $parameters);
-        return isset($rows[0]) ? $rows[0] : null;
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        $result = $this->database->execute('all', PDO::FETCH_ASSOC);
+        
+        return isset($result[0]) ? $result[0] : null;
     }
     
     /**
      * Create new provider
      */
-    public function create($data) {
+    public function create($data, $domain_uuid) {
         $provider_uuid = uuid();
         
-        // Validate type and provider name
+        // Validate type
         if (!in_array($data['provider_type'], self::TYPES)) {
             throw new Exception("Invalid provider type: " . $data['provider_type']);
         }
         
-        if (!isset(self::PROVIDERS[$data['provider_type']][$data['provider_name']])) {
-            throw new Exception("Invalid provider name: " . $data['provider_name']);
-        }
-        
         $sql = "INSERT INTO v_voice_ai_providers (
-            provider_uuid,
+            voice_ai_provider_uuid,
             domain_uuid,
             provider_type,
             provider_name,
             config,
-            is_active,
+            is_enabled,
             is_default,
             priority,
-            created_at
+            insert_date
         ) VALUES (
             :provider_uuid,
             :domain_uuid,
             :provider_type,
             :provider_name,
             :config,
-            :is_active,
+            :is_enabled,
             :is_default,
             :priority,
             NOW()
         )";
         
-        $parameters = [
-            'provider_uuid' => $provider_uuid,
-            'provider_type' => $data['provider_type'],
-            'provider_name' => $data['provider_name'],
-            'config' => json_encode($data['config'] ?? []),
-            'is_active' => $data['is_active'] ?? true,
-            'is_default' => $data['is_default'] ?? false,
-            'priority' => $data['priority'] ?? 10,
-        ];
-        domain_validator::add_to_parameters($parameters);
+        $parameters['provider_uuid'] = $provider_uuid;
+        $parameters['domain_uuid'] = $domain_uuid;
+        $parameters['provider_type'] = $data['provider_type'];
+        $parameters['provider_name'] = $data['provider_name'];
+        $parameters['config'] = json_encode($data['config'] ?? []);
+        $parameters['is_enabled'] = $data['is_enabled'] ?? true;
+        $parameters['is_default'] = $data['is_default'] ?? false;
+        $parameters['priority'] = $data['priority'] ?? 10;
         
         // If setting as default, unset other defaults of same type
         if (!empty($data['is_default'])) {
-            $this->unset_defaults($data['provider_type']);
+            $this->unset_defaults($data['provider_type'], $domain_uuid);
         }
         
-        $this->database->execute($sql, $parameters);
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        $this->database->execute();
         
         return $provider_uuid;
     }
@@ -167,46 +167,34 @@ class voice_ai_provider {
     /**
      * Update existing provider
      */
-    public function update($provider_uuid, $data) {
-        $set_parts = [];
-        $parameters = [
-            'provider_uuid' => $provider_uuid
-        ];
-        domain_validator::add_to_parameters($parameters);
-        
+    public function update($provider_uuid, $data, $domain_uuid) {
         // If changing is_default to true, unset others first
         if (!empty($data['is_default'])) {
-            $provider = $this->get($provider_uuid);
+            $provider = $this->get($provider_uuid, $domain_uuid);
             if ($provider) {
-                $this->unset_defaults($provider['provider_type']);
+                $this->unset_defaults($provider['provider_type'], $domain_uuid);
             }
         }
         
-        $allowed_fields = ['config', 'is_active', 'is_default', 'priority'];
+        $sql = "UPDATE v_voice_ai_providers SET
+            config = :config,
+            is_enabled = :is_enabled,
+            is_default = :is_default,
+            priority = :priority,
+            update_date = NOW()
+            WHERE voice_ai_provider_uuid = :provider_uuid 
+            AND domain_uuid = :domain_uuid";
         
-        foreach ($allowed_fields as $field) {
-            if (array_key_exists($field, $data)) {
-                $set_parts[] = "{$field} = :{$field}";
-                if ($field === 'config') {
-                    $parameters[$field] = json_encode($data[$field]);
-                } else {
-                    $parameters[$field] = $data[$field];
-                }
-            }
-        }
+        $parameters['provider_uuid'] = $provider_uuid;
+        $parameters['domain_uuid'] = $domain_uuid;
+        $parameters['config'] = json_encode($data['config'] ?? []);
+        $parameters['is_enabled'] = $data['is_enabled'] ?? true;
+        $parameters['is_default'] = $data['is_default'] ?? false;
+        $parameters['priority'] = $data['priority'] ?? 10;
         
-        if (empty($set_parts)) {
-            return false;
-        }
-        
-        $set_parts[] = "updated_at = NOW()";
-        
-        $sql = "UPDATE v_voice_ai_providers 
-                SET " . implode(', ', $set_parts) . "
-                WHERE provider_uuid = :provider_uuid 
-                AND domain_uuid = :domain_uuid";
-        
-        $this->database->execute($sql, $parameters);
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        $this->database->execute();
         
         return true;
     }
@@ -214,17 +202,17 @@ class voice_ai_provider {
     /**
      * Delete provider
      */
-    public function delete($provider_uuid) {
+    public function delete($provider_uuid, $domain_uuid) {
         $sql = "DELETE FROM v_voice_ai_providers 
-                WHERE provider_uuid = :provider_uuid 
+                WHERE voice_ai_provider_uuid = :provider_uuid 
                 AND domain_uuid = :domain_uuid";
         
-        $parameters = [
-            'provider_uuid' => $provider_uuid
-        ];
-        domain_validator::add_to_parameters($parameters);
+        $parameters['provider_uuid'] = $provider_uuid;
+        $parameters['domain_uuid'] = $domain_uuid;
         
-        $this->database->execute($sql, $parameters);
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        $this->database->execute();
         
         return true;
     }
@@ -232,54 +220,18 @@ class voice_ai_provider {
     /**
      * Unset all default providers of a type
      */
-    private function unset_defaults($type) {
+    private function unset_defaults($type, $domain_uuid) {
         $sql = "UPDATE v_voice_ai_providers 
                 SET is_default = false 
                 WHERE domain_uuid = :domain_uuid 
                 AND provider_type = :type";
         
-        $parameters = [
-            'type' => $type
-        ];
-        domain_validator::add_to_parameters($parameters);
+        $parameters['domain_uuid'] = $domain_uuid;
+        $parameters['type'] = $type;
         
-        $this->database->execute($sql, $parameters);
-    }
-    
-    /**
-     * Test provider connection
-     */
-    public function test_connection($provider_uuid) {
-        $provider = $this->get($provider_uuid);
-        if (!$provider) {
-            return ['success' => false, 'message' => 'Provider not found'];
-        }
-        
-        $service_url = $_ENV['VOICE_AI_SERVICE_URL'] ?? 'http://127.0.0.1:8089/api/v1';
-        
-        $payload = json_encode([
-            'domain_uuid' => $this->domain_uuid,
-            'provider_type' => $provider['provider_type'],
-            'provider_name' => $provider['provider_name'],
-            'config' => json_decode($provider['config'], true),
-        ]);
-        
-        $ch = curl_init($service_url . '/providers/test');
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        
-        $response = curl_exec($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        
-        if ($http_code == 200) {
-            return json_decode($response, true);
-        }
-        
-        return ['success' => false, 'message' => 'Service unavailable'];
+        $this->database->sql = $sql;
+        $this->database->parameters = $parameters;
+        $this->database->execute();
     }
     
     /**
@@ -328,6 +280,19 @@ class voice_ai_provider {
             'ollama_local' => [
                 ['name' => 'base_url', 'label' => 'Ollama URL', 'type' => 'text', 'default' => 'http://localhost:11434'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'llama3'],
+            ],
+            // Realtime providers
+            'openai_realtime' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gpt-4o-realtime-preview'],
+            ],
+            'elevenlabs_conv' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'agent_id', 'label' => 'Agent ID', 'type' => 'text'],
+            ],
+            'gemini_live' => [
+                ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password', 'required' => true],
+                ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gemini-2.0-flash-exp'],
             ],
         ];
         
