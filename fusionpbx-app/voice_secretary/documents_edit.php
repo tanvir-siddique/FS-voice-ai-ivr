@@ -65,39 +65,29 @@
 			$filepath = $upload_dir . '/' . $filename;
 			
 			if (move_uploaded_file($file['tmp_name'], $filepath)) {
-				//insert into database
+				//insert into database using FusionPBX array method
+				$array['voice_documents'][0]['voice_document_uuid'] = $document_uuid;
+				$array['voice_documents'][0]['domain_uuid'] = $domain_uuid;
+				$array['voice_documents'][0]['document_name'] = $_POST['document_name'] ?: $file['name'];
+				$array['voice_documents'][0]['document_type'] = $extension;
+				$array['voice_documents'][0]['file_path'] = $filepath;
+				$array['voice_documents'][0]['file_size'] = $file['size'];
+				$array['voice_documents'][0]['processing_status'] = 'pending';
+				$array['voice_documents'][0]['enabled'] = 'true';
+				
+				//add temp permissions
+				$p = permissions::new();
+				$p->add('voice_secretary_add', 'temp');
+				
+				//save
 				$database = new database;
+				$database->app_name = 'voice_secretary';
+				$database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+				$database->save($array);
+				unset($array);
 				
-				$sql = "INSERT INTO v_voice_documents (
-					voice_document_uuid,
-					domain_uuid,
-					document_name,
-					file_path,
-					file_type,
-					file_size,
-					processing_status,
-					insert_date
-				) VALUES (
-					:document_uuid,
-					:domain_uuid,
-					:document_name,
-					:file_path,
-					:file_type,
-					:file_size,
-					'pending',
-					NOW()
-				)";
-				
-				$parameters = [
-					'document_uuid' => $document_uuid,
-					'domain_uuid' => $domain_uuid,
-					'document_name' => $_POST['document_name'] ?: $file['name'],
-					'file_path' => $filepath,
-					'file_type' => $extension,
-					'file_size' => $file['size'],
-				];
-				
-				$database->execute($sql, $parameters);
+				//remove temp permissions
+				$p->delete('voice_secretary_add', 'temp');
 				
 				//trigger async processing
 				$service_url = $_ENV['VOICE_AI_SERVICE_URL'] ?? 'http://127.0.0.1:8100/api/v1';
