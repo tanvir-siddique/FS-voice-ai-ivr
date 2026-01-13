@@ -67,8 +67,18 @@ class DatabaseService:
                     host=settings.DB_HOST,
                     database=settings.DB_NAME,
                 )
-            except PostgresError as e:
-                logger.error("Failed to create database pool", error=str(e))
+            except Exception as e:
+                # NOTE: asyncpg can raise PostgresError subclasses OR OSError/TimeoutError etc.
+                logger.error(
+                    "Failed to create database pool",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    error_repr=repr(e),
+                    host=settings.DB_HOST,
+                    port=settings.DB_PORT,
+                    database=settings.DB_NAME,
+                    user=settings.DB_USER,
+                )
                 raise
         return cls._pool
     

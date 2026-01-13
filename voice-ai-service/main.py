@@ -31,7 +31,11 @@ async def lifespan(app: FastAPI):
         await db.get_pool()
         print("✅ Database connection pool initialized")
     except Exception as e:
-        print(f"⚠️ Database connection failed (will use fallback providers): {e}")
+        # IMPORTANT: keep details for debugging infra (pg_hba / auth / network)
+        print(
+            "⚠️ Database connection failed (will use fallback providers): "
+            f"{type(e).__name__}: {e!s} | repr={e!r}"
+        )
     
     yield
     
