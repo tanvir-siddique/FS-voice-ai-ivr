@@ -133,20 +133,58 @@
 			$database->app_name = 'voice_secretary';
 			$database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 			$database->save($array);
+			$db_message = $database->message ?? null;
 			unset($array);
 			
 			// Remove temp permissions
 			$p->delete('voice_secretary_add', 'temp');
 			$p->delete('voice_secretary_edit', 'temp');
 			
-			// Set message and redirect
-			if ($action === 'add') {
-				message::add($text['message-add'] ?? 'Secretary created successfully');
-			} else {
-				message::add($text['message-update'] ?? 'Secretary updated successfully');
+			// 🔎 Verificação pós-save: garantir que persistiu no banco
+			$verify_sql = "SELECT processing_mode, realtime_provider_uuid, enabled
+				FROM v_voice_secretaries
+				WHERE voice_secretary_uuid = :secretary_uuid
+				AND domain_uuid = :domain_uuid";
+			$verify_params['secretary_uuid'] = $secretary_uuid;
+			$verify_params['domain_uuid'] = $domain_uuid;
+			$verify_row = $database->select($verify_sql, $verify_params, 'row');
+
+			$expected_mode = $form_data['processing_mode'];
+			$expected_rt = $form_data['realtime_provider_uuid'] ?: null;
+			$expected_enabled = $form_data['is_active'] ? true : false;
+
+			$persisted_ok = is_array($verify_row)
+				&& (($verify_row['processing_mode'] ?? null) === $expected_mode)
+				&& (($verify_row['realtime_provider_uuid'] ?? null) === $expected_rt)
+				&& ((bool)($verify_row['enabled'] ?? false) === (bool)$expected_enabled);
+
+			if (!$persisted_ok) {
+				// Log no error_log do PHP para facilitar debug no servidor
+				if (!empty($db_message)) {
+					error_log("[voice_secretary] database->message: ".$db_message);
+				}
+				error_log("[voice_secretary] save_failed_or_not_persisted. expected_mode=".$expected_mode.
+					" expected_rt=".($expected_rt ?: 'null').
+					" expected_enabled=".($expected_enabled ? 'true' : 'false').
+					" got_mode=".($verify_row['processing_mode'] ?? 'null').
+					" got_rt=".($verify_row['realtime_provider_uuid'] ?? 'null').
+					" got_enabled=".((isset($verify_row['enabled']) && $verify_row['enabled']) ? 'true' : 'false')
+				);
+
+				message::add("Falha ao persistir no banco. Verifique logs do PHP-FPM/Nginx. ".
+					(!empty($db_message) ? "Mensagem do banco: ".$db_message : ""), "negative");
+				// Não redirecionar: manter na página para ver o erro
 			}
-			header('Location: secretary.php');
-			exit;
+			else {
+			// Set message and redirect
+				if ($action === 'add') {
+					message::add($text['message-add'] ?? 'Secretary created successfully');
+				} else {
+					message::add($text['message-update'] ?? 'Secretary updated successfully');
+				}
+				header('Location: secretary.php');
+				exit;
+			}
 		}
 	}
 
