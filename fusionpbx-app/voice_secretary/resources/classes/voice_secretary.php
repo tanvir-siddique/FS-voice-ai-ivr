@@ -10,16 +10,6 @@
 
 class voice_secretary {
     
-    private $database;
-    
-    /**
-     * Constructor
-     */
-    public function __construct() {
-        // Use FusionPBX database class
-        $this->database = new database;
-    }
-    
     /**
      * Get list of secretaries for a domain
      */
@@ -41,9 +31,8 @@ class voice_secretary {
         
         $parameters['domain_uuid'] = $domain_uuid;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        return $this->database->execute('all', PDO::FETCH_ASSOC);
+        $database = new database;
+        return $database->select($sql, $parameters, 'all');
     }
     
     /**
@@ -57,11 +46,8 @@ class voice_secretary {
         $parameters['secretary_uuid'] = $secretary_uuid;
         $parameters['domain_uuid'] = $domain_uuid;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $result = $this->database->execute('all', PDO::FETCH_ASSOC);
-        
-        return isset($result[0]) ? $result[0] : null;
+        $database = new database;
+        return $database->select($sql, $parameters, 'row');
     }
     
     /**
@@ -70,76 +56,31 @@ class voice_secretary {
     public function create($data, $domain_uuid) {
         $secretary_uuid = uuid();
         
-        $sql = "INSERT INTO v_voice_secretaries (
-            voice_secretary_uuid,
-            domain_uuid,
-            secretary_name,
-            company_name,
-            extension,
-            processing_mode,
-            personality_prompt,
-            greeting_message,
-            farewell_message,
-            stt_provider_uuid,
-            tts_provider_uuid,
-            llm_provider_uuid,
-            embeddings_provider_uuid,
-            realtime_provider_uuid,
-            tts_voice_id,
-            language,
-            max_turns,
-            transfer_extension,
-            is_enabled,
-            omniplay_webhook_url,
-            insert_date
-        ) VALUES (
-            :secretary_uuid,
-            :domain_uuid,
-            :secretary_name,
-            :company_name,
-            :extension,
-            :processing_mode,
-            :personality_prompt,
-            :greeting_message,
-            :farewell_message,
-            :stt_provider_uuid,
-            :tts_provider_uuid,
-            :llm_provider_uuid,
-            :embeddings_provider_uuid,
-            :realtime_provider_uuid,
-            :tts_voice_id,
-            :language,
-            :max_turns,
-            :transfer_extension,
-            :is_enabled,
-            :omniplay_webhook_url,
-            NOW()
-        )";
+        $array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+        $array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+        $array['v_voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
+        $array['v_voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
+        $array['v_voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
+        $array['v_voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
+        $array['v_voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
+        $array['v_voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? 'Olá! Como posso ajudar?';
+        $array['v_voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? 'Foi um prazer ajudar! Até logo!';
+        $array['v_voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
+        $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
+        $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
+        $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
+        $array['v_voice_secretaries'][0]['is_enabled'] = $data['is_active'] ?? true;
+        $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
         
-        $parameters['secretary_uuid'] = $secretary_uuid;
-        $parameters['domain_uuid'] = $domain_uuid;
-        $parameters['secretary_name'] = $data['secretary_name'];
-        $parameters['company_name'] = $data['company_name'] ?? null;
-        $parameters['extension'] = $data['extension'] ?? null;
-        $parameters['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
-        $parameters['personality_prompt'] = $data['system_prompt'] ?? null;
-        $parameters['greeting_message'] = $data['greeting_message'] ?? 'Olá! Como posso ajudar?';
-        $parameters['farewell_message'] = $data['farewell_message'] ?? 'Foi um prazer ajudar! Até logo!';
-        $parameters['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
-        $parameters['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
-        $parameters['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
-        $parameters['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
-        $parameters['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
-        $parameters['tts_voice_id'] = $data['tts_voice'] ?? null;
-        $parameters['language'] = $data['language'] ?? 'pt-BR';
-        $parameters['max_turns'] = $data['max_turns'] ?? 20;
-        $parameters['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $parameters['is_enabled'] = $data['is_active'] ?? true;
-        $parameters['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
-        
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->app_name = 'voice_secretary';
+        $database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+        $database->save($array);
         
         return $secretary_uuid;
     }
@@ -148,53 +89,31 @@ class voice_secretary {
      * Update existing secretary
      */
     public function update($secretary_uuid, $data, $domain_uuid) {
-        $sql = "UPDATE v_voice_secretaries SET
-            secretary_name = :secretary_name,
-            company_name = :company_name,
-            extension = :extension,
-            processing_mode = :processing_mode,
-            personality_prompt = :personality_prompt,
-            greeting_message = :greeting_message,
-            farewell_message = :farewell_message,
-            stt_provider_uuid = :stt_provider_uuid,
-            tts_provider_uuid = :tts_provider_uuid,
-            llm_provider_uuid = :llm_provider_uuid,
-            embeddings_provider_uuid = :embeddings_provider_uuid,
-            realtime_provider_uuid = :realtime_provider_uuid,
-            tts_voice_id = :tts_voice_id,
-            language = :language,
-            max_turns = :max_turns,
-            transfer_extension = :transfer_extension,
-            is_enabled = :is_enabled,
-            omniplay_webhook_url = :omniplay_webhook_url,
-            update_date = NOW()
-            WHERE voice_secretary_uuid = :secretary_uuid 
-            AND domain_uuid = :domain_uuid";
+        $array['v_voice_secretaries'][0]['voice_secretary_uuid'] = $secretary_uuid;
+        $array['v_voice_secretaries'][0]['domain_uuid'] = $domain_uuid;
+        $array['v_voice_secretaries'][0]['secretary_name'] = $data['secretary_name'];
+        $array['v_voice_secretaries'][0]['company_name'] = $data['company_name'] ?? null;
+        $array['v_voice_secretaries'][0]['extension'] = $data['extension'] ?? null;
+        $array['v_voice_secretaries'][0]['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
+        $array['v_voice_secretaries'][0]['personality_prompt'] = $data['system_prompt'] ?? null;
+        $array['v_voice_secretaries'][0]['greeting_message'] = $data['greeting_message'] ?? null;
+        $array['v_voice_secretaries'][0]['farewell_message'] = $data['farewell_message'] ?? null;
+        $array['v_voice_secretaries'][0]['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
+        $array['v_voice_secretaries'][0]['tts_voice_id'] = $data['tts_voice'] ?? null;
+        $array['v_voice_secretaries'][0]['language'] = $data['language'] ?? 'pt-BR';
+        $array['v_voice_secretaries'][0]['max_turns'] = $data['max_turns'] ?? 20;
+        $array['v_voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
+        $array['v_voice_secretaries'][0]['is_enabled'] = $data['is_active'] ?? true;
+        $array['v_voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
         
-        $parameters['secretary_uuid'] = $secretary_uuid;
-        $parameters['domain_uuid'] = $domain_uuid;
-        $parameters['secretary_name'] = $data['secretary_name'];
-        $parameters['company_name'] = $data['company_name'] ?? null;
-        $parameters['extension'] = $data['extension'] ?? null;
-        $parameters['processing_mode'] = $data['processing_mode'] ?? 'turn_based';
-        $parameters['personality_prompt'] = $data['system_prompt'] ?? null;
-        $parameters['greeting_message'] = $data['greeting_message'] ?? null;
-        $parameters['farewell_message'] = $data['farewell_message'] ?? null;
-        $parameters['stt_provider_uuid'] = !empty($data['stt_provider_uuid']) ? $data['stt_provider_uuid'] : null;
-        $parameters['tts_provider_uuid'] = !empty($data['tts_provider_uuid']) ? $data['tts_provider_uuid'] : null;
-        $parameters['llm_provider_uuid'] = !empty($data['llm_provider_uuid']) ? $data['llm_provider_uuid'] : null;
-        $parameters['embeddings_provider_uuid'] = !empty($data['embeddings_provider_uuid']) ? $data['embeddings_provider_uuid'] : null;
-        $parameters['realtime_provider_uuid'] = !empty($data['realtime_provider_uuid']) ? $data['realtime_provider_uuid'] : null;
-        $parameters['tts_voice_id'] = $data['tts_voice'] ?? null;
-        $parameters['language'] = $data['language'] ?? 'pt-BR';
-        $parameters['max_turns'] = $data['max_turns'] ?? 20;
-        $parameters['transfer_extension'] = $data['transfer_extension'] ?? '200';
-        $parameters['is_enabled'] = $data['is_active'] ?? true;
-        $parameters['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
-        
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->app_name = 'voice_secretary';
+        $database->app_uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+        $database->save($array);
         
         return true;
     }
@@ -210,9 +129,8 @@ class voice_secretary {
         $parameters['secretary_uuid'] = $secretary_uuid;
         $parameters['domain_uuid'] = $domain_uuid;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        $this->database->execute();
+        $database = new database;
+        $database->execute($sql, $parameters);
         
         return true;
     }
@@ -231,9 +149,8 @@ class voice_secretary {
         $parameters['domain_uuid'] = $domain_uuid;
         $parameters['type'] = $type;
         
-        $this->database->sql = $sql;
-        $this->database->parameters = $parameters;
-        return $this->database->execute('all', PDO::FETCH_ASSOC);
+        $database = new database;
+        return $database->select($sql, $parameters, 'all');
     }
 }
 ?>
