@@ -17,7 +17,7 @@ $apps[$x]['url'] = "https://omniplay.com.br";
 $apps[$x]['description']['en-us'] = "AI-powered virtual secretary for phone calls";
 $apps[$x]['description']['pt-br'] = "Secretária virtual com IA para atendimento telefônico";
 
-// Menu
+// Menu - Single entry (navigation handled within pages)
 $apps[$x]['menu'][0]['title']['en-us'] = "Voice Secretary";
 $apps[$x]['menu'][0]['title']['pt-br'] = "Secretária Virtual";
 $apps[$x]['menu'][0]['uuid'] = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
@@ -26,43 +26,6 @@ $apps[$x]['menu'][0]['category'] = "internal";
 $apps[$x]['menu'][0]['path'] = "/app/voice_secretary/secretary.php";
 $apps[$x]['menu'][0]['groups'][] = "superadmin";
 $apps[$x]['menu'][0]['groups'][] = "admin";
-
-// Sub-menus
-$apps[$x]['menu'][1]['title']['en-us'] = "Secretaries";
-$apps[$x]['menu'][1]['title']['pt-br'] = "Secretárias";
-$apps[$x]['menu'][1]['uuid'] = "c3d4e5f6-a7b8-9012-cdef-123456789012";
-$apps[$x]['menu'][1]['parent_uuid'] = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
-$apps[$x]['menu'][1]['category'] = "internal";
-$apps[$x]['menu'][1]['path'] = "/app/voice_secretary/secretary.php";
-$apps[$x]['menu'][1]['groups'][] = "superadmin";
-$apps[$x]['menu'][1]['groups'][] = "admin";
-
-$apps[$x]['menu'][2]['title']['en-us'] = "AI Providers";
-$apps[$x]['menu'][2]['title']['pt-br'] = "Provedores de IA";
-$apps[$x]['menu'][2]['uuid'] = "d4e5f6a7-b8c9-0123-def0-234567890123";
-$apps[$x]['menu'][2]['parent_uuid'] = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
-$apps[$x]['menu'][2]['category'] = "internal";
-$apps[$x]['menu'][2]['path'] = "/app/voice_secretary/providers.php";
-$apps[$x]['menu'][2]['groups'][] = "superadmin";
-$apps[$x]['menu'][2]['groups'][] = "admin";
-
-$apps[$x]['menu'][3]['title']['en-us'] = "Documents";
-$apps[$x]['menu'][3]['title']['pt-br'] = "Documentos";
-$apps[$x]['menu'][3]['uuid'] = "e5f6a7b8-c9d0-1234-ef01-345678901234";
-$apps[$x]['menu'][3]['parent_uuid'] = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
-$apps[$x]['menu'][3]['category'] = "internal";
-$apps[$x]['menu'][3]['path'] = "/app/voice_secretary/documents.php";
-$apps[$x]['menu'][3]['groups'][] = "superadmin";
-$apps[$x]['menu'][3]['groups'][] = "admin";
-
-$apps[$x]['menu'][4]['title']['en-us'] = "Conversations";
-$apps[$x]['menu'][4]['title']['pt-br'] = "Conversas";
-$apps[$x]['menu'][4]['uuid'] = "f6a7b8c9-d0e1-2345-f012-456789012345";
-$apps[$x]['menu'][4]['parent_uuid'] = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
-$apps[$x]['menu'][4]['category'] = "internal";
-$apps[$x]['menu'][4]['path'] = "/app/voice_secretary/conversations.php";
-$apps[$x]['menu'][4]['groups'][] = "superadmin";
-$apps[$x]['menu'][4]['groups'][] = "admin";
 
 // Permissions
 $apps[$x]['permissions'][0]['name'] = "voice_secretary_view";

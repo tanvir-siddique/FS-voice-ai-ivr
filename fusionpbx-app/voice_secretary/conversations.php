@@ -72,6 +72,10 @@ $secretaries = $database->select($sql_sec, ['domain_uuid' => $domain_uuid]);
 // Include header
 $document['title'] = $text['title-conversations'];
 require_once "resources/header.php";
+
+//include tab navigation
+$current_page = 'conversations';
+require_once "resources/nav_tabs.php";
 ?>
 
 <div class="action_bar" id="action_bar">

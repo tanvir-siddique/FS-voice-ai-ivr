@@ -91,6 +91,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit'])) {
 // Include header
 $document['title'] = $text['title-settings'];
 require_once "resources/header.php";
+
+//include tab navigation
+$current_page = 'settings';
+require_once "resources/nav_tabs.php";
 ?>
 
 <form method="post">

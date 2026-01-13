@@ -39,6 +39,10 @@ $documents = $database->select($sql, $parameters);
 // Include header
 $document['title'] = $text['title-voice_documents'];
 require_once "resources/header.php";
+
+//include tab navigation
+$current_page = 'documents';
+require_once "resources/nav_tabs.php";
 ?>
 
 <div class="action_bar" id="action_bar">

@@ -63,6 +63,10 @@
 //include the header
 	require_once "resources/header.php";
 
+//include tab navigation
+	$current_page = 'secretaries';
+	require_once "resources/nav_tabs.php";
+
 ?>
 
 <div class="action_bar" id="action_bar">
