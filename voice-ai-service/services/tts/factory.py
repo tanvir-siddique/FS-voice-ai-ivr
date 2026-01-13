@@ -49,6 +49,8 @@ def get_available_providers() -> list:
 # Auto-register providers when imported
 def _register_all():
     """Register all available TTS providers."""
+    import importlib
+    
     provider_classes = [
         ("piper_local", "piper_local", "PiperLocalTTS"),
         ("openai_tts", "openai_tts", "OpenAITTS"),
@@ -62,10 +64,11 @@ def _register_all():
     
     for name, module_name, class_name in provider_classes:
         try:
-            module = __import__(f".{module_name}", globals(), locals(), [class_name], 1)
+            module = importlib.import_module(f"services.tts.{module_name}")
             provider_class = getattr(module, class_name)
             register_provider(name, provider_class)
-        except (ImportError, AttributeError):
+        except (ImportError, AttributeError) as e:
+            # Log but don't fail - provider may have missing dependencies
             pass
 
 

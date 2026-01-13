@@ -60,9 +60,11 @@ def _register_all():
         ("lmstudio_local", "lmstudio_local", "LMStudioLLM"),
     ]
     
+    import importlib
+    
     for name, module_name, class_name in provider_classes:
         try:
-            module = __import__(f".{module_name}", globals(), locals(), [class_name], 1)
+            module = importlib.import_module(f"services.llm.{module_name}")
             provider_class = getattr(module, class_name)
             register_provider(name, provider_class)
         except (ImportError, AttributeError):
