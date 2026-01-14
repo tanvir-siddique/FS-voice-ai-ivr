@@ -266,6 +266,13 @@ Os presets são baseados na documentação oficial e ajustam apenas parâmetros 
 - OpenAI Realtime: VAD + tokens
 - ElevenLabs: overrides permitidos pelo Agent (quando liberado)
 
+Presets PT-BR disponíveis:
+- `ptbr_balanced`
+- `ptbr_low_latency`
+- `ptbr_high_quality`
+- `ptbr_stability` (OpenAI/ElevenLabs)
+- `ptbr_agent_default` (ElevenLabs)
+
 
 ## Troubleshooting
 

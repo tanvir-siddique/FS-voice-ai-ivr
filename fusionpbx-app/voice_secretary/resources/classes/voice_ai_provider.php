@@ -399,7 +399,7 @@ class voice_ai_provider {
             ],
             // Realtime providers
             'openai_realtime' => [
-                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality', 'stability'], 'default' => 'balanced'],
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality', 'stability', 'ptbr_balanced', 'ptbr_low_latency', 'ptbr_high_quality', 'ptbr_stability'], 'default' => 'balanced'],
                 ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gpt-4o-realtime-preview'],
@@ -411,7 +411,7 @@ class voice_ai_provider {
                 ['name' => 'tools_json', 'label' => 'Tools JSON (optional)', 'type' => 'textarea'],
             ],
             'elevenlabs_conversational' => [
-                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['agent_default', 'low_latency', 'high_quality', 'stability'], 'default' => 'agent_default'],
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['agent_default', 'low_latency', 'high_quality', 'stability', 'ptbr_agent_default', 'ptbr_low_latency', 'ptbr_high_quality', 'ptbr_stability'], 'default' => 'agent_default'],
                 ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'agent_id', 'label' => 'Agent ID', 'type' => 'text', 'required' => true],
@@ -429,7 +429,7 @@ class voice_ai_provider {
                 ['name' => 'dynamic_variables', 'label' => 'Dynamic Variables (JSON)', 'type' => 'textarea'],
             ],
             'gemini_live' => [
-                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality'], 'default' => 'balanced'],
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality', 'ptbr_balanced', 'ptbr_low_latency', 'ptbr_high_quality'], 'default' => 'balanced'],
                 ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gemini-2.0-flash-exp'],

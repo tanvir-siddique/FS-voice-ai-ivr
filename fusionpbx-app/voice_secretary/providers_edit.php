@@ -115,6 +115,7 @@
 	echo "	<div class='actions'>\n";
 	echo button::create(['type'=>'button','label'=>$text['button-back'],'icon'=>$_SESSION['theme']['button_icon_back'],'id'=>'btn_back','link'=>'providers.php']);
 	echo button::create(['type'=>'submit','name'=>'submit','label'=>$text['button-save'],'icon'=>$_SESSION['theme']['button_icon_save'],'id'=>'btn_save','style'=>'margin-left: 15px;']);
+	echo button::create(['type'=>'button','label'=>($text['button-apply_preset'] ?? 'Apply Preset & Save'),'icon'=>$_SESSION['theme']['button_icon_save'],'id'=>'btn_apply_preset','style'=>'margin-left: 15px;']);
 	echo "	</div>\n";
 	echo "	<div style='clear: both;'></div>\n";
 	echo "</div>\n";
@@ -397,6 +398,30 @@ function applyPreset(providerName, preset) {
 				silence_duration_ms: "1500",
 				prefix_padding_ms: "300",
 				max_response_output_tokens: "3072"
+			},
+			ptbr_balanced: {
+				vad_threshold: "0.55",
+				silence_duration_ms: "1000",
+				prefix_padding_ms: "300",
+				max_response_output_tokens: "4096"
+			},
+			ptbr_low_latency: {
+				vad_threshold: "0.75",
+				silence_duration_ms: "700",
+				prefix_padding_ms: "200",
+				max_response_output_tokens: "2048"
+			},
+			ptbr_high_quality: {
+				vad_threshold: "0.5",
+				silence_duration_ms: "1300",
+				prefix_padding_ms: "400",
+				max_response_output_tokens: "6144"
+			},
+			ptbr_stability: {
+				vad_threshold: "0.85",
+				silence_duration_ms: "1600",
+				prefix_padding_ms: "300",
+				max_response_output_tokens: "3072"
 			}
 		},
 		elevenlabs_conversational: {
@@ -430,12 +455,50 @@ function applyPreset(providerName, preset) {
 				tts_stability: "0.85",
 				tts_speed: "0.95",
 				tts_similarity_boost: "0.8"
+			},
+			ptbr_agent_default: {
+				use_agent_config: "true",
+				allow_prompt_override: "false",
+				allow_first_message_override: "false",
+				allow_voice_id_override: "false",
+				allow_tts_override: "false",
+				language: "pt-BR"
+			},
+			ptbr_low_latency: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.35",
+				tts_speed: "1.1",
+				tts_similarity_boost: "0.65",
+				language: "pt-BR"
+			},
+			ptbr_high_quality: {
+				use_agent_config: "false",
+				allow_prompt_override: "true",
+				allow_first_message_override: "true",
+				allow_voice_id_override: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.75",
+				tts_speed: "1.0",
+				tts_similarity_boost: "0.92",
+				language: "pt-BR"
+			},
+			ptbr_stability: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.88",
+				tts_speed: "0.95",
+				tts_similarity_boost: "0.82",
+				language: "pt-BR"
 			}
 		},
 		gemini_live: {
 			balanced: {},
 			low_latency: {},
-			high_quality: {}
+			high_quality: {},
+			ptbr_balanced: {},
+			ptbr_low_latency: {},
+			ptbr_high_quality: {}
 		}
 	};
 	const presetData = presets[providerName] && presets[providerName][preset];
@@ -475,6 +538,16 @@ document.addEventListener('DOMContentLoaded', () => {
 		// Edit mode: fields already rendered
 		bindDynamicControls();
 		toggleSimpleMode(providerName, getFieldValue('simple_mode'));
+	}
+
+	const applyBtn = document.getElementById('btn_apply_preset');
+	if (applyBtn) {
+		applyBtn.addEventListener('click', () => {
+			const providerName = document.getElementById('provider_name')?.value || document.querySelector('input[name="provider_name"]')?.value;
+			const presetValue = getFieldValue('preset');
+			applyPreset(providerName, presetValue);
+			document.getElementById('frm').submit();
+		});
 	}
 });
 </script>
