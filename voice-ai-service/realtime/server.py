@@ -12,6 +12,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 from typing import Optional
 
 import websockets
@@ -19,6 +20,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from .session import RealtimeSessionConfig
 from .session_manager import get_session_manager
+from .utils.metrics import get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,10 @@ PCM16_CHUNK_MS = 20
 # Warmup: acumular N chunks antes de começar a enviar (evita stuttering inicial)
 # Ref: os11k/freeswitch-elevenlabs-bridge usa BUFFER_WARMUP_CHUNKS = 10 (200ms)
 BUFFER_WARMUP_CHUNKS = 10  # 200ms
+
+# Fallback streamAudio (base64) usa frames maiores para reduzir overhead de arquivos
+STREAMAUDIO_FRAME_MS = int(os.getenv("FS_STREAMAUDIO_FRAME_MS", "200"))
+STREAMAUDIO_FRAME_BYTES = PCM16_16K_CHUNK_BYTES * max(1, STREAMAUDIO_FRAME_MS // 20)
 
 
 class RealtimeServer:
@@ -143,6 +149,7 @@ class RealtimeServer:
     ) -> None:
         """Gerencia uma sessão de chamada."""
         manager = get_session_manager()
+        metrics = get_metrics()
         session = None
         caller_id = ""
         
@@ -192,6 +199,10 @@ class RealtimeServer:
                 # Processar mensagens
                 if isinstance(message, bytes):
                     audio_bytes_total += len(message)
+                    try:
+                        metrics.record_audio(call_uuid, "in", len(message))
+                    except Exception:
+                        pass
                     # Áudio binário do FreeSWITCH
                     if session and session.is_active:
                         await session.handle_audio_input(message)
@@ -322,21 +333,57 @@ class RealtimeServer:
         pending = bytearray()
         sender_task: Optional[asyncio.Task] = None
         format_sent = False
+        playback_mode = os.getenv("FS_PLAYBACK_MODE", "rawAudio").lower()
+        allow_streamaudio_fallback = os.getenv("FS_STREAMAUDIO_FALLBACK", "true").lower() in ("1", "true", "yes")
+        if playback_mode not in ("rawaudio", "streamaudio"):
+            playback_mode = "rawaudio"
+
+        async def _send_rawaudio_header() -> bool:
+            nonlocal format_sent
+            if format_sent:
+                return True
+            try:
+                format_msg = json.dumps({
+                    "type": "rawAudio",
+                    "data": {
+                        "sampleRate": 16000
+                    }
+                })
+                await websocket.send(format_msg)
+                format_sent = True
+                logger.info("Audio format sent to FreeSWITCH (rawAudio)", extra={"call_uuid": call_uuid})
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to send rawAudio header: {e}", extra={"call_uuid": call_uuid})
+                return False
+
+        async def _send_streamaudio_frame(frame_bytes: bytes) -> None:
+            payload = json.dumps({
+                "type": "streamAudio",
+                "data": {
+                    "audioDataType": "raw",
+                    "sampleRate": 16000,
+                    "audioData": base64.b64encode(frame_bytes).decode("utf-8"),
+                }
+            })
+            await websocket.send(payload)
+            try:
+                metrics.record_audio(call_uuid, "out", len(frame_bytes))
+            except Exception:
+                pass
+            await asyncio.sleep(STREAMAUDIO_FRAME_MS / 1000.0)
 
         async def _sender_loop_rawaudio() -> None:
             """
             Envia áudio para o FreeSWITCH usando protocolo rawAudio + binário.
-            
-            Protocolo (conforme os11k/freeswitch-elevenlabs-bridge):
-            1. Envia mensagem de formato JSON uma vez
-            2. Depois envia chunks binários de 640 bytes (20ms) com pacing de 20ms
-            3. Warmup de 10 chunks (200ms) antes de começar a enviar
+            Fallback para streamAudio quando rawAudio falhar (opcional).
             """
-            nonlocal format_sent
+            nonlocal playback_mode
             try:
                 buffered_chunks: list[bytes] = []
                 streaming_started = False
-                
+                streamaudio_buffer = bytearray()
+
                 while True:
                     chunk = await audio_out_queue.get()
                     if chunk is None:
@@ -344,58 +391,95 @@ class RealtimeServer:
                         for remaining in buffered_chunks:
                             await websocket.send(remaining)
                             await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
+                        if streamaudio_buffer:
+                            await _send_streamaudio_frame(bytes(streamaudio_buffer))
                         return
-                    
-                    # Enviar mensagem de formato uma vez
-                    if not format_sent:
-                        format_msg = json.dumps({
-                            "type": "rawAudio",
-                            "data": {
-                                "sampleRate": 16000
-                            }
-                        })
-                        await websocket.send(format_msg)
-                        format_sent = True
-                        logger.info("Audio format sent to FreeSWITCH (rawAudio)", extra={"call_uuid": call_uuid})
-                    
-                    # Acumular chunks para warmup
-                    buffered_chunks.append(chunk)
-                    
-                    # Iniciar streaming após warmup
-                    if not streaming_started and len(buffered_chunks) >= BUFFER_WARMUP_CHUNKS:
-                        streaming_started = True
-                        logger.debug(f"Warmup complete ({BUFFER_WARMUP_CHUNKS} chunks), starting playback", extra={"call_uuid": call_uuid})
-                    
-                    # Enviar chunks com pacing
-                    if streaming_started:
-                        while buffered_chunks:
-                            chunk_to_send = buffered_chunks.pop(0)
-                            await websocket.send(chunk_to_send)  # Enviar como binário
-                            await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)  # Pacing de 20ms
-                        
-                        # Continuar recebendo e enviando em tempo real
-                        while True:
-                            try:
-                                c = await asyncio.wait_for(audio_out_queue.get(), timeout=0.5)
-                            except asyncio.TimeoutError:
-                                # Sem mais áudio, sair do loop de streaming contínuo
-                                # mas continuar no loop principal para receber mais áudio
-                                break
-                            
-                            if c is None:
-                                return
-                            
-                            await websocket.send(c)  # Enviar como binário
-                            await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
-                        
-                        # Reset para próximo burst de áudio
-                        streaming_started = False
-                        
+
+                    # rawAudio header
+                    if playback_mode == "rawaudio":
+                        header_ok = await _send_rawaudio_header()
+                        if not header_ok and allow_streamaudio_fallback:
+                            playback_mode = "streamaudio"
+                            logger.warning("Switching to streamAudio fallback (header failed)", extra={"call_uuid": call_uuid})
+
+                    if playback_mode == "rawaudio":
+                        # Acumular chunks para warmup
+                        buffered_chunks.append(chunk)
+
+                        # Iniciar streaming após warmup
+                        if not streaming_started and len(buffered_chunks) >= BUFFER_WARMUP_CHUNKS:
+                            streaming_started = True
+                            logger.debug(
+                                f"Warmup complete ({BUFFER_WARMUP_CHUNKS} chunks), starting playback",
+                                extra={"call_uuid": call_uuid},
+                            )
+
+                        # Enviar chunks com pacing
+                        if streaming_started:
+                            while buffered_chunks:
+                                chunk_to_send = buffered_chunks.pop(0)
+                                try:
+                                    await websocket.send(chunk_to_send)
+                                    try:
+                                        metrics.record_audio(call_uuid, "out", len(chunk_to_send))
+                                    except Exception:
+                                        pass
+                                    await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
+                                except Exception as e:
+                                    if allow_streamaudio_fallback:
+                                        playback_mode = "streamaudio"
+                                        streamaudio_buffer.extend(chunk_to_send)
+                                        logger.warning(
+                                            f"Switching to streamAudio fallback (send failed): {e}",
+                                            extra={"call_uuid": call_uuid},
+                                        )
+                                        break
+                                    raise
+
+                            # Continuar recebendo e enviando em tempo real
+                            while playback_mode == "rawaudio":
+                                try:
+                                    c = await asyncio.wait_for(audio_out_queue.get(), timeout=0.5)
+                                except asyncio.TimeoutError:
+                                    # Sem mais áudio, sair do loop de streaming contínuo
+                                    break
+
+                                if c is None:
+                                    return
+
+                                try:
+                                    await websocket.send(c)
+                                    try:
+                                        metrics.record_audio(call_uuid, "out", len(c))
+                                    except Exception:
+                                        pass
+                                    await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
+                                except Exception as e:
+                                    if allow_streamaudio_fallback:
+                                        playback_mode = "streamaudio"
+                                        streamaudio_buffer.extend(c)
+                                        logger.warning(
+                                            f"Switching to streamAudio fallback (send failed): {e}",
+                                            extra={"call_uuid": call_uuid},
+                                        )
+                                        break
+                                    raise
+
+                            # Reset para próximo burst de áudio
+                            streaming_started = False
+
+                    if playback_mode == "streamaudio":
+                        streamaudio_buffer.extend(chunk)
+                        while len(streamaudio_buffer) >= STREAMAUDIO_FRAME_BYTES:
+                            frame = bytes(streamaudio_buffer[:STREAMAUDIO_FRAME_BYTES])
+                            del streamaudio_buffer[:STREAMAUDIO_FRAME_BYTES]
+                            await _send_streamaudio_frame(frame)
+
             except websockets.exceptions.ConnectionClosed:
                 logger.debug("WebSocket closed during audio playback", extra={"call_uuid": call_uuid})
             except Exception as e:
                 logger.error(
-                    f"Error in FreeSWITCH rawAudio sender loop: {e}",
+                    f"Error in FreeSWITCH playback sender loop: {e}",
                     exc_info=True,
                     extra={"call_uuid": call_uuid},
                 )

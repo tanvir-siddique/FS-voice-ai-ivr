@@ -31,6 +31,8 @@ class SessionMetrics:
     ended_at: Optional[float] = None
     audio_chunks_received: int = 0
     audio_chunks_sent: int = 0
+    audio_bytes_received: int = 0
+    audio_bytes_sent: int = 0
     turns_completed: int = 0
     response_latencies: list = field(default_factory=list)
     
@@ -55,6 +57,7 @@ class RealtimeMetrics:
     def _init_prometheus(self):
         self.calls_total = Counter('voice_ai_realtime_calls_total', 'Total calls', ['domain_uuid', 'provider', 'outcome'])
         self.audio_chunks = Counter('voice_ai_realtime_audio_chunks_total', 'Audio chunks', ['domain_uuid', 'direction'])
+        self.audio_bytes = Counter('voice_ai_realtime_audio_bytes_total', 'Audio bytes', ['domain_uuid', 'direction'])
         self.response_latency = Histogram('voice_ai_realtime_response_latency_seconds', 'Response latency', 
             ['domain_uuid', 'provider'], buckets=[0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0])
         self.active_sessions = Gauge('voice_ai_realtime_active_sessions', 'Active sessions', ['domain_uuid', 'provider'])
@@ -96,6 +99,19 @@ class RealtimeMetrics:
             metrics.turns_completed += 1
             if PROMETHEUS_AVAILABLE:
                 self.response_latency.labels(domain_uuid=metrics.domain_uuid, provider=metrics.provider).observe(latency_seconds)
+
+    def record_audio(self, call_uuid: str, direction: str, byte_count: int) -> None:
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            if direction == "in":
+                metrics.audio_chunks_received += 1
+                metrics.audio_bytes_received += byte_count
+            else:
+                metrics.audio_chunks_sent += 1
+                metrics.audio_bytes_sent += byte_count
+            if PROMETHEUS_AVAILABLE:
+                self.audio_chunks.labels(domain_uuid=metrics.domain_uuid, direction=direction).inc()
+                self.audio_bytes.labels(domain_uuid=metrics.domain_uuid, direction=direction).inc(byte_count)
     
     @contextmanager
     def measure_latency(self, call_uuid: str):

@@ -56,6 +56,11 @@ fs_cli -x "module_exists mod_audio_stream"
 # Deve retornar: true
 ```
 
+Verificar versão (v1.0.3+ recomendado):
+```bash
+strings /usr/lib/freeswitch/mod/mod_audio_stream.so | grep -i "1.0.3" || true
+```
+
 ### 2. Copiar script Lua
 
 ```bash
