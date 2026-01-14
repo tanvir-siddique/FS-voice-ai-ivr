@@ -2,9 +2,16 @@
 OpenAI Realtime API Provider.
 
 Referências:
-- .context/docs/data-flow.md: Fluxo Realtime v2
-- openspec/changes/voice-ai-realtime/design.md: Decision 2 (Protocol)
-- Context7: /openai/openai-cookbook (Realtime API examples)
+- SDK oficial: https://github.com/openai/openai-python (src/openai/resources/beta/realtime/)
+- Docs: https://platform.openai.com/docs/guides/realtime-conversations
+- Context7: /websites/platform_openai
+
+IMPORTANTE - Formato de eventos (verificado em Jan/2026):
+- Áudio output: response.output_audio.delta (NÃO response.audio.delta!)
+- Áudio done: response.output_audio.done
+- Transcript output: response.audio_transcript.delta/done
+- Input audio: input_audio_buffer.append
+- VAD: input_audio_buffer.speech_started/speech_stopped
 """
 
 import asyncio
@@ -71,9 +78,14 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
     """
     Provider para OpenAI Realtime API.
     
-    Sample rates:
-    - Input: 24kHz (API requirement)
-    - Output: 24kHz
+    Sample rates (conforme SDK oficial):
+    - Input: 24kHz PCM16 mono
+    - Output: 24kHz PCM16 mono
+    
+    Protocolo WebSocket:
+    - Header: Authorization: Bearer {api_key}
+    - Header: OpenAI-Beta: realtime=v1
+    - URL: wss://api.openai.com/v1/realtime?model={model}
     """
     
     REALTIME_URL = "wss://api.openai.com/v1/realtime"
@@ -98,6 +110,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         self._ws: Optional[ClientConnection] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._event_queue: asyncio.Queue[ProviderEvent] = asyncio.Queue()
+        self._session_id: Optional[str] = None
     
     @property
     def name(self) -> str:
@@ -105,7 +118,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
     
     @property
     def input_sample_rate(self) -> int:
-        return 24000
+        return 24000  # OpenAI Realtime requer 24kHz
     
     @property
     def output_sample_rate(self) -> int:
@@ -122,6 +135,11 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "OpenAI-Beta": "realtime=v1"
         }
         
+        logger.debug(f"Connecting to OpenAI Realtime: {url}", extra={
+            "domain_uuid": self.config.domain_uuid,
+            "model": self.model,
+        })
+        
         self._ws = await websockets.connect(
             url,
             additional_headers=headers,
@@ -134,31 +152,39 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         event = json.loads(response)
         
         if event.get("type") != "session.created":
-            raise ConnectionError(f"Unexpected: {event.get('type')}")
+            raise ConnectionError(f"Unexpected initial event: {event.get('type')}")
         
+        self._session_id = event.get("session", {}).get("id")
         self._connected = True
         self._receive_task = asyncio.create_task(self._receive_loop())
         
-        # Log estruturado conforme backend-specialist.md
         logger.info("Connected to OpenAI Realtime", extra={
             "domain_uuid": self.config.domain_uuid,
             "model": self.model,
+            "session_id": self._session_id,
         })
     
     async def configure(self) -> None:
-        """Configura sessão com prompt, voz, VAD, tools."""
+        """
+        Configura sessão com prompt, voz, VAD, tools.
+        
+        Ref: session.update event (SDK oficial)
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
         
+        # Construir configuração de sessão
         session_config = {
             "type": "session.update",
             "session": {
                 "modalities": ["audio", "text"],
-                "instructions": self.config.system_prompt,
-                "voice": self.config.voice,
+                "instructions": self.config.system_prompt or "",
+                "voice": self.config.voice or "alloy",
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
-                "input_audio_transcription": {"model": "whisper-1"},
+                "input_audio_transcription": {
+                    "model": "whisper-1"
+                },
                 "turn_detection": {
                     "type": "server_vad",
                     "threshold": self.config.vad_threshold,
@@ -171,25 +197,48 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             }
         }
         
+        logger.debug("Sending session.update", extra={
+            "domain_uuid": self.config.domain_uuid,
+            "has_instructions": bool(self.config.system_prompt),
+            "voice": self.config.voice,
+        })
+        
         await self._ws.send(json.dumps(session_config))
         
+        # Se houver first_message (saudação), enviar como texto e solicitar resposta
         if self.config.first_message:
+            logger.debug(f"Sending first message: {self.config.first_message[:50]}...")
             await self.send_text(self.config.first_message)
+            # Solicitar resposta do modelo
             await self._ws.send(json.dumps({"type": "response.create"}))
     
     async def send_audio(self, audio_bytes: bytes) -> None:
-        """Envia áudio (base64 PCM16 @ 24kHz)."""
+        """
+        Envia áudio para OpenAI.
+        
+        Formato: base64 PCM16 @ 24kHz
+        Ref: input_audio_buffer.append event (SDK oficial)
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
         
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        
         await self._ws.send(json.dumps({
             "type": "input_audio_buffer.append",
             "audio": audio_b64
         }))
+        
+        logger.debug(f"Audio chunk sent to OpenAI: {len(audio_bytes)} bytes", extra={
+            "domain_uuid": self.config.domain_uuid,
+        })
     
     async def send_text(self, text: str) -> None:
-        """Envia mensagem de texto."""
+        """
+        Envia mensagem de texto.
+        
+        Ref: conversation.item.create event (SDK oficial)
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
         
@@ -201,11 +250,22 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 "content": [{"type": "input_text", "text": text}]
             }
         }))
+        
+        logger.debug(f"Text sent to OpenAI: {text[:50]}...", extra={
+            "domain_uuid": self.config.domain_uuid,
+        })
     
     async def interrupt(self) -> None:
-        """Interrompe resposta atual (barge-in)."""
+        """
+        Interrompe resposta atual (barge-in).
+        
+        Ref: response.cancel event (SDK oficial)
+        """
         if self._ws:
             await self._ws.send(json.dumps({"type": "response.cancel"}))
+            logger.debug("Interrupt signal sent to OpenAI", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
     
     async def send_function_result(
         self,
@@ -213,6 +273,11 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         result: Dict[str, Any],
         call_id: Optional[str] = None
     ) -> None:
+        """
+        Envia resultado de function call.
+        
+        Ref: conversation.item.create (type: function_call_output) (SDK oficial)
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
         
@@ -224,7 +289,14 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 "output": json.dumps(result)
             }
         }))
+        
+        # Solicitar nova resposta após enviar resultado da função
         await self._ws.send(json.dumps({"type": "response.create"}))
+        
+        logger.debug(f"Function result sent to OpenAI: {function_name}", extra={
+            "domain_uuid": self.config.domain_uuid,
+            "call_id": call_id,
+        })
     
     async def receive_events(self) -> AsyncIterator[ProviderEvent]:
         """Generator de eventos."""
@@ -251,32 +323,77 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 if provider_event:
                     await self._event_queue.put(provider_event)
         except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"OpenAI WebSocket closed: {e}", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             await self._event_queue.put(ProviderEvent(
                 type=ProviderEventType.SESSION_ENDED,
                 data={"reason": str(e)}
             ))
         except Exception as e:
-            logger.error(f"Receive loop error: {e}")
+            logger.error(f"OpenAI receive loop error: {e}", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             await self._event_queue.put(ProviderEvent(
                 type=ProviderEventType.ERROR,
                 data={"error": str(e)}
             ))
     
     def _parse_event(self, event: Dict[str, Any]) -> Optional[ProviderEvent]:
-        """Converte evento OpenAI para ProviderEvent."""
+        """
+        Converte evento OpenAI para ProviderEvent.
+        
+        IMPORTANTE - Nomes de eventos conforme documentação oficial (Jan/2026):
+        - response.output_audio.delta (NÃO response.audio.delta!)
+        - response.output_audio.done
+        - response.audio_transcript.delta/done
+        - conversation.item.input_audio_transcription.completed
+        """
         etype = event.get("type", "")
         
-        if etype == "response.audio.delta":
+        # Log para debug de eventos desconhecidos
+        if etype not in (
+            "response.output_audio.delta", "response.output_audio.done",
+            "response.audio_transcript.delta", "response.audio_transcript.done",
+            "conversation.item.input_audio_transcription.completed",
+            "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped",
+            "response.created", "response.done",
+            "response.function_call_arguments.done",
+            "session.created", "session.updated",
+            "input_audio_buffer.committed", "input_audio_buffer.cleared",
+            "conversation.item.created", "error"
+        ):
+            logger.debug(f"OpenAI event received: {etype}", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "event_data_preview": str(event)[:200],
+            })
+        
+        # ===== ÁUDIO OUTPUT =====
+        # CORRIGIDO: Era response.audio.delta, agora é response.output_audio.delta
+        if etype == "response.output_audio.delta":
             audio_b64 = event.get("delta", "")
+            audio_bytes = base64.b64decode(audio_b64) if audio_b64 else b""
+            
+            logger.debug(f"OpenAI audio received: {len(audio_bytes)} bytes", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "response_id": event.get("response_id"),
+            })
+            
             return ProviderEvent(
                 type=ProviderEventType.AUDIO_DELTA,
-                data={"audio": base64.b64decode(audio_b64) if audio_b64 else b""},
+                data={"audio": audio_bytes},
                 response_id=event.get("response_id"),
+                item_id=event.get("item_id"),
             )
         
-        if etype == "response.audio.done":
+        # CORRIGIDO: Era response.audio.done
+        if etype == "response.output_audio.done":
+            logger.debug("OpenAI audio output done", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             return ProviderEvent(type=ProviderEventType.AUDIO_DONE, data={})
         
+        # ===== TRANSCRIÇÃO DO ASSISTENTE =====
         if etype == "response.audio_transcript.delta":
             return ProviderEvent(
                 type=ProviderEventType.TRANSCRIPT_DELTA,
@@ -289,39 +406,97 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 data={"transcript": event.get("transcript", "")}
             )
         
+        # ===== TRANSCRIÇÃO DO USUÁRIO (STT) =====
         if etype == "conversation.item.input_audio_transcription.completed":
+            transcript = event.get("transcript", "")
+            logger.debug(f"User transcript: {transcript[:50]}...", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             return ProviderEvent(
                 type=ProviderEventType.USER_TRANSCRIPT,
-                data={"transcript": event.get("transcript", "")}
+                data={"transcript": transcript}
             )
         
+        if etype == "conversation.item.input_audio_transcription.failed":
+            logger.warning("User audio transcription failed", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "error": event.get("error"),
+            })
+            return None  # Não é erro crítico
+        
+        # ===== VAD (Voice Activity Detection) =====
         if etype == "input_audio_buffer.speech_started":
+            logger.debug("Speech started (VAD)", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             return ProviderEvent(type=ProviderEventType.SPEECH_STARTED, data={})
         
         if etype == "input_audio_buffer.speech_stopped":
+            logger.debug("Speech stopped (VAD)", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             return ProviderEvent(type=ProviderEventType.SPEECH_STOPPED, data={})
         
+        # ===== RESPONSE LIFECYCLE =====
         if etype == "response.created":
+            logger.debug("Response started", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
             return ProviderEvent(type=ProviderEventType.RESPONSE_STARTED, data={})
         
         if etype == "response.done":
-            return ProviderEvent(type=ProviderEventType.RESPONSE_DONE, data={})
+            response = event.get("response", {})
+            status = response.get("status", "completed")
+            logger.debug(f"Response done: {status}", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "status": status,
+            })
+            return ProviderEvent(
+                type=ProviderEventType.RESPONSE_DONE,
+                data={"status": status}
+            )
         
+        # ===== FUNCTION CALLS =====
         if etype == "response.function_call_arguments.done":
+            func_name = event.get("name", "")
+            try:
+                arguments = json.loads(event.get("arguments", "{}"))
+            except json.JSONDecodeError:
+                arguments = {}
+            
+            logger.info(f"Function call: {func_name}", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "call_id": event.get("call_id"),
+            })
+            
             return ProviderEvent(
                 type=ProviderEventType.FUNCTION_CALL,
                 data={
-                    "function_name": event.get("name", ""),
-                    "arguments": json.loads(event.get("arguments", "{}")),
+                    "function_name": func_name,
+                    "arguments": arguments,
                     "call_id": event.get("call_id", ""),
                 }
             )
         
+        # ===== ERRORS =====
         if etype == "error":
             error = event.get("error", {})
-            if error.get("code") == "rate_limit_exceeded":
+            error_code = error.get("code", "unknown")
+            error_message = error.get("message", "Unknown error")
+            
+            logger.error(f"OpenAI error: {error_code} - {error_message}", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
+            
+            if error_code == "rate_limit_exceeded":
                 return ProviderEvent(type=ProviderEventType.RATE_LIMITED, data={"error": error})
+            
             return ProviderEvent(type=ProviderEventType.ERROR, data={"error": error})
+        
+        # ===== SESSION EVENTS (confirmações, ignorar) =====
+        if etype in ("session.updated", "input_audio_buffer.committed", 
+                     "input_audio_buffer.cleared", "conversation.item.created"):
+            return None  # Eventos de confirmação, não precisam de handling
         
         return None
     
@@ -341,5 +516,6 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             self._ws = None
         
         logger.info("Disconnected from OpenAI Realtime", extra={
-            "domain_uuid": self.config.domain_uuid
+            "domain_uuid": self.config.domain_uuid,
+            "session_id": self._session_id,
         })
