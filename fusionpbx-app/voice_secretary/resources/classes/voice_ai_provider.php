@@ -399,6 +399,8 @@ class voice_ai_provider {
             ],
             // Realtime providers
             'openai_realtime' => [
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality', 'stability'], 'default' => 'balanced'],
+                ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gpt-4o-realtime-preview'],
                 ['name' => 'voice', 'label' => 'Voice', 'type' => 'select', 'options' => ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']],
@@ -409,6 +411,8 @@ class voice_ai_provider {
                 ['name' => 'tools_json', 'label' => 'Tools JSON (optional)', 'type' => 'textarea'],
             ],
             'elevenlabs_conversational' => [
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['agent_default', 'low_latency', 'high_quality', 'stability'], 'default' => 'agent_default'],
+                ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'agent_id', 'label' => 'Agent ID', 'type' => 'text', 'required' => true],
                 ['name' => 'voice_id', 'label' => 'Voice ID', 'type' => 'text'],
@@ -416,6 +420,7 @@ class voice_ai_provider {
                 ['name' => 'allow_prompt_override', 'label' => 'Allow Prompt Override', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'false'],
                 ['name' => 'allow_first_message_override', 'label' => 'Allow First Message Override', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'false'],
                 ['name' => 'allow_voice_id_override', 'label' => 'Allow Voice ID Override', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'false'],
+                ['name' => 'allow_tts_override', 'label' => 'Allow TTS Overrides', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'false'],
                 ['name' => 'language', 'label' => 'Language (ex: pt-BR)', 'type' => 'text'],
                 ['name' => 'tts_stability', 'label' => 'TTS Stability (0-1)', 'type' => 'number', 'step' => '0.05', 'min' => '0', 'max' => '1'],
                 ['name' => 'tts_speed', 'label' => 'TTS Speed (0.7-1.2)', 'type' => 'number', 'step' => '0.05', 'min' => '0.7', 'max' => '1.2'],
@@ -424,6 +429,8 @@ class voice_ai_provider {
                 ['name' => 'dynamic_variables', 'label' => 'Dynamic Variables (JSON)', 'type' => 'textarea'],
             ],
             'gemini_live' => [
+                ['name' => 'preset', 'label' => 'Preset', 'type' => 'select', 'options' => ['balanced', 'low_latency', 'high_quality'], 'default' => 'balanced'],
+                ['name' => 'simple_mode', 'label' => 'Simple Mode', 'type' => 'select', 'options' => ['true', 'false'], 'default' => 'true'],
                 ['name' => 'api_key', 'label' => 'API Key', 'type' => 'password'],
                 ['name' => 'model', 'label' => 'Model', 'type' => 'text', 'default' => 'gemini-2.0-flash-exp'],
                 ['name' => 'voice', 'label' => 'Voice', 'type' => 'select', 'options' => ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck']],

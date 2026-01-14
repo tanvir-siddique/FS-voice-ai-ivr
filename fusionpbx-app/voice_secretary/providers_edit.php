@@ -300,6 +300,7 @@ function updateConfigFields() {
 	if (providerName && configFields[providerName]) {
 		configFields[providerName].forEach(field => {
 			const tr = document.createElement('tr');
+			tr.dataset.fieldName = field.name;
 			const tdLabel = document.createElement('td');
 			const tdInput = document.createElement('td');
 			
@@ -323,6 +324,21 @@ function updateConfigFields() {
 					if (opt === field.default) option.selected = true;
 					input.appendChild(option);
 				});
+			} else if (field.type === 'textarea') {
+				input = document.createElement('textarea');
+				input.className = 'formfld';
+				input.name = 'config[' + field.name + ']';
+				input.rows = 6;
+				if (field.default) input.value = field.default;
+			} else if (field.type === 'number') {
+				input = document.createElement('input');
+				input.type = 'number';
+				input.className = 'formfld';
+				input.name = 'config[' + field.name + ']';
+				if (field.default !== undefined) input.value = field.default;
+				if (field.step) input.step = field.step;
+				if (field.min !== undefined) input.min = field.min;
+				if (field.max !== undefined) input.max = field.max;
 			} else {
 				input = document.createElement('input');
 				input.type = field.type === 'password' ? 'password' : 'text';
@@ -338,7 +354,129 @@ function updateConfigFields() {
 			container.appendChild(tr);
 		});
 	}
+
+	applyPreset(providerName, getFieldValue('preset'));
+	toggleSimpleMode(providerName, getFieldValue('simple_mode'));
 }
+
+function getFieldValue(fieldName) {
+	const input = document.querySelector('[name="config[' + fieldName + ']"]');
+	return input ? input.value : null;
+}
+
+function setFieldValue(fieldName, value) {
+	const input = document.querySelector('[name="config[' + fieldName + ']"]');
+	if (!input || value === undefined || value === null) return;
+	input.value = value;
+}
+
+function applyPreset(providerName, preset) {
+	if (!providerName || !preset) return;
+	const presets = {
+		openai_realtime: {
+			balanced: {
+				vad_threshold: "0.5",
+				silence_duration_ms: "900",
+				prefix_padding_ms: "300",
+				max_response_output_tokens: "4096"
+			},
+			low_latency: {
+				vad_threshold: "0.7",
+				silence_duration_ms: "600",
+				prefix_padding_ms: "200",
+				max_response_output_tokens: "2048"
+			},
+			high_quality: {
+				vad_threshold: "0.45",
+				silence_duration_ms: "1200",
+				prefix_padding_ms: "400",
+				max_response_output_tokens: "6144"
+			},
+			stability: {
+				vad_threshold: "0.8",
+				silence_duration_ms: "1500",
+				prefix_padding_ms: "300",
+				max_response_output_tokens: "3072"
+			}
+		},
+		elevenlabs_conversational: {
+			agent_default: {
+				use_agent_config: "true",
+				allow_prompt_override: "false",
+				allow_first_message_override: "false",
+				allow_voice_id_override: "false",
+				allow_tts_override: "false"
+			},
+			low_latency: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.3",
+				tts_speed: "1.1",
+				tts_similarity_boost: "0.6"
+			},
+			high_quality: {
+				use_agent_config: "false",
+				allow_prompt_override: "true",
+				allow_first_message_override: "true",
+				allow_voice_id_override: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.7",
+				tts_speed: "1.0",
+				tts_similarity_boost: "0.9"
+			},
+			stability: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.85",
+				tts_speed: "0.95",
+				tts_similarity_boost: "0.8"
+			}
+		},
+		gemini_live: {
+			balanced: {},
+			low_latency: {},
+			high_quality: {}
+		}
+	};
+	const presetData = presets[providerName] && presets[providerName][preset];
+	if (!presetData) return;
+	Object.keys(presetData).forEach(key => setFieldValue(key, presetData[key]));
+}
+
+function toggleSimpleMode(providerName, simpleModeValue) {
+	const simpleMode = (simpleModeValue || 'true') === 'true';
+	const advancedFields = {
+		openai_realtime: ['vad_threshold', 'silence_duration_ms', 'prefix_padding_ms', 'max_response_output_tokens', 'tools_json'],
+		elevenlabs_conversational: ['allow_prompt_override', 'allow_first_message_override', 'allow_voice_id_override', 'allow_tts_override', 'language', 'tts_stability', 'tts_speed', 'tts_similarity_boost', 'custom_llm_extra_body', 'dynamic_variables'],
+		gemini_live: ['tools_json']
+	};
+	const fields = advancedFields[providerName] || [];
+	fields.forEach(name => {
+		const row = document.querySelector('tr[data-field-name="' + name + '"]');
+		if (row) row.style.display = simpleMode ? 'none' : '';
+	});
+}
+
+function bindDynamicControls() {
+	const providerName = document.getElementById('provider_name')?.value || document.querySelector('input[name="provider_name"]')?.value;
+	const presetField = document.querySelector('[name="config[preset]"]');
+	const simpleModeField = document.querySelector('[name="config[simple_mode]"]');
+	if (presetField) {
+		presetField.addEventListener('change', () => applyPreset(providerName, presetField.value));
+	}
+	if (simpleModeField) {
+		simpleModeField.addEventListener('change', () => toggleSimpleMode(providerName, simpleModeField.value));
+	}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+	const providerName = document.getElementById('provider_name')?.value || document.querySelector('input[name="provider_name"]')?.value;
+	if (providerName && !document.getElementById('provider_name')) {
+		// Edit mode: fields already rendered
+		bindDynamicControls();
+		toggleSimpleMode(providerName, getFieldValue('simple_mode'));
+	}
+});
 </script>
 
 <?php

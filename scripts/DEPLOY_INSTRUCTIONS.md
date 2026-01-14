@@ -255,6 +255,18 @@ Referências:
 - https://elevenlabs.io/docs/agents-platform/customization/personalization
 - https://platform.openai.com/docs/guides/realtime-vad
 
+### Presets e Wizard (UI simplificada)
+
+Para admins menos técnicos, a tela de providers agora oferece:
+
+- **Preset** (balanced / low_latency / high_quality / stability)
+- **Simple Mode** (oculta campos avançados)
+
+Os presets são baseados na documentação oficial e ajustam apenas parâmetros suportados:
+- OpenAI Realtime: VAD + tokens
+- ElevenLabs: overrides permitidos pelo Agent (quando liberado)
+
+
 ## Troubleshooting
 
 ### "No audio heard"
