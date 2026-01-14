@@ -116,13 +116,13 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         """
         Configura a sessão.
         
-        ElevenLabs usa conversation_config_override para customização.
-        Ref: https://elevenlabs.io/docs/agents-platform/customization/personalization/dynamic-variables
+        Ref: SDK oficial elevenlabs-python/conversation.py
+        O tipo correto é "conversation_initiation_client_data" (não "conversation_config_override")!
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
-        # Construir override de configuração
+        # Construir override de configuração do agente
         agent_config = {}
         
         # System prompt (personalidade)
@@ -144,40 +144,49 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
                 "domain_uuid": self.config.domain_uuid,
             })
         
-        config_override = {
-            "type": "conversation_config_override",
-            "conversation_config_override": {
-                "agent": agent_config,
-            },
+        # Construir conversation_config_override
+        conversation_config_override = {
+            "agent": agent_config,
         }
         
         # Voice override se especificado
         if self.voice_id:
-            config_override["conversation_config_override"]["tts"] = {
+            conversation_config_override["tts"] = {
                 "voice_id": self.voice_id,
             }
         
-        logger.info("Sending conversation_config_override", extra={
+        # Mensagem inicial - formato do SDK oficial!
+        # Tipo: "conversation_initiation_client_data" (NÃO "conversation_config_override")
+        initiation_message = {
+            "type": "conversation_initiation_client_data",
+            "conversation_config_override": conversation_config_override,
+            "dynamic_variables": {},  # Pode ser usado para passar variáveis dinâmicas
+        }
+        
+        logger.info("Sending conversation_initiation_client_data", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_system_prompt": bool(self.config.system_prompt),
-            "has_first_message": bool(self.config.first_message),
+            "has_first_message": bool(agent_config.get("first_message")),
+            "has_voice_id": bool(self.voice_id),
         })
         
-        await self._ws.send(json.dumps(config_override))
+        await self._ws.send(json.dumps(initiation_message))
     
     async def send_audio(self, audio_bytes: bytes) -> None:
         """
         Envia áudio para ElevenLabs.
         
         Formato: base64 PCM16 @ 16kHz
+        Ref: SDK oficial elevenlabs-python/conversation.py
+        IMPORTANTE: NÃO incluir "type" - apenas {"user_audio_chunk": "base64..."}
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
         
+        # SDK oficial NÃO inclui "type" no payload de áudio!
         await self._ws.send(json.dumps({
-            "type": "user_audio_chunk",
             "user_audio_chunk": audio_b64,
         }))
     
@@ -185,15 +194,16 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         """
         Envia texto para ElevenLabs.
         
-        ElevenLabs Conversational AI suporta texto via user_transcript.
+        Ref: SDK oficial - tipo "user_message" (não "user_transcript")
+        user_transcript é o que o servidor ENVIA de volta, não o que enviamos!
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
-        # Simular input de texto como transcript
+        # Tipo correto: user_message (não user_transcript!)
         await self._ws.send(json.dumps({
-            "type": "user_transcript",
-            "user_transcript": text,
+            "type": "user_message",
+            "text": text,
         }))
     
     async def interrupt(self) -> None:
@@ -209,14 +219,19 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         result: Dict[str, Any],
         call_id: Optional[str] = None
     ) -> None:
-        """Envia resultado de function call."""
+        """
+        Envia resultado de function call.
+        
+        Ref: SDK oficial - tipo "client_tool_result" (não "tool_result")
+        """
         if not self._ws:
             raise RuntimeError("Not connected")
         
         await self._ws.send(json.dumps({
-            "type": "tool_result",
+            "type": "client_tool_result",
             "tool_call_id": call_id or "",
-            "result": json.dumps(result),
+            "result": json.dumps(result) if isinstance(result, dict) else str(result),
+            "is_error": False,
         }))
     
     async def receive_events(self) -> AsyncIterator[ProviderEvent]:
@@ -241,14 +256,12 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
             async for message in self._ws:
                 event = json.loads(message)
                 
-                # Responder ping com pong para manter conexão ativa
+                # Responder ping com pong IMEDIATAMENTE para manter conexão ativa
+                # Ref: SDK oficial elevenlabs-python/conversation.py - ping_ms é só para medir latência
                 if event.get("type") == "ping":
                     ping_event = event.get("ping_event", {})
                     event_id = ping_event.get("event_id")
-                    ping_ms = ping_event.get("ping_ms", 0)
-                    # Aguardar o tempo indicado antes de responder
-                    if ping_ms > 0:
-                        await asyncio.sleep(ping_ms / 1000.0)
+                    # Responder IMEDIATAMENTE - NÃO aguardar ping_ms!
                     await self._ws.send(json.dumps({
                         "type": "pong",
                         "event_id": event_id,
@@ -333,19 +346,27 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         if etype == "agent_response_done":
             return ProviderEvent(type=ProviderEventType.RESPONSE_DONE, data={})
         
-        if etype == "tool_use":
-            # Function call
-            tool_calls = event.get("tool_calls", [])
-            if tool_calls:
-                tool = tool_calls[0]
-                return ProviderEvent(
-                    type=ProviderEventType.FUNCTION_CALL,
-                    data={
-                        "function_name": tool.get("name", ""),
-                        "arguments": json.loads(tool.get("arguments", "{}")),
-                        "call_id": tool.get("id", ""),
-                    }
-                )
+        if etype == "client_tool_call":
+            # Function call - Ref: SDK oficial
+            # Formato: {"type": "client_tool_call", "client_tool_call": {"tool_name": "...", "tool_call_id": "...", "parameters": {...}}}
+            tool_call = event.get("client_tool_call", {})
+            tool_name = tool_call.get("tool_name", "")
+            tool_call_id = tool_call.get("tool_call_id", "")
+            parameters = tool_call.get("parameters", {})
+            
+            logger.info(f"Tool call received: {tool_name}", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "tool_call_id": tool_call_id,
+            })
+            
+            return ProviderEvent(
+                type=ProviderEventType.FUNCTION_CALL,
+                data={
+                    "function_name": tool_name,
+                    "arguments": parameters,
+                    "call_id": tool_call_id,
+                }
+            )
         
         if etype == "conversation_ended":
             return ProviderEvent(
