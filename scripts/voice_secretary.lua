@@ -32,6 +32,10 @@ session:sleep(300) -- pequeno delay para estabilizar o canal
 --
 -- STREAM_HEART_BEAT: intervalo em segundos para keep-alive (útil com load balancers)
 
+-- Habilitar playback bidirecional (v1.0.3+)
+session:setVariable("STREAM_PLAYBACK", "true")
+session:setVariable("STREAM_SAMPLE_RATE", "16000")
+
 session:setVariable("STREAM_BUFFER_SIZE", "200")
 session:setVariable("STREAM_SUPPRESS_LOG", "false")
 -- session:setVariable("STREAM_HEART_BEAT", "15") -- opcional
