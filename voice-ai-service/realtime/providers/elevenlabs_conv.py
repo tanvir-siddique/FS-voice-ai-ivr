@@ -2,14 +2,29 @@
 ElevenLabs Conversational AI Provider.
 
 Referências:
+- AsyncAPI oficial: https://elevenlabs.io/docs/agents-platform/api-reference/agents-platform/websocket
+- SDK Python: https://github.com/elevenlabs/elevenlabs-python
 - Context7: /elevenlabs/elevenlabs-python
-- .context/docs/data-flow.md: Fluxo Realtime v2
-- openspec/changes/voice-ai-realtime/design.md: Decision 4
 
 ElevenLabs Conversational AI usa WebSocket para streaming bidirecional.
-- Input: 16kHz PCM16
-- Output: 16kHz PCM16
+- Input: 16kHz PCM16 (base64)
+- Output: 16kHz PCM16 (base64)
 - Endpoint: wss://api.elevenlabs.io/v1/convai/conversation
+
+Eventos Client → Server (PUBLISH):
+- UserAudioChunk: {user_audio_chunk: "base64..."} (SEM type!)
+- Pong: {type: "pong", event_id: int}
+- ConversationInitiationClientData: {type: "conversation_initiation_client_data", ...}
+- ClientToolResult: {type: "client_tool_result", tool_call_id, result: str, is_error}
+- UserMessage: {type: "user_message", text: str}
+
+Eventos Server → Client (SUBSCRIBE):
+- audio: {type: "audio", audio_event: {audio_base_64, event_id}}
+- user_transcript: {type: "user_transcript", user_transcription_event: {user_transcript}}
+- agent_response: {type: "agent_response", agent_response_event: {agent_response}}
+- client_tool_call: {type: "client_tool_call", client_tool_call: {tool_name, tool_call_id, parameters}}
+- ping: {type: "ping", ping_event: {event_id, ping_ms}}
+- interruption: {type: "interruption", interruption_event: {event_id}}
 """
 
 import asyncio
@@ -379,6 +394,59 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
                 type=ProviderEventType.ERROR,
                 data={"error": event.get("message", "Unknown error")}
             )
+        
+        # ===== EVENTOS ADICIONAIS (conforme AsyncAPI oficial) =====
+        # Ref: https://elevenlabs.io/docs/agents-platform/api-reference/agents-platform/websocket
+        
+        if etype == "agent_response_correction":
+            # Correção de resposta truncada/interrompida
+            correction_event = event.get("agent_response_correction_event", {})
+            logger.debug("Agent response correction", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "original": correction_event.get("original_agent_response", "")[:50],
+                "corrected": correction_event.get("corrected_agent_response", "")[:50],
+            })
+            return ProviderEvent(
+                type=ProviderEventType.TRANSCRIPT_DONE,
+                data={"transcript": correction_event.get("corrected_agent_response", "")}
+            )
+        
+        if etype == "vad_score":
+            # Voice Activity Detection score (0.0 - 1.0)
+            vad_event = event.get("vad_score_event", {})
+            vad_score = vad_event.get("vad_score", 0.0)
+            # Log apenas se score alto (indicando fala)
+            if vad_score > 0.5:
+                logger.debug(f"VAD score: {vad_score:.2f}", extra={
+                    "domain_uuid": self.config.domain_uuid,
+                })
+            return None  # Não emitir evento, apenas log
+        
+        if etype == "contextual_update":
+            # Update de contexto (informação adicional)
+            text = event.get("text", "")
+            logger.debug(f"Contextual update: {text[:50]}...", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
+            return None  # Informativo apenas
+        
+        if etype == "internal_tentative_agent_response":
+            # Resposta preliminar do agente (interno, para debug)
+            tentative_event = event.get("tentative_agent_response_internal_event", {})
+            tentative_text = tentative_event.get("tentative_agent_response", "")
+            logger.debug(f"Tentative response: {tentative_text[:50]}...", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
+            return ProviderEvent(
+                type=ProviderEventType.TRANSCRIPT_DELTA,
+                data={"transcript": tentative_text}
+            )
+        
+        # Evento desconhecido - log para debug
+        logger.warning(f"Unknown ElevenLabs event: {etype}", extra={
+            "domain_uuid": self.config.domain_uuid,
+            "event_preview": str(event)[:200],
+        })
         
         return None
     
