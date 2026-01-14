@@ -78,24 +78,30 @@
 				'name' => $name
 			], 'row');
 			
-			if ($check['cnt'] > 0) {
+			if ($check && $check['cnt'] > 0) {
 				//update
-				$sql_upd = "UPDATE v_default_settings SET default_setting_value = :value ";
+				$sql_upd = "UPDATE v_default_settings SET default_setting_value = :value, default_setting_enabled = 'true' ";
 				$sql_upd .= "WHERE domain_uuid = :domain_uuid ";
 				$sql_upd .= "AND default_setting_category = 'voice_secretary' ";
 				$sql_upd .= "AND default_setting_subcategory = :name";
+				$database->execute($sql_upd, [
+					'domain_uuid' => $domain_uuid,
+					'name' => $name,
+					'value' => (string)$value
+				]);
 			} else {
-				//insert
+				//insert - usar uuid() do PHP em vez de função SQL
+				$setting_uuid = uuid();
 				$sql_upd = "INSERT INTO v_default_settings ";
-				$sql_upd .= "(default_setting_uuid, domain_uuid, default_setting_category, default_setting_subcategory, default_setting_value, default_setting_enabled) ";
-				$sql_upd .= "VALUES (uuid_generate_v4(), :domain_uuid, 'voice_secretary', :name, :value, 'true')";
+				$sql_upd .= "(default_setting_uuid, domain_uuid, default_setting_category, default_setting_subcategory, default_setting_name, default_setting_value, default_setting_enabled, default_setting_order) ";
+				$sql_upd .= "VALUES (:setting_uuid, :domain_uuid, 'voice_secretary', :name, :name, :value, 'true', 0)";
+				$database->execute($sql_upd, [
+					'setting_uuid' => $setting_uuid,
+					'domain_uuid' => $domain_uuid,
+					'name' => $name,
+					'value' => (string)$value
+				]);
 			}
-			
-			$database->execute($sql_upd, [
-				'domain_uuid' => $domain_uuid,
-				'name' => $name,
-				'value' => $value
-			]);
 			unset($sql_upd);
 		}
 		
