@@ -247,18 +247,20 @@ class RealtimeSession:
         - Gemini Live: input=16kHz, output=24kHz
         """
         if self._provider:
-            self._resampler = ResamplerPair(
-                freeswitch_rate=self.config.freeswitch_sample_rate,
-                provider_input_rate=self._provider.input_sample_rate,
-                provider_output_rate=self._provider.output_sample_rate,  # Pode ser diferente do input!
+            fs_rate = self.config.freeswitch_sample_rate
+            provider_in = self._provider.input_sample_rate
+            provider_out = self._provider.output_sample_rate
+            
+            # Log explícito para debug
+            logger.info(
+                f"Resampler setup: FS={fs_rate}Hz <-> Provider(in={provider_in}Hz, out={provider_out}Hz)"
             )
             
-            logger.debug("Resampler configured", extra={
-                "call_uuid": self.call_uuid,
-                "freeswitch_rate": self.config.freeswitch_sample_rate,
-                "provider_input_rate": self._provider.input_sample_rate,
-                "provider_output_rate": self._provider.output_sample_rate,
-            })
+            self._resampler = ResamplerPair(
+                freeswitch_rate=fs_rate,
+                provider_input_rate=provider_in,
+                provider_output_rate=provider_out,
+            )
     
     async def handle_audio_input(self, audio_bytes: bytes) -> None:
         """Processa áudio do FreeSWITCH."""

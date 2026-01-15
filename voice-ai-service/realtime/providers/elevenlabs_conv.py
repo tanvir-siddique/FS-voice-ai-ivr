@@ -188,14 +188,12 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         self._connected = True
         self._receive_task = asyncio.create_task(self._receive_loop())
         
-        logger.info("Connected to ElevenLabs Conversational AI", extra={
-            "domain_uuid": self.config.domain_uuid,
-            "agent_id": self.agent_id,
-            "conversation_id": conversation_id,
-            "agent_output_audio_format": output_format,
-            "user_input_audio_format": input_format,
-            "actual_output_sample_rate": self._actual_output_sample_rate,
-        })
+        # Log explícito com sample rate para debug
+        logger.info(
+            f"Connected to ElevenLabs Conversational AI - "
+            f"output_format={output_format}, output_sample_rate={self._actual_output_sample_rate}Hz, "
+            f"input_format={input_format}"
+        )
     
     async def configure(self) -> None:
         """

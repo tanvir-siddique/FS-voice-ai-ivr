@@ -210,6 +210,16 @@ class ResamplerPair:
     
     def resample_output(self, audio_bytes: bytes) -> bytes:
         """Provider -> FS (com warmup buffer)"""
+        # Log no primeiro chunk para debug
+        if not hasattr(self, '_output_logged') or not self._output_logged:
+            self._output_logged = True
+            needs_resample = self.output_resampler.needs_resample
+            logger.info(
+                f"First output chunk: {len(audio_bytes)} bytes, "
+                f"resample needed: {needs_resample} "
+                f"({self.provider_output_rate}Hz -> {self.freeswitch_rate}Hz)"
+            )
+        
         resampled = self.output_resampler.process(audio_bytes)
         return self.output_buffer.add(resampled)
     
