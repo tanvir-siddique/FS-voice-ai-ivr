@@ -262,7 +262,10 @@ services:
       # FreeSWITCH Audio Playback
       - FS_PLAYBACK_MODE=rawAudio
       - FS_STREAMAUDIO_FALLBACK=false
-      - FS_WARMUP_CHUNKS=5
+      - FS_WARMUP_CHUNKS=10
+      - FS_WARMUP_CHUNKS_MIN=5
+      - FS_WARMUP_CHUNKS_MAX=15
+      - FS_ADAPTIVE_WARMUP=true
       
       # Audio Debug/Fix Options (se o áudio sair distorcido)
       # - FS_AUDIO_SWAP_BYTES=true  # Inverter byte order (big <-> little endian)

@@ -603,6 +603,11 @@ class RealtimeServer:
                                 except asyncio.TimeoutError:
                                     underrun_count += 1
                                     _metrics.record_playback_underrun(call_uuid)
+                                    if underrun_count == 1 or underrun_count % 10 == 0:
+                                        logger.warning(
+                                            f"Audio underrun #{underrun_count} - queue empty for {PCM16_CHUNK_MS}ms",
+                                            extra={"call_uuid": call_uuid, "underrun_count": underrun_count}
+                                        )
                                     if adaptive_warmup and warmup_chunks < warmup_max:
                                         warmup_chunks += 1
                                     # Sem mais áudio, sair do loop de streaming contínuo

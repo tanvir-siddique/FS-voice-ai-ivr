@@ -180,7 +180,7 @@ class ResamplerPair:
         freeswitch_rate: int = 16000, 
         provider_input_rate: int = 24000,
         provider_output_rate: int = None,  # Se None, usa provider_input_rate
-        output_warmup_ms: int = 200
+        output_warmup_ms: int = 300  # Aumentado de 200ms para 300ms para reduzir picotamento
     ):
         # Se output rate não especificado, assume igual ao input
         if provider_output_rate is None:
