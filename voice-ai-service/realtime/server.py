@@ -350,6 +350,9 @@ class RealtimeServer:
                 try:
                     tools = json.loads(tools_json) if isinstance(tools_json, str) else tools_json
                 except Exception:
+                    logger.warning("Invalid tools_json in provider_config", extra={"call_uuid": call_uuid})
+
+        # Parse fallback providers
         fallback_providers = []
         if fallback_providers_env:
             try:
@@ -361,7 +364,6 @@ class RealtimeServer:
                     fallback_providers = [p.strip() for p in fallback_providers_env.split(",") if p.strip()]
             except Exception:
                 logger.warning("Invalid fallback_providers format", extra={"call_uuid": call_uuid})
-                    logger.warning("Invalid tools_json in provider_config", extra={"call_uuid": call_uuid})
 
         # ========================================
         # Transfer Rules Integration
