@@ -19,7 +19,7 @@ Este documento descreve a integração do Voice AI com o MinIO compartilhado do 
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MINIO COMPARTILHADO                          │
 │                                                                 │
-│  Endpoint: minio.netplay.net.br                                 │
+│  Endpoint: storage.netplay.net.br                               │
 │  Bucket:   voice-recordings                                     │
 │                                                                 │
 │  Estrutura:                                                     │
@@ -47,13 +47,13 @@ Este documento descreve a integração do Voice AI com o MinIO compartilhado do 
 
 ```bash
 # MinIO - Storage compartilhado com OmniPlay
-MINIO_ENDPOINT=minio.netplay.net.br
+MINIO_ENDPOINT=storage.netplay.net.br
 MINIO_ACCESS_KEY=<chave_de_acesso>
 MINIO_SECRET_KEY=<chave_secreta>
 MINIO_BUCKET=voice-recordings
 MINIO_USE_SSL=true
 MINIO_REGION=us-east-1
-MINIO_PUBLIC_URL=https://minio.netplay.net.br
+MINIO_PUBLIC_URL=https://storage.netplay.net.br
 
 # OmniPlay Integration
 OMNIPLAY_API_URL=https://omniplay.netplay.net.br
@@ -71,7 +71,7 @@ VOICE_AI_SERVICE_TOKEN=<mesmo_token_do_voice_ai>
 
 ### Via MinIO Console (UI)
 
-1. Acesse https://minio.netplay.net.br/
+1. Acesse https://storage.netplay.net.br/
 2. Faça login como admin
 3. Vá em **Identity** → **Service Accounts**
 4. Clique em **Create Service Account**
@@ -85,7 +85,7 @@ VOICE_AI_SERVICE_TOKEN=<mesmo_token_do_voice_ai>
 
 ```bash
 # Configurar alias
-mc alias set omniplay https://minio.netplay.net.br ADMIN_ACCESS_KEY ADMIN_SECRET_KEY
+mc alias set omniplay https://storage.netplay.net.br ADMIN_ACCESS_KEY ADMIN_SECRET_KEY
 
 # Criar bucket
 mc mb omniplay/voice-recordings
@@ -151,7 +151,7 @@ async def initiate_handoff(self, ...):
     
     # 2. Faz upload para MinIO
     recording_url = await self.upload_recording(audio_data)
-    # → https://minio.netplay.net.br/voice-recordings/company_5/voice/2026/01/15/abc-123.mp3
+    # → https://storage.netplay.net.br/voice-recordings/company_5/voice/2026/01/15/abc-123.mp3
     
     # 3. Envia para OmniPlay com a URL
     await self.create_fallback_ticket(
@@ -178,7 +178,7 @@ Cada arquivo tem metadados S3:
 
 ```bash
 # No servidor Voice AI
-curl -I https://minio.netplay.net.br/minio/health/live
+curl -I https://storage.netplay.net.br/minio/health/live
 ```
 
 ### 2. Testar upload via Python
@@ -200,7 +200,7 @@ print(f"Upload result: {result}")
 
 ### 3. Verificar no MinIO Console
 
-1. Acesse https://minio.netplay.net.br/
+1. Acesse https://storage.netplay.net.br/
 2. Navegue até o bucket `voice-recordings`
 3. Verifique se o arquivo de teste foi criado
 

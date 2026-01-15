@@ -71,15 +71,15 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       
       # MinIO - Storage compartilhado com OmniPlay
-      # URL: https://minio.netplay.net.br/
+      # URL: https://storage.netplay.net.br/
       # Bucket separado para gravações de voz
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio.netplay.net.br}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-storage.netplay.net.br}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-}
       - MINIO_BUCKET=${MINIO_BUCKET:-voice-recordings}
       - MINIO_USE_SSL=${MINIO_USE_SSL:-true}
       - MINIO_REGION=${MINIO_REGION:-us-east-1}
-      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-https://minio.netplay.net.br}
+      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-https://storage.netplay.net.br}
       
       # OmniPlay Integration
       - OMNIPLAY_API_URL=${OMNIPLAY_API_URL:-}
@@ -255,7 +255,18 @@ services:
       # Application
       - REALTIME_HOST=0.0.0.0
       - REALTIME_PORT=8085
+      - REALTIME_VAD_THRESHOLD=0.7
+      - REALTIME_SILENCE_MS=1000
       - DEBUG=${DEBUG:-false}
+      
+      # FreeSWITCH Audio Playback
+      - FS_PLAYBACK_MODE=rawAudio
+      - FS_STREAMAUDIO_FALLBACK=false
+      - FS_WARMUP_CHUNKS=5
+      
+      # Recording
+      - ATTACH_RECORDING_ENABLED=true
+      - FREESWITCH_RECORDINGS_PATH=/var/lib/freeswitch/recordings
       
       # Database - FusionPBX PostgreSQL (no host)
       - DB_HOST=${DB_HOST:-host.docker.internal}

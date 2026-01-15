@@ -503,6 +503,9 @@ class RealtimeServer:
                 logger.warning(f"Failed to send rawAudio header: {e}", extra={"call_uuid": call_uuid})
                 return False
 
+        # Obter instância de métricas para funções aninhadas
+        _metrics = get_metrics()
+
         async def _send_streamaudio_frame(frame_bytes: bytes) -> None:
             payload = json.dumps({
                 "type": "streamAudio",
@@ -514,7 +517,7 @@ class RealtimeServer:
             })
             await websocket.send(payload)
             try:
-                metrics.record_audio(call_uuid, "out", len(frame_bytes))
+                _metrics.record_audio(call_uuid, "out", len(frame_bytes))
             except Exception:
                 pass
             await asyncio.sleep(STREAMAUDIO_FRAME_MS / 1000.0)
@@ -575,7 +578,7 @@ class RealtimeServer:
                                 try:
                                     await websocket.send(chunk_to_send)
                                     try:
-                                        metrics.record_audio(call_uuid, "out", len(chunk_to_send))
+                                        _metrics.record_audio(call_uuid, "out", len(chunk_to_send))
                                     except Exception:
                                         pass
                                     await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
@@ -599,7 +602,7 @@ class RealtimeServer:
                                     )
                                 except asyncio.TimeoutError:
                                     underrun_count += 1
-                                    metrics.record_playback_underrun(call_uuid)
+                                    _metrics.record_playback_underrun(call_uuid)
                                     if adaptive_warmup and warmup_chunks < warmup_max:
                                         warmup_chunks += 1
                                     # Sem mais áudio, sair do loop de streaming contínuo
@@ -614,7 +617,7 @@ class RealtimeServer:
                                 try:
                                     await websocket.send(c_bytes)
                                     try:
-                                        metrics.record_audio(call_uuid, "out", len(c_bytes))
+                                        _metrics.record_audio(call_uuid, "out", len(c_bytes))
                                     except Exception:
                                         pass
                                     await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
@@ -644,13 +647,13 @@ class RealtimeServer:
                     # Atualizar health score periodicamente
                     now = time.time()
                     if now - last_health_update >= 1.0:
-                        session_metrics = metrics.get_session_metrics(call_uuid)
+                        session_metrics = _metrics.get_session_metrics(call_uuid)
                         if session_metrics:
                             underrun_ratio = session_metrics.playback_underruns / max(1, session_metrics.audio_chunks_sent)
                             latency_penalty = min(30.0, session_metrics.avg_latency_ms / 50.0)
                             underrun_penalty = min(50.0, underrun_ratio * 200.0)
                             health_score = 100.0 - latency_penalty - underrun_penalty
-                            metrics.update_health_score(call_uuid, health_score)
+                            _metrics.update_health_score(call_uuid, health_score)
                         last_health_update = now
 
             except websockets.exceptions.ConnectionClosed:

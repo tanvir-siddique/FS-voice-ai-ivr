@@ -24,7 +24,8 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 # Configurações via ambiente
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio.netplay.net.br")
+# Usa o mesmo MinIO do OmniPlay: storage.netplay.net.br
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "storage.netplay.net.br")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "voice-recordings")
