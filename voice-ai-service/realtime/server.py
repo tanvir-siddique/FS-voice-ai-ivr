@@ -669,7 +669,8 @@ class RealtimeServer:
                                         )
                                     if adaptive_warmup and warmup_chunks < warmup_max:
                                         warmup_chunks += 1
-                                    # Sem mais áudio, sair do loop de streaming contínuo
+                                    # Sem mais áudio, resetar streaming e sair para aguardar novo burst
+                                    streaming_started = False
                                     break
 
                                 if c is None:
