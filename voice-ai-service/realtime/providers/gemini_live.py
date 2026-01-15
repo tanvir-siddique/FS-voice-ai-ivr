@@ -8,17 +8,18 @@ Google Gemini Live API Provider (Multimodal Live API).
 - Vertex AI Docs: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api
 
 === MODELOS DISPONÍVEIS (Jan/2026) ===
-- gemini-2.5-flash-live (recomendado para baixa latência)
-- gemini-3-flash-preview (mais recente)
-- gemini-2.0-flash-exp (experimental)
+- gemini-2.5-flash-native-audio-preview-12-2025 (nativo de áudio, mais recente)
+- gemini-2.5-flash-preview-native-audio-dialog (otimizado para diálogo)
+- gemini-live-2.5-flash-preview (Live API padrão)
+- gemini-2.5-flash-live-001 (Vertex AI GA)
 
 === FORMATO WEBSOCKET (BidiGenerateContent) ===
 - URL: wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=API_KEY
 - Primeira mensagem: { "setup": BidiGenerateContentSetup }
 - Aguardar: { "setupComplete": ... }
-- Áudio input: { "realtimeInput": { "audio": { "mimeType": "audio/pcm;rate=16000", "data": "base64..." } } }
+- Áudio input: { "realtimeInput": { "mediaChunks": [{ "mimeType": "audio/pcm;rate=16000", "data": "base64..." }] } }
 - Áudio output: serverContent.modelTurn.parts[].inlineData (PCM @ 24kHz)
-- Interrupção: { "realtimeInput": { "activityEnd": {} } }
+- Interrupção: { "realtimeInput": { "audioStreamEnd": true } } ou { "clientContent": { "turnComplete": true } }
 
 === CONFIGURAÇÕES DE ÁUDIO ===
 - Input: 16-bit PCM, 16kHz, mono
@@ -51,16 +52,17 @@ logger = logging.getLogger(__name__)
 
 # Vozes disponíveis no Gemini Live (prebuiltVoiceConfig)
 # Ref: https://ai.google.dev/gemini-api/docs/live#voices
+# Atualizado Janeiro 2026
 GEMINI_VOICES = {
-    # Vozes principais
-    "Aoede": {"gender": "female", "style": "warm"},
-    "Charon": {"gender": "male", "style": "deep"},
-    "Fenrir": {"gender": "male", "style": "strong"},
-    "Kore": {"gender": "female", "style": "bright"},
+    # Vozes principais (Gemini 2.5 Native Audio)
     "Puck": {"gender": "neutral", "style": "playful"},
-    # Vozes adicionais (Gemini 2.5+)
-    "Orion": {"gender": "male", "style": "professional"},
+    "Charon": {"gender": "male", "style": "deep"},
+    "Kore": {"gender": "female", "style": "bright"},
+    "Fenrir": {"gender": "male", "style": "strong"},
+    "Aoede": {"gender": "female", "style": "warm"},
     "Leda": {"gender": "female", "style": "calm"},
+    "Orus": {"gender": "male", "style": "professional"},
+    "Zephyr": {"gender": "neutral", "style": "smooth"},
 }
 
 # Lista simples para validação
@@ -88,16 +90,15 @@ class GeminiLiveProvider(BaseRealtimeProvider):
     LIVE_API_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
     
     # Modelo padrão para Live API (bidiGenerateContent)
-    # IMPORTANTE: Testar diferentes modelos para encontrar o que funciona
-    # A API Live pode ter modelos específicos que mudam com frequência
     # Ref: https://ai.google.dev/gemini-api/docs/models
-    DEFAULT_MODEL = "models/gemini-2.0-flash"
+    # Atualizado Janeiro 2026
+    DEFAULT_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
     
     # Modelos para tentar em ordem de preferência
     AVAILABLE_MODELS = [
-        "models/gemini-2.0-flash",             # Modelo base
-        "models/gemini-2.0-flash-001",         # Versão específica
-        "models/gemini-2.0-flash-live",        # Live específico
+        "models/gemini-2.5-flash-native-audio-preview-12-2025",  # Nativo de áudio (mais recente)
+        "models/gemini-2.5-flash-preview-native-audio-dialog",   # Otimizado para diálogo
+        "models/gemini-live-2.5-flash-preview",                  # Live API padrão
     ]
     
     def __init__(self, credentials: Dict[str, Any], config: RealtimeConfig):
@@ -298,13 +299,17 @@ class GeminiLiveProvider(BaseRealtimeProvider):
         # Encode áudio em base64
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
         
-        # Formato correto conforme documentação
+        # Formato correto conforme documentação (Janeiro 2026)
+        # Ref: https://ai.google.dev/gemini-api/docs/live
+        # IMPORTANTE: usar "mediaChunks" (array), não "audio" (objeto único)
         message = {
             "realtimeInput": {
-                "audio": {
-                    "mimeType": "audio/pcm;rate=16000",
-                    "data": audio_b64
-                }
+                "mediaChunks": [
+                    {
+                        "mimeType": "audio/pcm;rate=16000",
+                        "data": audio_b64
+                    }
+                ]
             }
         }
         
@@ -341,21 +346,32 @@ class GeminiLiveProvider(BaseRealtimeProvider):
     
     async def interrupt(self) -> None:
         """
-        Interrompe resposta atual.
+        Interrompe resposta atual / Sinaliza fim do turno do usuário.
         
-        CORRIGIDO: Usar activityEnd (não activity_end boolean)
-        Ref: BidiGenerateContentRealtimeInput.activityEnd
+        Ref: https://ai.google.dev/gemini-api/docs/live
+        Atualizado Janeiro 2026
+        
+        Opções:
+        1. audioStreamEnd: quando stream de áudio pausar por mais de 1s
+        2. clientContent.turnComplete: sinaliza fim do turno de forma explícita
         """
         if not self._ws or not self._setup_complete:
             return
         
+        # Usar audioStreamEnd conforme documentação
         message = {
             "realtimeInput": {
-                "activityEnd": {}  # CORRIGIDO: É um objeto ActivityEnd, não boolean
+                "audioStreamEnd": True
             }
         }
         
-        await self._ws.send(json.dumps(message))
+        try:
+            await self._ws.send(json.dumps(message))
+            logger.debug("Sent audioStreamEnd to Gemini", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to send interrupt to Gemini: {e}")
         
         logger.debug("Interrupt signal sent to Gemini", extra={
             "domain_uuid": self.config.domain_uuid,
