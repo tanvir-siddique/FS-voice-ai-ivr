@@ -85,6 +85,13 @@
 			'time_condition_uuid' => !empty($_POST['time_condition_uuid']) ? $_POST['time_condition_uuid'] : null,
 			'enabled' => $_POST['enabled'] ?? 'true',
 			'webhook_url' => $_POST['webhook_url'] ?? '',
+			// Handoff OmniPlay settings
+			'handoff_enabled' => isset($_POST['handoff_enabled']) ? 'true' : 'false',
+			'handoff_keywords' => trim($_POST['handoff_keywords'] ?? 'atendente,humano,pessoa,operador'),
+			'fallback_ticket_enabled' => isset($_POST['fallback_ticket_enabled']) ? 'true' : 'false',
+			'handoff_queue_id' => !empty($_POST['handoff_queue_id']) ? intval($_POST['handoff_queue_id']) : null,
+			// OmniPlay Integration
+			'omniplay_company_id' => !empty($_POST['omniplay_company_id']) ? intval($_POST['omniplay_company_id']) : null,
 		];
 		
 		//validate
@@ -383,10 +390,21 @@
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	//Transfer Settings Section
+	//Transfer & Handoff Settings Section
 	echo "<tr>\n";
 	echo "	<td colspan='2' style='padding: 12px 10px; background: #f8f9fa; border-bottom: 1px solid #dee2e6;'>\n";
-	echo "		<b>".($text['header-transfer'] ?? 'Transfer Settings')."</b>\n";
+	echo "		<b>".($text['header-transfer'] ?? 'Transfer & Handoff Settings')."</b>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Handoff Enabled
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_enabled'] ?? 'Enable Handoff')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$handoff_enabled = (!isset($data['handoff_enabled']) || $data['handoff_enabled'] == 'true' || $data['handoff_enabled'] === true);
+	echo "		<input type='checkbox' name='handoff_enabled' id='handoff_enabled' ".($handoff_enabled ? 'checked' : '')." onchange='toggleHandoffOptions()'>\n";
+	echo "		<label for='handoff_enabled'>".($text['label-enabled'] ?? 'Enabled')."</label>\n";
+	echo "		<br />".($text['description-handoff_enabled'] ?? 'Allow transferring calls to human agents or creating tickets')."\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -430,9 +448,40 @@
 	echo "</tr>\n";
 
 	echo "<tr>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-max_turns'] ?? 'Max Turns')."</td>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-max_turns'] ?? 'Max AI Turns')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<input class='formfld' type='number' name='max_turns' min='1' max='100' value='".escape($data['max_turns'] ?? 20)."'>\n";
+	echo "		<br />".($text['description-max_turns'] ?? 'After this many turns, automatically initiate handoff')."\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Handoff Keywords
+	echo "<tr class='handoff-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_keywords'] ?? 'Handoff Keywords')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$keywords = $data['handoff_keywords'] ?? 'atendente,humano,pessoa,operador,falar com alguém';
+	echo "		<input class='formfld' type='text' name='handoff_keywords' maxlength='500' value='".escape($keywords)."' style='width: 100%;'>\n";
+	echo "		<br />".($text['description-handoff_keywords'] ?? 'Comma-separated keywords that trigger handoff (e.g., "atendente,humano,pessoa")')."\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback Ticket
+	echo "<tr class='handoff-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_ticket'] ?? 'Fallback to Ticket')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$fallback_enabled = (!isset($data['fallback_ticket_enabled']) || $data['fallback_ticket_enabled'] == 'true' || $data['fallback_ticket_enabled'] === true);
+	echo "		<input type='checkbox' name='fallback_ticket_enabled' id='fallback_ticket_enabled' ".($fallback_enabled ? 'checked' : '').">\n";
+	echo "		<label for='fallback_ticket_enabled'>".($text['label-enabled'] ?? 'Enabled')."</label>\n";
+	echo "		<br />".($text['description-fallback_ticket'] ?? 'Create a pending ticket when no agents are online or transfer fails')."\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Handoff Queue (for ticket assignment)
+	echo "<tr class='handoff-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_queue'] ?? 'Ticket Queue')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='text' name='handoff_queue_id' maxlength='20' value='".escape($data['handoff_queue_id'] ?? '')."' placeholder='Queue ID from OmniPlay'>\n";
+	echo "		<br />".($text['description-handoff_queue'] ?? 'OmniPlay queue ID to assign tickets created by voice handoff')."\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -448,6 +497,14 @@
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<input class='formfld' type='url' name='webhook_url' maxlength='500' value='".escape($data['omniplay_webhook_url'] ?? '')."' placeholder='https://...'>\n";
 	echo "		<br />".($text['description-webhook_url'] ?? 'OmniPlay webhook URL for creating tickets.')."\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-omniplay_company_id'] ?? 'OmniPlay Company ID')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='omniplay_company_id' min='1' value='".intval($data['omniplay_company_id'] ?? '')."' placeholder='1'>\n";
+	echo "		<br />".($text['description-omniplay_company_id'] ?? 'OmniPlay Company ID for API integration (required for handoff tickets).')."\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -471,6 +528,20 @@ function toggleRealtimeProvider() {
 		row.style.display = 'none';
 	}
 }
+
+function toggleHandoffOptions() {
+	var enabled = document.getElementById('handoff_enabled').checked;
+	var rows = document.querySelectorAll('.handoff-option');
+	rows.forEach(function(row) {
+		row.style.display = enabled ? '' : 'none';
+	});
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+	toggleRealtimeProvider();
+	toggleHandoffOptions();
+});
 
 async function loadTtsVoices(silent) {
 	try {

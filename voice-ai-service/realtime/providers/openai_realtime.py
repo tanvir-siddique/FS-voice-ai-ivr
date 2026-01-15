@@ -1,17 +1,53 @@
 """
 OpenAI Realtime API Provider.
 
-Referências:
-- SDK oficial: https://github.com/openai/openai-python (src/openai/resources/beta/realtime/)
+=== KNOWLEDGE BASE REFERENCES ===
+- Context7 Library ID: /websites/platform_openai (9418 snippets)
+- Context7 SDK: /openai/openai-python (429 snippets)
 - Docs: https://platform.openai.com/docs/guides/realtime-conversations
-- Context7: /websites/platform_openai
+- API Reference: https://platform.openai.com/docs/api-reference/realtime
+- SDK: https://github.com/openai/openai-python (src/openai/resources/beta/realtime/)
 
-IMPORTANTE - Formato de eventos (verificado em Jan/2026):
-- Áudio output: response.output_audio.delta (NÃO response.audio.delta!)
-- Áudio done: response.output_audio.done
-- Transcript output: response.audio_transcript.delta/done
-- Input audio: input_audio_buffer.append
-- VAD: input_audio_buffer.speech_started/speech_stopped
+=== MODELOS DISPONÍVEIS (Jan/2026) ===
+- gpt-4o-realtime-preview (principal)
+- gpt-realtime-2025-08-28 (mais recente, se disponível)
+
+=== CONFIGURAÇÕES DE ÁUDIO ===
+- Input: 24kHz PCM16 mono (audio/pcm)
+- Output: 24kHz PCM16 mono (audio/pcm)
+- Endpoint: wss://api.openai.com/v1/realtime?model={model}
+- Headers: Authorization: Bearer {api_key}, OpenAI-Beta: realtime=v1
+
+=== FORMATO DE EVENTOS (Context7 verificado) ===
+Client → Server:
+- session.update: Configurar sessão (modalities, voice, VAD, tools)
+- input_audio_buffer.append: Enviar áudio (base64, até 15MiB)
+- input_audio_buffer.commit: Commit manual (se VAD desabilitado)
+- conversation.item.create: Criar item (message, function_call_output)
+- response.create: Solicitar resposta
+- response.cancel: Interromper resposta (barge-in)
+
+Server → Client:
+- session.created: Sessão iniciada
+- session.updated: Configuração atualizada
+- response.output_audio.delta: Chunk de áudio (base64)
+- response.output_audio.done: Áudio completo
+- response.audio_transcript.delta/done: Transcrição do assistente
+- conversation.item.input_audio_transcription.completed: STT do usuário
+- input_audio_buffer.speech_started/speech_stopped: VAD
+- input_audio_buffer.timeout_triggered: Timeout de silêncio (idle_timeout_ms)
+- response.function_call_arguments.done: Function call
+- error: Erros (rate_limit_exceeded, etc.)
+
+=== VAD (TURN DETECTION) ===
+Ref: session.update → session.audio.input.turn_detection
+- type: "server_vad"
+- threshold: 0.5 (0.0-1.0, sensibilidade)
+- prefix_padding_ms: 300 (áudio antes da fala)
+- silence_duration_ms: 200 (silêncio para encerrar turno)
+- idle_timeout_ms: null (timeout de inatividade)
+- create_response: true (auto-responder)
+- interrupt_response: true (barge-in)
 """
 
 import asyncio
@@ -168,39 +204,75 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         """
         Configura sessão com prompt, voz, VAD, tools.
         
-        Ref: session.update event (SDK oficial)
+        Ref: session.update event
+        Context7: /websites/platform_openai → "session.updated Event"
+        
+        FORMATO ATUALIZADO (Jan/2026):
+        - audio.input.format: { type: "audio/pcm", rate: 24000 }
+        - audio.output: { format, voice, speed }
+        - audio.input.turn_detection: { type: "server_vad", threshold, ... }
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
-        # Construir configuração de sessão
+        # Vozes disponíveis (Jan/2026): alloy, echo, fable, onyx, nova, shimmer, marin
+        voice = self.config.voice or "alloy"
+        
+        # Construir configuração de sessão conforme Context7 docs
+        # Ref: session.updated event structure
         session_config = {
             "type": "session.update",
             "session": {
                 "modalities": ["audio", "text"],
                 "instructions": self.config.system_prompt or "",
-                "voice": self.config.voice or "alloy",
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "input_audio_transcription": {
-                    "model": "whisper-1"
+                # Configuração de áudio (novo formato)
+                "audio": {
+                    "input": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "transcription": {
+                            "model": "whisper-1"
+                        },
+                        # VAD (Voice Activity Detection)
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": self.config.vad_threshold or 0.5,
+                            "prefix_padding_ms": self.config.prefix_padding_ms or 300,
+                            "silence_duration_ms": self.config.silence_duration_ms or 200,
+                            "idle_timeout_ms": None,  # Sem timeout de inatividade
+                            "create_response": True,  # Auto-responder após fala
+                            "interrupt_response": True,  # Barge-in habilitado
+                        }
+                    },
+                    "output": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "voice": voice,
+                        "speed": 1.0
+                    }
                 },
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": self.config.vad_threshold,
-                    "silence_duration_ms": self.config.silence_duration_ms,
-                    "prefix_padding_ms": self.config.prefix_padding_ms,
-                },
+                # Tools (function calling)
                 "tools": self.config.tools or DEFAULT_TOOLS,
                 "tool_choice": "auto",
-                "max_response_output_tokens": self.config.max_response_output_tokens,
             }
         }
+        
+        # max_response_output_tokens (limitar resposta)
+        if self.config.max_response_output_tokens and self.config.max_response_output_tokens > 0:
+            session_config["session"]["max_response_output_tokens"] = int(self.config.max_response_output_tokens)
+        else:
+            session_config["session"]["max_response_output_tokens"] = "inf"
         
         logger.debug("Sending session.update", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_instructions": bool(self.config.system_prompt),
-            "voice": self.config.voice,
+            "voice": voice,
+            "vad_threshold": self.config.vad_threshold,
+            "max_output_tokens": session_config["session"]["max_response_output_tokens"],
         })
         
         await self._ws.send(json.dumps(session_config))

@@ -281,11 +281,23 @@ class RealtimeServer:
                     s.farewell_message as farewell,
                     p.provider_name,
                     p.config as provider_config,
-                    s.extension
+                    s.extension,
+                    s.max_turns,
+                    s.transfer_extension,
+                    s.language,
+                    -- Handoff OmniPlay fields
+                    COALESCE(s.handoff_enabled, true) as handoff_enabled,
+                    COALESCE(s.handoff_timeout, 30) as handoff_timeout,
+                    COALESCE(s.handoff_keywords, 'atendente,humano,pessoa,operador') as handoff_keywords,
+                    s.handoff_queue_id,
+                    COALESCE(s.fallback_ticket_enabled, true) as fallback_ticket_enabled,
+                    COALESCE(s.presence_check_enabled, true) as presence_check_enabled,
+                    s.omniplay_webhook_url,
+                    s.omniplay_company_id
                 FROM v_voice_secretaries s
                 LEFT JOIN v_voice_ai_providers p ON p.voice_ai_provider_uuid = s.realtime_provider_uuid
                 WHERE s.domain_uuid = $1
-                  AND s.is_enabled = true
+                  AND s.enabled = true
                   AND s.processing_mode IN ('realtime', 'auto')
                 ORDER BY 
                     CASE WHEN s.extension = '8000' THEN 0 ELSE 1 END,
@@ -403,6 +415,10 @@ class RealtimeServer:
         if transfer_context:
             final_system_prompt = f"{system_prompt_base}\n{transfer_context}"
 
+        # Parse handoff keywords from comma-separated string
+        handoff_keywords_str = row.get("handoff_keywords") or "atendente,humano,pessoa,operador"
+        handoff_keywords = [k.strip() for k in handoff_keywords_str.split(",") if k.strip()]
+        
         config = RealtimeSessionConfig(
             domain_uuid=domain_uuid,
             call_uuid=call_uuid,
@@ -421,6 +437,14 @@ class RealtimeServer:
             tools=tools,
             fallback_providers=fallback_providers,
             barge_in_enabled=barge_in_enabled,
+            omniplay_webhook_url=row.get("omniplay_webhook_url"),
+            # Handoff OmniPlay config
+            handoff_enabled=bool(row.get("handoff_enabled", True)),
+            handoff_timeout_ms=int(row.get("handoff_timeout", 30)) * 1000,  # seconds to ms
+            handoff_keywords=handoff_keywords,
+            handoff_max_ai_turns=int(row.get("max_turns", 20)),
+            handoff_queue_id=row.get("handoff_queue_id"),
+            omniplay_company_id=row.get("omniplay_company_id"),
         )
         
         logger.debug("Session config created", extra={

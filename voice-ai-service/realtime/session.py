@@ -70,6 +70,7 @@ class RealtimeSessionConfig:
     handoff_keywords: List[str] = field(default_factory=lambda: ["atendente", "humano", "pessoa", "operador"])
     handoff_max_ai_turns: int = 20
     handoff_queue_id: Optional[int] = None
+    omniplay_company_id: Optional[int] = None  # OmniPlay companyId para API
 
 
 class RealtimeSession:
@@ -134,6 +135,7 @@ class RealtimeSession:
                     max_ai_turns=config.handoff_max_ai_turns,
                     fallback_queue_id=config.handoff_queue_id,
                     secretary_uuid=config.secretary_uuid,
+                    omniplay_company_id=config.omniplay_company_id,  # OmniPlay companyId
                 ),
                 transcript=[],  # Will be updated during session
                 on_transfer=on_transfer,

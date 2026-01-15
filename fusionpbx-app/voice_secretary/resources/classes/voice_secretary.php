@@ -77,6 +77,16 @@ class voice_secretary {
         $array['voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
         $array['voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
         $array['voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
+        // Handoff OmniPlay settings
+        $array['voice_secretaries'][0]['handoff_enabled'] = ($data['handoff_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['handoff_keywords'] = $data['handoff_keywords'] ?? 'atendente,humano,pessoa,operador';
+        $array['voice_secretaries'][0]['fallback_ticket_enabled'] = ($data['fallback_ticket_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['handoff_queue_id'] = !empty($data['handoff_queue_id']) ? intval($data['handoff_queue_id']) : null;
+        $array['voice_secretaries'][0]['handoff_timeout'] = $data['handoff_timeout'] ?? 30;
+        $array['voice_secretaries'][0]['presence_check_enabled'] = ($data['presence_check_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['time_condition_uuid'] = !empty($data['time_condition_uuid']) ? $data['time_condition_uuid'] : null;
+        // OmniPlay Integration
+        $array['voice_secretaries'][0]['omniplay_company_id'] = !empty($data['omniplay_company_id']) ? intval($data['omniplay_company_id']) : null;
         
         $database = new database;
         $database->app_name = 'voice_secretary';
@@ -110,6 +120,16 @@ class voice_secretary {
         $array['voice_secretaries'][0]['transfer_extension'] = $data['transfer_extension'] ?? '200';
         $array['voice_secretaries'][0]['omniplay_webhook_url'] = $data['webhook_url'] ?? null;
         $array['voice_secretaries'][0]['enabled'] = $data['is_active'] ?? true;
+        // Handoff OmniPlay settings
+        $array['voice_secretaries'][0]['handoff_enabled'] = ($data['handoff_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['handoff_keywords'] = $data['handoff_keywords'] ?? 'atendente,humano,pessoa,operador';
+        $array['voice_secretaries'][0]['fallback_ticket_enabled'] = ($data['fallback_ticket_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['handoff_queue_id'] = !empty($data['handoff_queue_id']) ? intval($data['handoff_queue_id']) : null;
+        $array['voice_secretaries'][0]['handoff_timeout'] = $data['handoff_timeout'] ?? 30;
+        $array['voice_secretaries'][0]['presence_check_enabled'] = ($data['presence_check_enabled'] ?? 'true') === 'true';
+        $array['voice_secretaries'][0]['time_condition_uuid'] = !empty($data['time_condition_uuid']) ? $data['time_condition_uuid'] : null;
+        // OmniPlay Integration
+        $array['voice_secretaries'][0]['omniplay_company_id'] = !empty($data['omniplay_company_id']) ? intval($data['omniplay_company_id']) : null;
         
         $database = new database;
         $database->app_name = 'voice_secretary';

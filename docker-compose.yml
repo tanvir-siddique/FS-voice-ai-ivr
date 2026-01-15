@@ -70,6 +70,21 @@ services:
       # Ollama (local LLM)
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       
+      # MinIO - Storage compartilhado com OmniPlay
+      # URL: https://minio.netplay.net.br/
+      # Bucket separado para gravações de voz
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio.netplay.net.br}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-}
+      - MINIO_BUCKET=${MINIO_BUCKET:-voice-recordings}
+      - MINIO_USE_SSL=${MINIO_USE_SSL:-true}
+      - MINIO_REGION=${MINIO_REGION:-us-east-1}
+      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-https://minio.netplay.net.br}
+      
+      # OmniPlay Integration
+      - OMNIPLAY_API_URL=${OMNIPLAY_API_URL:-}
+      - VOICE_AI_SERVICE_TOKEN=${VOICE_AI_SERVICE_TOKEN:-}
+      
       # Piper TTS (local)
       - PIPER_DATA_DIR=/app/data/piper
       

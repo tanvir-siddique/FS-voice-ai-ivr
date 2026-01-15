@@ -35,6 +35,9 @@ class SessionMetrics:
     audio_bytes_sent: int = 0
     turns_completed: int = 0
     response_latencies: list = field(default_factory=list)
+    playback_underruns: int = 0
+    barge_in_count: int = 0
+    health_score: float = 100.0
     
     @property
     def duration_seconds(self) -> float:
@@ -61,6 +64,7 @@ class RealtimeMetrics:
         self.response_latency = Histogram('voice_ai_realtime_response_latency_seconds', 'Response latency', 
             ['domain_uuid', 'provider'], buckets=[0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 2.0])
         self.active_sessions = Gauge('voice_ai_realtime_active_sessions', 'Active sessions', ['domain_uuid', 'provider'])
+        self.health_score = Gauge('voice_ai_realtime_health_score', 'Realtime health score (0-100)', ['domain_uuid', 'provider'])
     
     def session_started(self, domain_uuid: str, call_uuid: str, provider: str) -> SessionMetrics:
         metrics = SessionMetrics(domain_uuid=domain_uuid, call_uuid=call_uuid, provider=provider)
@@ -82,6 +86,7 @@ class RealtimeMetrics:
         if PROMETHEUS_AVAILABLE:
             self.calls_total.labels(domain_uuid=metrics.domain_uuid, provider=metrics.provider, outcome=outcome).inc()
             self.active_sessions.labels(domain_uuid=metrics.domain_uuid, provider=metrics.provider).dec()
+            self.health_score.labels(domain_uuid=metrics.domain_uuid, provider=metrics.provider).set(metrics.health_score)
         
         logger.info("Realtime session ended", extra={
             "domain_uuid": metrics.domain_uuid,
@@ -112,6 +117,38 @@ class RealtimeMetrics:
             if PROMETHEUS_AVAILABLE:
                 self.audio_chunks.labels(domain_uuid=metrics.domain_uuid, direction=direction).inc()
                 self.audio_bytes.labels(domain_uuid=metrics.domain_uuid, direction=direction).inc(byte_count)
+
+    def record_playback_underrun(self, call_uuid: str) -> None:
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            metrics.playback_underruns += 1
+
+    def record_barge_in(self, call_uuid: str) -> None:
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            metrics.barge_in_count += 1
+
+    def update_health_score(self, call_uuid: str, score: float) -> None:
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            metrics.health_score = max(0.0, min(100.0, score))
+            if PROMETHEUS_AVAILABLE:
+                self.health_score.labels(domain_uuid=metrics.domain_uuid, provider=metrics.provider).set(metrics.health_score)
+
+    def update_provider(self, call_uuid: str, provider: str) -> None:
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            metrics.provider = provider
+
+    def get_session_metrics(self, call_uuid: str) -> Optional[SessionMetrics]:
+        return self._sessions.get(call_uuid)
+    
+    def get_avg_latency(self, call_uuid: str) -> Optional[float]:
+        """Retorna latência média em ms para uma sessão."""
+        metrics = self._sessions.get(call_uuid)
+        if metrics:
+            return metrics.avg_latency_ms
+        return None
     
     @contextmanager
     def measure_latency(self, call_uuid: str):

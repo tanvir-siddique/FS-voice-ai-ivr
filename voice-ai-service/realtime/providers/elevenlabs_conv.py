@@ -1,30 +1,47 @@
 """
 ElevenLabs Conversational AI Provider.
 
-Referências:
-- AsyncAPI oficial: https://elevenlabs.io/docs/agents-platform/api-reference/agents-platform/websocket
+=== KNOWLEDGE BASE REFERENCES ===
+- Context7 Library ID: /websites/elevenlabs_io (6866 snippets)
+- Context7 SDK: /elevenlabs/elevenlabs-python (629 snippets)
+- Docs WebSocket: https://elevenlabs.io/docs/agents-platform/api-reference/agents-platform/websocket
 - SDK Python: https://github.com/elevenlabs/elevenlabs-python
-- Context7: /elevenlabs/elevenlabs-python
+- Events: https://elevenlabs.io/docs/agents-platform/customization/events/client-events
 
+=== CONFIGURAÇÕES DE ÁUDIO ===
 ElevenLabs Conversational AI usa WebSocket para streaming bidirecional.
 - Input: 16kHz PCM16 (base64)
 - Output: 16kHz PCM16 (base64)
 - Endpoint: wss://api.elevenlabs.io/v1/convai/conversation
+- Regiões: wss://api.us.elevenlabs.io/, wss://api.eu.residency.elevenlabs.io/
 
-Eventos Client → Server (PUBLISH):
+=== EVENTOS CLIENT → SERVER (PUBLISH) ===
+Ref: V1ConvaiConversationPublish schema
 - UserAudioChunk: {user_audio_chunk: "base64..."} (SEM type!)
 - Pong: {type: "pong", event_id: int}
 - ConversationInitiationClientData: {type: "conversation_initiation_client_data", ...}
 - ClientToolResult: {type: "client_tool_result", tool_call_id, result: str, is_error}
 - UserMessage: {type: "user_message", text: str}
+- UserActivity: {type: "user_activity"} (para barge-in)
+- ContextualUpdate: {type: "contextual_update", text: str}
 
-Eventos Server → Client (SUBSCRIBE):
+=== EVENTOS SERVER → CLIENT (SUBSCRIBE) ===
+Ref: V1ConvaiConversationSubscribe schema
 - audio: {type: "audio", audio_event: {audio_base_64, event_id}}
 - user_transcript: {type: "user_transcript", user_transcription_event: {user_transcript}}
 - agent_response: {type: "agent_response", agent_response_event: {agent_response}}
+- agent_response_correction: {type: "agent_response_correction", agent_response_correction_event: {...}}
 - client_tool_call: {type: "client_tool_call", client_tool_call: {tool_name, tool_call_id, parameters}}
 - ping: {type: "ping", ping_event: {event_id, ping_ms}}
 - interruption: {type: "interruption", interruption_event: {event_id}}
+- conversation_initiation_metadata: {type: "conversation_initiation_metadata", ...}
+
+=== POLICY VIOLATIONS (1008) ===
+Se o Agent bloqueia override, erros comuns:
+- "Override for field 'voice_id' is not allowed by config."
+- "Override for field 'first_message' is not allowed by config."
+- "Override for field 'prompt' is not allowed by config."
+Solução: use_agent_config=True ou habilitar allow_*_override=True
 """
 
 import asyncio

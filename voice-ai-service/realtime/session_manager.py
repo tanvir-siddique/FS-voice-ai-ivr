@@ -47,6 +47,7 @@ class RealtimeSessionManager:
         on_audio_output: Optional[Callable] = None,
         on_transcript: Optional[Callable] = None,
         on_function_call: Optional[Callable] = None,
+        on_barge_in: Optional[Callable] = None,
     ) -> RealtimeSession:
         """Cria nova sessão."""
         async with self._lock:
@@ -64,6 +65,7 @@ class RealtimeSessionManager:
                 on_transcript=on_transcript,
                 on_function_call=on_function_call,
                 on_session_end=lambda reason: self._on_session_end(config.call_uuid, reason),
+                on_barge_in=on_barge_in,
             )
             
             self._sessions[config.call_uuid] = session

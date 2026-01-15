@@ -1,33 +1,78 @@
-# AGENTS.md
+# AGENTS.md - Voice AI IVR
+
+## 📚 Knowledge Base (OBRIGATÓRIO)
+
+**SEMPRE consulte a Knowledge Base antes de modificar providers de IA:**
+
+- **Arquivo principal:** `docs/KNOWLEDGE_BASE.md`
+- **Context7 MCP:** Use para buscar documentação atualizada
+
+### Context7 Library IDs
+| Provider | Library ID | Snippets |
+|----------|------------|----------|
+| ElevenLabs | `/websites/elevenlabs_io` | 6.866 |
+| OpenAI Realtime | `/websites/platform_openai` | 9.418 |
+| FreeSWITCH | `/signalwire/freeswitch-docs` | 8.023 |
+
+### Exemplo de Consulta
+```python
+# Antes de modificar elevenlabs_conv.py:
+mcp_context7_query-docs(
+    libraryId="/websites/elevenlabs_io",
+    query="Conversational AI WebSocket events audio format"
+)
+```
 
 ## Dev environment tips
-- Install dependencies with `npm install` before running scaffolds.
-- Use `npm run dev` for the interactive TypeScript session that powers local experimentation.
-- Run `npm run build` to refresh the CommonJS bundle in `dist/` before shipping changes.
-- Store generated artefacts in `.context/` so reruns stay deterministic.
+- Python 3.11+ com virtualenv
+- `pip install -r requirements.txt` para dependências
+- `docker-compose up -d` para PostgreSQL e Redis
+- `python -m uvicorn voice_ai_service.main:app --reload` para dev
 
 ## Testing instructions
-- Execute `npm run test` to run the Jest suite.
-- Append `-- --watch` while iterating on a failing spec.
-- Trigger `npm run build && npm run test` before opening a PR to mimic CI.
-- Add or update tests alongside any generator or CLI changes.
+- `pytest tests/` para testes unitários
+- `pytest tests/integration/` para testes de integração
+- Verificar conexão com FreeSWITCH antes de testes E2E
 
 ## PR instructions
-- Follow Conventional Commits (for example, `feat(scaffolding): add doc links`).
-- Cross-link new scaffolds in `docs/README.md` and `agents/README.md` so future agents can find them.
-- Attach sample CLI output or generated markdown when behaviour shifts.
-- Confirm the built artefacts in `dist/` match the new source changes.
+- Follow Conventional Commits (ex: `feat(providers): add gemini live support`)
+- Atualizar `docs/KNOWLEDGE_BASE.md` se descobrir nova documentação
+- Verificar compatibilidade com FreeSWITCH 16kHz ↔ Provider sample rate
+- Testar barge-in e VAD em chamada real
 
 ## Repository map
-- `database/` — explain what lives here and when agents should edit it.
-- `deploy/` — explain what lives here and when agents should edit it.
-- `docs/` — explain what lives here and when agents should edit it.
-- `freeswitch/` — explain what lives here and when agents should edit it.
-- `fusionpbx-app/` — explain what lives here and when agents should edit it.
-- `README.md/` — explain what lives here and when agents should edit it.
-- `voice-ai-service/` — explain what lives here and when agents should edit it.
+- `database/` — Migrations SQL para FusionPBX (v_voice_secretaries, v_voice_ai_providers)
+- `deploy/` — Docker Compose e scripts de deploy
+- `docs/` — Documentação, **incluindo KNOWLEDGE_BASE.md**
+- `freeswitch/` — Lua scripts e configurações de dialplan
+- `fusionpbx-app/` — App PHP para gerenciamento via FusionPBX UI
+- `voice-ai-service/` — Bridge Python (FastAPI + WebSocket)
+  - `realtime/providers/` — Implementações de cada AI provider
+  - `realtime/handlers/` — Handlers (handoff, function call)
+  - `realtime/utils/` — Utilitários (resampler, metrics)
 
 ## AI Context References
-- Documentation index: `.context/docs/README.md`
-- Agent playbooks: `.context/agents/README.md`
-- Contributor guide: `CONTRIBUTING.md`
+- **Knowledge Base:** `docs/KNOWLEDGE_BASE.md` (Context7 references)
+- **System Overview:** `docs/SYSTEM_OVERVIEW.md`
+- **Handoff OmniPlay:** `docs/HANDOFF_OMNIPLAY.md`
+- **Deploy Instructions:** `docs/DEPLOY_INSTRUCTIONS.md`
+
+## Provider-Specific Notes
+
+### ElevenLabs
+- Sample rate: 16kHz (mesmo que FreeSWITCH, sem resample)
+- Formato áudio: `user_audio_chunk` (SEM type!)
+- Barge-in: `user_activity` (não `interrupt`)
+- Policy violations: use `use_agent_config=true`
+
+### OpenAI Realtime
+- Sample rate: 24kHz (precisa resample de/para 16kHz)
+- Formato áudio: `input_audio_buffer.append`
+- Barge-in: `response.cancel`
+- VAD: `turn_detection` no `session.update`
+
+### Gemini Live
+- Sample rate: Input 16kHz, Output 24kHz (precisa resample)
+- Formato áudio: `realtimeInput.audio`
+- Barge-in: `activityEnd`
+- Setup: `systemInstruction` DEVE estar no setup inicial

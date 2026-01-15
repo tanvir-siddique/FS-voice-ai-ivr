@@ -5,6 +5,10 @@ Gerencia transferência de chamadas para atendentes humanos e fallback para tick
 
 Multi-tenant: domain_uuid obrigatório
 Ref: openspec/changes/add-realtime-handoff-omni/design.md
+
+Storage: Usa MinIO compartilhado para gravações
+MinIO URL: https://minio.netplay.net.br/
+Bucket: voice-recordings
 """
 
 import os
@@ -16,11 +20,13 @@ from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, field
 import aiohttp
 
+from ..utils.minio_uploader import get_minio_uploader, UploadResult
+
 logger = logging.getLogger(__name__)
 
 # Configurações via ambiente
 OMNIPLAY_API_URL = os.getenv("OMNIPLAY_API_URL", "http://host.docker.internal:8080")
-OMNIPLAY_API_TOKEN = os.getenv("OMNIPLAY_API_TOKEN", "")
+OMNIPLAY_SERVICE_TOKEN = os.getenv("VOICE_AI_SERVICE_TOKEN", "")  # Token para auth máquina-a-máquina
 HANDOFF_TIMEOUT_MS = int(os.getenv("HANDOFF_TIMEOUT_MS", "30000"))
 HANDOFF_KEYWORDS = os.getenv("HANDOFF_KEYWORDS", "atendente,humano,pessoa,operador,falar com alguém").split(",")
 
@@ -49,6 +55,7 @@ class HandoffConfig:
     max_ai_turns: int = 20
     fallback_queue_id: Optional[int] = None
     secretary_uuid: Optional[str] = None
+    omniplay_company_id: Optional[int] = None  # OmniPlay companyId para API
 
 
 @dataclass
@@ -95,13 +102,23 @@ class HandoffHandler:
         self._turn_count = 0
     
     async def _get_http_session(self) -> aiohttp.ClientSession:
-        """Obtém sessão HTTP reutilizável."""
+        """Obtém sessão HTTP reutilizável com headers de Service Auth."""
         if self._http_session is None or self._http_session.closed:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Service-Name": "voice-ai-realtime",
+            }
+            
+            # Adicionar token de serviço se disponível
+            if OMNIPLAY_SERVICE_TOKEN:
+                headers["Authorization"] = f"Bearer {OMNIPLAY_SERVICE_TOKEN}"
+            
+            # Adicionar company_id se disponível
+            if self.config.omniplay_company_id:
+                headers["X-Company-Id"] = str(self.config.omniplay_company_id)
+            
             self._http_session = aiohttp.ClientSession(
-                headers={
-                    "Authorization": f"Bearer {OMNIPLAY_API_TOKEN}",
-                    "Content-Type": "application/json"
-                },
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10)
             )
         return self._http_session
@@ -175,6 +192,84 @@ class HandoffHandler:
             )
             return {"has_online_agents": False, "agents": [], "dial_string": None}
     
+    async def upload_recording(
+        self,
+        audio_data: bytes,
+        content_type: str = "audio/mpeg",
+        metadata: Optional[Dict[str, str]] = None
+    ) -> Optional[str]:
+        """
+        Faz upload da gravação para MinIO compartilhado.
+        
+        Args:
+            audio_data: Bytes do áudio
+            content_type: MIME type (default: audio/mpeg)
+            metadata: Metadados adicionais
+            
+        Returns:
+            URL pública da gravação ou None se falhar
+        """
+        if not audio_data:
+            logger.debug("No audio data to upload", extra={"call_uuid": self.call_uuid})
+            return None
+        
+        if not self.config.omniplay_company_id:
+            logger.warning(
+                "Cannot upload recording: omniplay_company_id not configured",
+                extra={"call_uuid": self.call_uuid}
+            )
+            return None
+        
+        try:
+            uploader = get_minio_uploader()
+            
+            if not uploader.is_available:
+                logger.warning(
+                    "MinIO uploader not available",
+                    extra={"call_uuid": self.call_uuid}
+                )
+                return None
+            
+            # Adicionar metadados do domínio
+            upload_metadata = {
+                "domain-uuid": self.domain_uuid,
+                "secretary-uuid": self.config.secretary_uuid or "",
+            }
+            if metadata:
+                upload_metadata.update(metadata)
+            
+            result = uploader.upload_audio(
+                audio_data=audio_data,
+                call_uuid=self.call_uuid,
+                company_id=self.config.omniplay_company_id,
+                content_type=content_type,
+                metadata=upload_metadata
+            )
+            
+            if result.success and result.url:
+                logger.info(
+                    "Recording uploaded to MinIO",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "url": result.url,
+                        "size": result.size
+                    }
+                )
+                return result.url
+            else:
+                logger.warning(
+                    f"Recording upload failed: {result.error}",
+                    extra={"call_uuid": self.call_uuid}
+                )
+                return None
+                
+        except Exception as e:
+            logger.error(
+                f"Error uploading recording: {e}",
+                extra={"call_uuid": self.call_uuid}
+            )
+            return None
+    
     async def create_fallback_ticket(
         self,
         caller_number: str,
@@ -182,11 +277,30 @@ class HandoffHandler:
         language: str = "pt-BR",
         duration_seconds: int = 0,
         avg_latency_ms: Optional[float] = None,
-        handoff_reason: str = "no_agents_available"
+        handoff_reason: str = "no_agents_available",
+        recording_url: Optional[str] = None,
+        audio_data: Optional[bytes] = None
     ) -> HandoffResult:
-        """Cria ticket pending via API OmniPlay."""
+        """
+        Cria ticket pending via API OmniPlay.
+        
+        Args:
+            caller_number: Número do chamador
+            provider: Nome do provider de IA usado
+            language: Idioma da conversa
+            duration_seconds: Duração da chamada
+            avg_latency_ms: Latência média
+            handoff_reason: Motivo do handoff
+            recording_url: URL da gravação (se já foi feito upload)
+            audio_data: Bytes do áudio (faz upload se recording_url não fornecido)
+        """
         try:
             session = await self._get_http_session()
+            
+            # Fazer upload da gravação se fornecida e não tiver URL
+            final_recording_url = recording_url
+            if not final_recording_url and audio_data:
+                final_recording_url = await self.upload_recording(audio_data)
             
             # Gerar resumo simples se não houver LLM
             summary = self._generate_simple_summary()
@@ -203,7 +317,8 @@ class HandoffHandler:
                 "avg_latency_ms": avg_latency_ms,
                 "handoff_reason": handoff_reason,
                 "queue_id": self.config.fallback_queue_id,
-                "secretary_uuid": self.config.secretary_uuid
+                "secretary_uuid": self.config.secretary_uuid,
+                "recording_url": final_recording_url  # ← URL da gravação no MinIO
             }
             
             url = f"{OMNIPLAY_API_URL}/api/tickets/realtime-handoff"
@@ -217,7 +332,8 @@ class HandoffHandler:
                             "domain_uuid": self.domain_uuid,
                             "call_uuid": self.call_uuid,
                             "ticket_id": data.get("ticket_id"),
-                            "ticket_uuid": data.get("ticket_uuid")
+                            "ticket_uuid": data.get("ticket_uuid"),
+                            "has_recording": bool(final_recording_url)
                         }
                     )
                     return HandoffResult(
@@ -274,14 +390,26 @@ class HandoffHandler:
         provider: str,
         language: str = "pt-BR",
         duration_seconds: int = 0,
-        avg_latency_ms: Optional[float] = None
+        avg_latency_ms: Optional[float] = None,
+        audio_data: Optional[bytes] = None,
+        recording_url: Optional[str] = None
     ) -> HandoffResult:
         """
         Inicia processo de handoff.
         
         1. Verifica atendentes online
         2. Se houver: solicita transfer
-        3. Se não houver: cria ticket
+        3. Se não houver: faz upload da gravação e cria ticket
+        
+        Args:
+            reason: Motivo do handoff (keyword, max_turns, etc.)
+            caller_number: Número do chamador
+            provider: Nome do provider de IA
+            language: Idioma da conversa
+            duration_seconds: Duração da chamada
+            avg_latency_ms: Latência média
+            audio_data: Bytes da gravação (será feito upload para MinIO)
+            recording_url: URL da gravação (se já foi feito upload)
         """
         if self._handoff_initiated:
             logger.warning("Handoff already initiated", extra={"call_uuid": self.call_uuid})
@@ -300,7 +428,9 @@ class HandoffHandler:
                 "domain_uuid": self.domain_uuid,
                 "call_uuid": self.call_uuid,
                 "reason": reason,
-                "turns": self._turn_count
+                "turns": self._turn_count,
+                "has_audio": bool(audio_data),
+                "has_recording_url": bool(recording_url)
             }
         )
         
@@ -342,7 +472,9 @@ class HandoffHandler:
                         language=language,
                         duration_seconds=duration_seconds,
                         avg_latency_ms=avg_latency_ms,
-                        handoff_reason=f"{reason}:transfer_failed"
+                        handoff_reason=f"{reason}:transfer_failed",
+                        audio_data=audio_data,
+                        recording_url=recording_url
                     )
         
         # 3. Sem atendentes - criar ticket
@@ -358,5 +490,7 @@ class HandoffHandler:
             language=language,
             duration_seconds=duration_seconds,
             avg_latency_ms=avg_latency_ms,
-            handoff_reason=reason
+            handoff_reason=reason,
+            audio_data=audio_data,
+            recording_url=recording_url
         )

@@ -1,17 +1,33 @@
 """
-Google Gemini 2.0 Flash Live API Provider.
+Google Gemini Live API Provider (Multimodal Live API).
 
-Referências:
-- Docs oficiais: https://ai.google.dev/api/live
-- Context7: /websites/ai_google_dev_api
-- SDK: google-genai (pip install google-genai)
+=== KNOWLEDGE BASE REFERENCES ===
+- Docs oficiais: https://ai.google.dev/gemini-api/docs/live
+- Context7 Library ID: /websites/ai_google_dev_api (buscar com query-docs)
+- Cookbook GitHub: https://github.com/google-gemini/cookbook
+- Vertex AI Docs: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api
 
-IMPORTANTE - Formato WebSocket (verificado em Jan/2026):
-- URL: wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent
+=== MODELOS DISPONÍVEIS (Jan/2026) ===
+- gemini-2.5-flash-live (recomendado para baixa latência)
+- gemini-3-flash-preview (mais recente)
+- gemini-2.0-flash-exp (experimental)
+
+=== FORMATO WEBSOCKET (BidiGenerateContent) ===
+- URL: wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=API_KEY
 - Primeira mensagem: { "setup": BidiGenerateContentSetup }
 - Aguardar: { "setupComplete": ... }
 - Áudio input: { "realtimeInput": { "audio": { "mimeType": "audio/pcm;rate=16000", "data": "base64..." } } }
 - Áudio output: serverContent.modelTurn.parts[].inlineData (PCM @ 24kHz)
+- Interrupção: { "realtimeInput": { "activityEnd": {} } }
+
+=== CONFIGURAÇÕES DE ÁUDIO ===
+- Input: 16-bit PCM, 16kHz, mono
+- Output: 16-bit PCM, 24kHz, mono (precisa resample para 16kHz do FreeSWITCH)
+
+=== VAD (Voice Activity Detection) ===
+- Nativo no Gemini Live
+- Suporta barge-in (interrupção do usuário)
+- Configurável via generationConfig
 """
 
 import asyncio
@@ -33,8 +49,22 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-# Vozes disponíveis no Gemini Live
-GEMINI_VOICES = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
+# Vozes disponíveis no Gemini Live (prebuiltVoiceConfig)
+# Ref: https://ai.google.dev/gemini-api/docs/live#voices
+GEMINI_VOICES = {
+    # Vozes principais
+    "Aoede": {"gender": "female", "style": "warm"},
+    "Charon": {"gender": "male", "style": "deep"},
+    "Fenrir": {"gender": "male", "style": "strong"},
+    "Kore": {"gender": "female", "style": "bright"},
+    "Puck": {"gender": "neutral", "style": "playful"},
+    # Vozes adicionais (Gemini 2.5+)
+    "Orion": {"gender": "male", "style": "professional"},
+    "Leda": {"gender": "female", "style": "calm"},
+}
+
+# Lista simples para validação
+GEMINI_VOICE_NAMES = list(GEMINI_VOICES.keys())
 
 
 class GeminiLiveProvider(BaseRealtimeProvider):
@@ -54,8 +84,19 @@ class GeminiLiveProvider(BaseRealtimeProvider):
     4. Enviar/receber mensagens
     """
     
+    # URL da Live API (requer API key como query param)
     LIVE_API_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-    DEFAULT_MODEL = "models/gemini-2.0-flash-exp"
+    
+    # Modelo padrão - usar gemini-2.5-flash-live para baixa latência
+    # Ref: https://ai.google.dev/gemini-api/docs/models#gemini-2.5-flash
+    DEFAULT_MODEL = "models/gemini-2.5-flash-live"
+    
+    # Modelos alternativos disponíveis
+    AVAILABLE_MODELS = [
+        "models/gemini-2.5-flash-live",   # Recomendado para Voice AI
+        "models/gemini-3-flash-preview",   # Mais recente
+        "models/gemini-2.0-flash-exp",     # Experimental (anterior)
+    ]
     
     def __init__(self, credentials: Dict[str, Any], config: RealtimeConfig):
         import os
@@ -70,10 +111,14 @@ class GeminiLiveProvider(BaseRealtimeProvider):
         
         # Validar voz
         voice = self.config.voice or "Aoede"
-        if voice not in GEMINI_VOICES:
-            logger.warning(f"Voice '{voice}' not in known Gemini voices, using Aoede")
+        if voice not in GEMINI_VOICE_NAMES:
+            logger.warning(f"Voice '{voice}' not in known Gemini voices {GEMINI_VOICE_NAMES}, using Aoede")
             voice = "Aoede"
         self._voice = voice
+        
+        # Configurações de áudio
+        self._input_sample_rate = 16000  # Gemini aceita 16kHz
+        self._output_sample_rate = 24000  # Gemini retorna 24kHz
         
         logger.info("Gemini Live credentials loaded", extra={
             "api_key_source": "db" if credentials.get("api_key") else "env",
@@ -127,67 +172,89 @@ class GeminiLiveProvider(BaseRealtimeProvider):
         """
         Configura sessão via BidiGenerateContentSetup.
         
-        CORRIGIDO: systemInstruction deve estar no setup, não enviado depois.
+        Ref: https://ai.google.dev/gemini-api/docs/live
+        Ref: https://github.com/google-gemini/cookbook (quickstarts/Multimodal_Live_API)
         
-        Ref: https://ai.google.dev/api/live#BidiGenerateContentSetup
+        IMPORTANTE:
+        - systemInstruction DEVE estar no setup inicial
+        - responseModalities: ["AUDIO"] para voz
+        - speechConfig com voiceConfig para escolher a voz
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
-        # Construir configuração de setup
-        # IMPORTANTE: Usar formato correto conforme documentação
-        setup_message = {
-            "setup": {
-                "model": self.model,
-                "generationConfig": {
-                    "responseModalities": ["AUDIO"],
-                    "speechConfig": {
-                        "voiceConfig": {
-                            "prebuiltVoiceConfig": {
-                                "voiceName": self._voice
-                            }
-                        }
+        # Construir configuração de setup conforme docs oficiais
+        # Ref: BidiGenerateContentSetup
+        generation_config = {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {
+                        "voiceName": self._voice
                     }
-                },
+                }
             }
         }
         
-        # Adicionar system instruction se fornecido
-        # CORRIGIDO: Antes era enviado como mensagem de texto, agora no setup
+        # Adicionar maxOutputTokens se configurado (limitar resposta)
+        if self.config.max_response_output_tokens and self.config.max_response_output_tokens > 0:
+            generation_config["maxOutputTokens"] = int(self.config.max_response_output_tokens)
+        
+        # Configurar temperatura se especificada
+        if hasattr(self.config, 'temperature') and self.config.temperature is not None:
+            generation_config["temperature"] = self.config.temperature
+        
+        setup_message = {
+            "setup": {
+                "model": self.model,
+                "generationConfig": generation_config,
+            }
+        }
+        
+        # System instruction (obrigatório para contexto do agente)
+        # DEVE estar no setup, não pode ser enviado depois
         if self.config.system_prompt:
             setup_message["setup"]["systemInstruction"] = {
                 "parts": [{"text": self.config.system_prompt}]
             }
         
-        # Adicionar tools se fornecidos
+        # Function calling / Tools
         if self.config.tools:
             setup_message["setup"]["tools"] = self._convert_tools(self.config.tools)
         
-        logger.debug("Sending Gemini setup", extra={
+        logger.debug("Sending Gemini Live setup", extra={
             "domain_uuid": self.config.domain_uuid,
+            "model": self.model,
+            "voice": self._voice,
             "has_system_instruction": bool(self.config.system_prompt),
             "has_tools": bool(self.config.tools),
+            "max_output_tokens": generation_config.get("maxOutputTokens"),
         })
         
         await self._ws.send(json.dumps(setup_message))
         
-        # Aguardar setupComplete
-        response = await asyncio.wait_for(self._ws.recv(), timeout=10)
-        data = json.loads(response)
-        
-        if "setupComplete" not in data:
-            raise ConnectionError(f"Gemini setup failed, got: {data}")
-        
-        self._setup_complete = True
-        
-        logger.info("Gemini Live setup complete", extra={
-            "domain_uuid": self.config.domain_uuid,
-        })
+        # Aguardar setupComplete (timeout de 10s)
+        try:
+            response = await asyncio.wait_for(self._ws.recv(), timeout=10)
+            data = json.loads(response)
+            
+            if "setupComplete" not in data:
+                raise ConnectionError(f"Gemini setup failed, got: {data}")
+            
+            self._setup_complete = True
+            
+            logger.info("Gemini Live setup complete", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "model": self.model,
+            })
+            
+        except asyncio.TimeoutError:
+            raise ConnectionError("Gemini setup timed out (10s)")
         
         # Iniciar receive loop
         self._receive_task = asyncio.create_task(self._receive_loop())
         
-        # Enviar first_message se configurado
+        # Enviar first_message se configurado (como texto do usuário)
         if self.config.first_message:
             logger.debug(f"Sending first message: {self.config.first_message[:50]}...")
             await self.send_text(self.config.first_message)

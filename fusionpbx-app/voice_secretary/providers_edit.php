@@ -399,6 +399,18 @@ function applyPreset(providerName, preset) {
 				prefix_padding_ms: "300",
 				max_response_output_tokens: "3072"
 			},
+			top10: {
+				vad_threshold: "0.7",
+				silence_duration_ms: "700",
+				prefix_padding_ms: "200",
+				max_response_output_tokens: "3072",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "gemini_live,elevenlabs_conversational"
+			},
 			ptbr_balanced: {
 				vad_threshold: "0.55",
 				silence_duration_ms: "1000",
@@ -422,6 +434,18 @@ function applyPreset(providerName, preset) {
 				silence_duration_ms: "1600",
 				prefix_padding_ms: "300",
 				max_response_output_tokens: "3072"
+			},
+			ptbr_top10: {
+				vad_threshold: "0.7",
+				silence_duration_ms: "800",
+				prefix_padding_ms: "200",
+				max_response_output_tokens: "3072",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "gemini_live,elevenlabs_conversational"
 			}
 		},
 		elevenlabs_conversational: {
@@ -455,6 +479,19 @@ function applyPreset(providerName, preset) {
 				tts_stability: "0.85",
 				tts_speed: "0.95",
 				tts_similarity_boost: "0.8"
+			},
+			top10: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.6",
+				tts_speed: "1.05",
+				tts_similarity_boost: "0.75",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "openai_realtime,gemini_live"
 			},
 			ptbr_agent_default: {
 				use_agent_config: "true",
@@ -490,15 +527,47 @@ function applyPreset(providerName, preset) {
 				tts_speed: "0.95",
 				tts_similarity_boost: "0.82",
 				language: "pt-BR"
+			},
+			ptbr_top10: {
+				use_agent_config: "true",
+				allow_tts_override: "true",
+				tts_stability: "0.65",
+				tts_speed: "1.05",
+				tts_similarity_boost: "0.8",
+				language: "pt-BR",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "openai_realtime,gemini_live"
 			}
 		},
 		gemini_live: {
 			balanced: {},
 			low_latency: {},
 			high_quality: {},
+			top10: {
+				max_response_output_tokens: "3072",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "openai_realtime,elevenlabs_conversational"
+			},
 			ptbr_balanced: {},
 			ptbr_low_latency: {},
-			ptbr_high_quality: {}
+			ptbr_high_quality: {},
+			ptbr_top10: {
+				max_response_output_tokens: "3072",
+				barge_in_enabled: "true",
+				adaptive_warmup: "true",
+				warmup_chunks: "4",
+				warmup_chunks_min: "3",
+				warmup_chunks_max: "8",
+				fallback_providers: "openai_realtime,elevenlabs_conversational"
+			}
 		}
 	};
 	const presetData = presets[providerName] && presets[providerName][preset];
@@ -509,9 +578,9 @@ function applyPreset(providerName, preset) {
 function toggleSimpleMode(providerName, simpleModeValue) {
 	const simpleMode = (simpleModeValue || 'true') === 'true';
 	const advancedFields = {
-		openai_realtime: ['vad_threshold', 'silence_duration_ms', 'prefix_padding_ms', 'max_response_output_tokens', 'tools_json'],
-		elevenlabs_conversational: ['allow_prompt_override', 'allow_first_message_override', 'allow_voice_id_override', 'allow_tts_override', 'language', 'tts_stability', 'tts_speed', 'tts_similarity_boost', 'custom_llm_extra_body', 'dynamic_variables'],
-		gemini_live: ['tools_json']
+		openai_realtime: ['vad_threshold', 'silence_duration_ms', 'prefix_padding_ms', 'max_response_output_tokens', 'barge_in_enabled', 'adaptive_warmup', 'warmup_chunks', 'warmup_chunks_min', 'warmup_chunks_max', 'fallback_providers', 'tools_json'],
+		elevenlabs_conversational: ['allow_prompt_override', 'allow_first_message_override', 'allow_voice_id_override', 'allow_tts_override', 'language', 'tts_stability', 'tts_speed', 'tts_similarity_boost', 'custom_llm_extra_body', 'dynamic_variables', 'barge_in_enabled', 'adaptive_warmup', 'warmup_chunks', 'warmup_chunks_min', 'warmup_chunks_max', 'fallback_providers'],
+		gemini_live: ['max_response_output_tokens', 'barge_in_enabled', 'adaptive_warmup', 'warmup_chunks', 'warmup_chunks_min', 'warmup_chunks_max', 'fallback_providers', 'tools_json']
 	};
 	const fields = advancedFields[providerName] || [];
 	fields.forEach(name => {
