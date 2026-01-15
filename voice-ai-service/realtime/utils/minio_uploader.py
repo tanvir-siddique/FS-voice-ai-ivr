@@ -25,10 +25,11 @@ logger = logging.getLogger(__name__)
 
 # Configurações via ambiente
 # Usa o mesmo MinIO do OmniPlay: storage.netplay.net.br
+# Bucket: omniplay (mesmo do OmniPlay, organizado em pastas)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "storage.netplay.net.br")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "voice-recordings")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "omniplay")
 MINIO_USE_SSL = os.getenv("MINIO_USE_SSL", "true").lower() == "true"
 MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 MINIO_PUBLIC_URL = os.getenv("MINIO_PUBLIC_URL", f"https://{MINIO_ENDPOINT}")

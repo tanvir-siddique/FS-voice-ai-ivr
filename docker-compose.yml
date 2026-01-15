@@ -72,11 +72,11 @@ services:
       
       # MinIO - Storage compartilhado com OmniPlay
       # URL: https://storage.netplay.net.br/
-      # Bucket separado para gravações de voz
+      # Bucket: omniplay (mesmo do OmniPlay, organizado em pastas voice/)
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-storage.netplay.net.br}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-}
-      - MINIO_BUCKET=${MINIO_BUCKET:-voice-recordings}
+      - MINIO_BUCKET=${MINIO_BUCKET:-omniplay}
       - MINIO_USE_SSL=${MINIO_USE_SSL:-true}
       - MINIO_REGION=${MINIO_REGION:-us-east-1}
       - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-https://storage.netplay.net.br}
