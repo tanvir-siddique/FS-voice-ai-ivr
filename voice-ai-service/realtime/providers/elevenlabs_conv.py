@@ -167,22 +167,31 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         if event.get("type") != "conversation_initiation_metadata":
             raise ConnectionError(f"Unexpected initial event: {event.get('type')}")
         
+        # DEBUG: Log do evento completo para verificar estrutura
+        logger.info(f"ElevenLabs conversation_initiation_metadata: {json.dumps(event, indent=2)}")
+        
         # CRÍTICO: Extrair o formato de áudio de saída do agente
         # Ref: https://elevenlabs.io/docs/agents-platform/customization/events/client-events
         # O agent_output_audio_format pode ser: pcm_16000, pcm_22050, pcm_44100, etc.
         metadata = event.get("conversation_initiation_metadata_event", {})
-        output_format = metadata.get("agent_output_audio_format", "pcm_16000")
-        input_format = metadata.get("user_input_audio_format", "pcm_16000")
+        output_format = metadata.get("agent_output_audio_format", "")
+        input_format = metadata.get("user_input_audio_format", "")
         conversation_id = metadata.get("conversation_id", "")
+        
+        # Log dos campos extraídos
+        logger.info(f"ElevenLabs metadata - output_format='{output_format}', input_format='{input_format}'")
         
         # Parsear sample rate do formato: "pcm_16000" → 16000
         if output_format and output_format.startswith("pcm_"):
             try:
                 self._actual_output_sample_rate = int(output_format.split("_")[1])
-            except (IndexError, ValueError):
+                logger.info(f"ElevenLabs output sample rate parsed: {self._actual_output_sample_rate}Hz")
+            except (IndexError, ValueError) as e:
+                logger.warning(f"Could not parse sample rate from '{output_format}': {e}, using 16000Hz")
                 self._actual_output_sample_rate = 16000
         else:
             # Fallback para 16000 se formato não reconhecido
+            logger.warning(f"Unknown output_format '{output_format}', assuming 16000Hz")
             self._actual_output_sample_rate = 16000
         
         self._connected = True
