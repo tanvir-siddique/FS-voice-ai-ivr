@@ -164,8 +164,13 @@ class ResamplerPair:
     """
     Par de resamplers para comunicação bidirecional.
     
-    - Input: FreeSWITCH (16kHz) -> Provider (24kHz)
-    - Output: Provider (24kHz) -> FreeSWITCH (16kHz)
+    - Input: FreeSWITCH (16kHz) -> Provider (input_rate)
+    - Output: Provider (output_rate) -> FreeSWITCH (16kHz)
+    
+    IMPORTANTE: Input e output do provider podem ter sample rates diferentes!
+    - ElevenLabs: input=16kHz, output=16kHz/22050Hz/44100Hz (dinâmico)
+    - OpenAI Realtime: input=24kHz, output=24kHz
+    - Gemini Live: input=16kHz, output=24kHz
     
     Inclui buffer de warmup no output para playback suave.
     """
@@ -173,17 +178,31 @@ class ResamplerPair:
     def __init__(
         self, 
         freeswitch_rate: int = 16000, 
-        provider_rate: int = 24000,
+        provider_input_rate: int = 24000,
+        provider_output_rate: int = None,  # Se None, usa provider_input_rate
         output_warmup_ms: int = 200
     ):
-        self.input_resampler = Resampler(freeswitch_rate, provider_rate)
-        self.output_resampler = Resampler(provider_rate, freeswitch_rate)
+        # Se output rate não especificado, assume igual ao input
+        if provider_output_rate is None:
+            provider_output_rate = provider_input_rate
+        
+        self.freeswitch_rate = freeswitch_rate
+        self.provider_input_rate = provider_input_rate
+        self.provider_output_rate = provider_output_rate
+        
+        # Input: FS -> Provider (usa input_rate do provider)
+        self.input_resampler = Resampler(freeswitch_rate, provider_input_rate)
+        
+        # Output: Provider -> FS (usa output_rate do provider)
+        self.output_resampler = Resampler(provider_output_rate, freeswitch_rate)
         
         # Buffer de warmup para output (FS)
         self.output_buffer = AudioBuffer(
             warmup_ms=output_warmup_ms,
             sample_rate=freeswitch_rate
         )
+        
+        logger.debug(f"ResamplerPair: FS({freeswitch_rate}) <-> Provider(in:{provider_input_rate}, out:{provider_output_rate})")
     
     def resample_input(self, audio_bytes: bytes) -> bytes:
         """FS -> Provider"""

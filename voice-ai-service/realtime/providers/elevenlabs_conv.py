@@ -122,6 +122,10 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         self._ws: Optional[ClientConnection] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._event_queue: asyncio.Queue[ProviderEvent] = asyncio.Queue()
+        
+        # Sample rate de saída (atualizado dinamicamente pelo conversation_initiation_metadata)
+        # IMPORTANTE: O ElevenLabs pode retornar áudio em 22050Hz ou 44100Hz, não apenas 16000Hz!
+        self._actual_output_sample_rate = 16000  # Default, será atualizado no connect()
     
     @property
     def name(self) -> str:
@@ -133,7 +137,9 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
     
     @property
     def output_sample_rate(self) -> int:
-        return 16000
+        # DINÂMICO: Retorna o sample rate real do agente (pode ser 16000, 22050, 44100, etc.)
+        # Este valor é atualizado no connect() baseado no conversation_initiation_metadata
+        return self._actual_output_sample_rate
     
     async def connect(self) -> None:
         """Conecta ao ElevenLabs Conversational AI."""
@@ -161,12 +167,34 @@ class ElevenLabsConversationalProvider(BaseRealtimeProvider):
         if event.get("type") != "conversation_initiation_metadata":
             raise ConnectionError(f"Unexpected initial event: {event.get('type')}")
         
+        # CRÍTICO: Extrair o formato de áudio de saída do agente
+        # Ref: https://elevenlabs.io/docs/agents-platform/customization/events/client-events
+        # O agent_output_audio_format pode ser: pcm_16000, pcm_22050, pcm_44100, etc.
+        metadata = event.get("conversation_initiation_metadata_event", {})
+        output_format = metadata.get("agent_output_audio_format", "pcm_16000")
+        input_format = metadata.get("user_input_audio_format", "pcm_16000")
+        conversation_id = metadata.get("conversation_id", "")
+        
+        # Parsear sample rate do formato: "pcm_16000" → 16000
+        if output_format and output_format.startswith("pcm_"):
+            try:
+                self._actual_output_sample_rate = int(output_format.split("_")[1])
+            except (IndexError, ValueError):
+                self._actual_output_sample_rate = 16000
+        else:
+            # Fallback para 16000 se formato não reconhecido
+            self._actual_output_sample_rate = 16000
+        
         self._connected = True
         self._receive_task = asyncio.create_task(self._receive_loop())
         
         logger.info("Connected to ElevenLabs Conversational AI", extra={
             "domain_uuid": self.config.domain_uuid,
             "agent_id": self.agent_id,
+            "conversation_id": conversation_id,
+            "agent_output_audio_format": output_format,
+            "user_input_audio_format": input_format,
+            "actual_output_sample_rate": self._actual_output_sample_rate,
         })
     
     async def configure(self) -> None:

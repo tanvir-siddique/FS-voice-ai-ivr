@@ -264,6 +264,11 @@ services:
       - FS_STREAMAUDIO_FALLBACK=false
       - FS_WARMUP_CHUNKS=5
       
+      # Audio Debug/Fix Options (se o áudio sair distorcido)
+      # - FS_AUDIO_SWAP_BYTES=true  # Inverter byte order (big <-> little endian)
+      # - FS_AUDIO_INVERT_PHASE=true  # Inverter fase (sample *= -1)
+      # - FS_AUDIO_FORCE_RESAMPLE=22050  # Forçar resample de X Hz para 16kHz
+      
       # Recording
       - ATTACH_RECORDING_ENABLED=true
       - FREESWITCH_RECORDINGS_PATH=/var/lib/freeswitch/recordings

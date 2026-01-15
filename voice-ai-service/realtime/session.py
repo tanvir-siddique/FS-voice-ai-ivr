@@ -238,11 +238,27 @@ class RealtimeSession:
         await self._provider.configure()
     
     def _setup_resampler(self) -> None:
+        """
+        Configura os resamplers para conversão de áudio.
+        
+        IMPORTANTE: Input e output do provider podem ter sample rates diferentes!
+        - ElevenLabs: input=16kHz, output=16kHz/22050Hz/44100Hz (dinâmico)
+        - OpenAI Realtime: input=24kHz, output=24kHz
+        - Gemini Live: input=16kHz, output=24kHz
+        """
         if self._provider:
             self._resampler = ResamplerPair(
                 freeswitch_rate=self.config.freeswitch_sample_rate,
-                provider_rate=self._provider.input_sample_rate,
+                provider_input_rate=self._provider.input_sample_rate,
+                provider_output_rate=self._provider.output_sample_rate,  # Pode ser diferente do input!
             )
+            
+            logger.debug("Resampler configured", extra={
+                "call_uuid": self.call_uuid,
+                "freeswitch_rate": self.config.freeswitch_sample_rate,
+                "provider_input_rate": self._provider.input_sample_rate,
+                "provider_output_rate": self._provider.output_sample_rate,
+            })
     
     async def handle_audio_input(self, audio_bytes: bytes) -> None:
         """Processa áudio do FreeSWITCH."""
@@ -262,9 +278,45 @@ class RealtimeSession:
         
         Inclui resampling e buffer warmup de 200ms para playback suave.
         Baseado em: https://github.com/os11k/freeswitch-elevenlabs-bridge
+        
+        Se o áudio sair distorcido, tente estas variáveis de ambiente:
+        - FS_AUDIO_SWAP_BYTES=true (inverte byte order: little <-> big endian)
+        - FS_AUDIO_INVERT_PHASE=true (inverte fase: sample *= -1)
+        - FS_AUDIO_FORCE_RESAMPLE=24000 (força resample de 24kHz para 16kHz)
         """
+        import os
+        import numpy as np
+        
         if not audio_bytes:
             return
+        
+        # Forçar resample se o provider retornar sample rate diferente do declarado
+        # Alguns providers (ElevenLabs) podem retornar 22050Hz ao invés de 16kHz
+        force_resample = os.getenv("FS_AUDIO_FORCE_RESAMPLE", "").strip()
+        if force_resample and force_resample.isdigit():
+            from .utils.resampler import Resampler
+            source_rate = int(force_resample)
+            if source_rate != 16000:
+                temp_resampler = Resampler(source_rate, 16000)
+                audio_bytes = temp_resampler.process(audio_bytes)
+        
+        # Opção para corrigir byte order (big-endian <-> little-endian)
+        # Útil se o áudio sair completamente distorcido
+        swap_bytes = os.getenv("FS_AUDIO_SWAP_BYTES", "false").lower() in ("1", "true", "yes")
+        
+        if swap_bytes and len(audio_bytes) >= 2:
+            # PCM16: swap bytes de cada sample (2 bytes)
+            samples = np.frombuffer(audio_bytes, dtype=np.int16)
+            swapped = samples.byteswap()
+            audio_bytes = swapped.tobytes()
+        
+        # Opção para inverter fase (útil se o áudio sair "metálico")
+        invert_phase = os.getenv("FS_AUDIO_INVERT_PHASE", "false").lower() in ("1", "true", "yes")
+        
+        if invert_phase and len(audio_bytes) >= 2:
+            samples = np.frombuffer(audio_bytes, dtype=np.int16)
+            inverted = -samples  # Inverte fase
+            audio_bytes = np.clip(inverted, -32768, 32767).astype(np.int16).tobytes()
         
         if self._resampler:
             # resample_output já inclui o buffer warmup
