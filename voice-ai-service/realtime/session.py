@@ -25,7 +25,45 @@ from .utils.resampler import ResamplerPair
 from .utils.metrics import get_metrics
 from .handlers.handoff import HandoffHandler, HandoffConfig, HandoffResult
 
+# FASE 1: Handoff Inteligente
+# Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
+from .handlers.transfer_manager import (
+    TransferManager,
+    TransferStatus,
+    TransferResult,
+    create_transfer_manager,
+)
+from .handlers.transfer_destination_loader import TransferDestination
+
 logger = logging.getLogger(__name__)
+
+
+# Function call definition para o LLM usar handoff inteligente
+HANDOFF_FUNCTION_DEFINITION = {
+    "type": "function",
+    "name": "request_handoff",
+    "description": (
+        "Transfere a chamada para um atendente humano, departamento ou pessoa específica. "
+        "Use quando o cliente pedir para falar com alguém ou quando não souber resolver."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "destination": {
+                "type": "string",
+                "description": (
+                    "Nome da pessoa, departamento ou 'qualquer atendente'. "
+                    "Exemplos: 'Jeni', 'financeiro', 'suporte', 'qualquer atendente disponível'"
+                )
+            },
+            "reason": {
+                "type": "string",
+                "description": "Motivo pelo qual o cliente quer falar com alguém"
+            }
+        },
+        "required": ["destination"]
+    }
+}
 
 
 @dataclass
@@ -79,6 +117,12 @@ class RealtimeSessionConfig:
     jitter_buffer_max: int = 300  # FreeSWITCH jitter buffer max (ms)
     jitter_buffer_step: int = 40  # FreeSWITCH jitter buffer step (ms)
     stream_buffer_size: int = 20  # mod_audio_stream buffer in MILLISECONDS (not samples!)
+    
+    # FASE 1: Intelligent Handoff Configuration
+    # Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
+    intelligent_handoff_enabled: bool = True  # Usar TransferManager ao invés de handoff simples
+    transfer_announce_enabled: bool = True  # Anunciar antes de transferir
+    transfer_default_timeout: int = 30  # Timeout padrão de ring em segundos
 
 
 class RealtimeSession:
@@ -129,7 +173,7 @@ class RealtimeSession:
         self._fallback_index = 0
         self._fallback_active = False
         
-        # Handoff handler
+        # Handoff handler (legacy - para fallback)
         self._handoff_handler: Optional[HandoffHandler] = None
         self._handoff_result: Optional[HandoffResult] = None
         if config.handoff_enabled:
@@ -149,6 +193,12 @@ class RealtimeSession:
                 on_transfer=on_transfer,
                 on_message=self._send_text_to_provider,
             )
+        
+        # FASE 1: TransferManager para handoff inteligente
+        # Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
+        self._transfer_manager: Optional[TransferManager] = None
+        self._current_transfer: Optional[TransferResult] = None
+        self._transfer_in_progress = False
     
     @property
     def call_uuid(self) -> str:
@@ -183,6 +233,11 @@ class RealtimeSession:
         try:
             await self._create_provider()
             self._setup_resampler()
+            
+            # FASE 1: Inicializar TransferManager para handoff inteligente
+            if self.config.intelligent_handoff_enabled:
+                await self._init_transfer_manager()
+            
             self._event_task = asyncio.create_task(self._event_loop())
             self._timeout_task = asyncio.create_task(self._timeout_monitor())
             
@@ -190,11 +245,37 @@ class RealtimeSession:
                 "call_uuid": self.call_uuid,
                 "domain_uuid": self.domain_uuid,
                 "provider": self.config.provider_name,
+                "intelligent_handoff": self.config.intelligent_handoff_enabled,
             })
         except Exception as e:
             logger.error(f"Failed to start session: {e}")
             await self.stop("error")
             raise
+    
+    async def _init_transfer_manager(self) -> None:
+        """
+        Inicializa TransferManager para handoff inteligente.
+        
+        Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
+        """
+        try:
+            self._transfer_manager = await create_transfer_manager(
+                domain_uuid=self.config.domain_uuid,
+                call_uuid=self.config.call_uuid,
+                caller_id=self.config.caller_id,
+                secretary_uuid=self.config.secretary_uuid,
+                on_resume=self._on_transfer_resume,
+                on_transfer_complete=self._on_transfer_complete,
+            )
+            
+            logger.info("TransferManager initialized", extra={
+                "call_uuid": self.call_uuid,
+                "destinations_count": len(self._transfer_manager._destinations or []),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to initialize TransferManager: {e}")
+            # Continuar sem TransferManager - usará handoff legacy
+            self._transfer_manager = None
     
     async def _create_provider(self) -> None:
         """Cria e conecta ao provider."""
@@ -495,9 +576,18 @@ class RealtimeSession:
             asyncio.create_task(self._delayed_stop(2.0, "function_end"))
             return {"status": "ending"}
         elif name == "request_handoff":
-            # Handoff requested by LLM via function call - não bloquear
-            asyncio.create_task(self._initiate_handoff(reason="llm_intent"))
-            return {"status": "handoff_initiated"}
+            # FASE 1: Usar TransferManager se disponível
+            destination = args.get("destination", "qualquer atendente")
+            reason = args.get("reason", "solicitação do cliente")
+            
+            if self._transfer_manager and self.config.intelligent_handoff_enabled:
+                # Handoff inteligente com attended transfer
+                asyncio.create_task(self._execute_intelligent_handoff(destination, reason))
+                return {"status": "transfer_initiated", "destination": destination}
+            else:
+                # Fallback para handoff legacy (cria ticket)
+                asyncio.create_task(self._initiate_handoff(reason="llm_intent"))
+                return {"status": "handoff_initiated"}
         return {"error": f"Unknown function: {name}"}
     
     async def _send_text_to_provider(self, text: str) -> None:

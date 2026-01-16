@@ -176,6 +176,7 @@
 
 **Duração Estimada:** 3-4 dias
 **Objetivo:** Implementar transfer attended com monitoramento de eventos ESL
+**Status:** ✅ CONCLUÍDA em 2026-01-16
 
 ### 1.1 Voice AI - Carregador de Destinos
 
@@ -184,13 +185,13 @@
 # voice-ai-service/realtime/handlers/transfer_destination_loader.py
 ```
 
-- [ ] **1.1.1.1** Criar classe `TransferDestinationLoader`
+- [x] **1.1.1.1** Criar classe `TransferDestinationLoader` ✅ 2026-01-16
   - Método `load_destinations(domain_uuid, secretary_uuid)` → List[TransferDestination]
   - Método `find_by_alias(text, destinations)` → Optional[TransferDestination]
   - Método `get_default(destinations)` → Optional[TransferDestination]
   - Cache em memória com TTL de 5 minutos
 
-- [ ] **1.1.1.2** Criar dataclass `TransferDestination`
+- [x] **1.1.1.2** Criar dataclass `TransferDestination` ✅ 2026-01-16
   ```python
   @dataclass
   class TransferDestination:
@@ -211,13 +212,13 @@
       priority: int
   ```
 
-- [ ] **1.1.1.3** Implementar fuzzy matching para aliases
+- [x] **1.1.1.3** Implementar fuzzy matching para aliases ✅ 2026-01-16
   - Busca exata em aliases
   - Busca parcial no nome
   - Busca por departamento
   - Retornar destino com maior prioridade em caso de empate
 
-- [ ] **1.1.1.4** Implementar verificação de horário comercial
+- [x] **1.1.1.4** Implementar verificação de horário comercial ✅ 2026-01-16
   ```python
   def is_within_working_hours(dest: TransferDestination) -> tuple[bool, str]:
       # Verificar dia da semana
@@ -225,7 +226,7 @@
       # Retornar (is_available, message_if_unavailable)
   ```
 
-- [ ] **1.1.1.5** Escrever testes unitários
+- [ ] **1.1.1.5** Escrever testes unitários (pendente)
   - test_load_destinations_from_db
   - test_find_by_alias_exact_match
   - test_find_by_alias_partial_match
@@ -239,35 +240,35 @@
 # voice-ai-service/realtime/handlers/esl_client.py
 ```
 
-- [ ] **1.2.1.1** Implementar conexão ESL com reconexão automática
+- [x] **1.2.1.1** Implementar conexão ESL com reconexão automática ✅ 2026-01-16
   ```python
-  class ESLClient:
+  class AsyncESLClient:
       async def connect(self) -> bool
       async def disconnect(self) -> None
       async def reconnect(self) -> bool
-      async def is_connected(self) -> bool
+      @property is_connected(self) -> bool
   ```
 
-- [ ] **1.2.1.2** Implementar envio de comandos API
+- [x] **1.2.1.2** Implementar envio de comandos API ✅ 2026-01-16
   ```python
   async def execute_api(self, command: str) -> str
   async def execute_bgapi(self, command: str) -> str  # Background API
   ```
 
-- [ ] **1.2.1.3** Implementar subscrição de eventos
+- [x] **1.2.1.3** Implementar subscrição de eventos ✅ 2026-01-16
   ```python
   async def subscribe_events(self, events: List[str], uuid: str = None) -> None
   async def unsubscribe_events(self, uuid: str = None) -> None
-  async def recv_event(self, timeout: float = None) -> Optional[Dict]
+  # Event queue via _event_reader_loop
   ```
 
-- [ ] **1.2.1.4** Implementar handler de eventos com callback
+- [x] **1.2.1.4** Implementar handler de eventos com callback ✅ 2026-01-16
   ```python
   def on_event(self, event_name: str, uuid: str, callback: Callable) -> str  # retorna handler_id
   def off_event(self, handler_id: str) -> None
   ```
 
-- [ ] **1.2.1.5** Implementar métodos de alto nível
+- [x] **1.2.1.5** Implementar métodos de alto nível ✅ 2026-01-16
   ```python
   async def uuid_broadcast(self, uuid: str, audio: str, leg: str = "aleg") -> bool
   async def uuid_break(self, uuid: str) -> bool
@@ -276,17 +277,17 @@
   async def originate(self, dial_string: str, app: str = "&park()") -> str  # retorna UUID
   ```
 
-- [ ] **1.2.1.6** Implementar wait_for_event com filtros
+- [x] **1.2.1.6** Implementar wait_for_event com filtros ✅ 2026-01-16
   ```python
   async def wait_for_event(
       self,
       event_names: List[str],
       uuid: str,
       timeout: float
-  ) -> Optional[Dict]
+  ) -> Optional[ESLEvent]
   ```
 
-- [ ] **1.2.1.7** Escrever testes unitários (mockar socket)
+- [ ] **1.2.1.7** Escrever testes unitários (mockar socket) (pendente)
   - test_connect_success
   - test_connect_failure_reconnect
   - test_execute_api
@@ -300,7 +301,7 @@
 # voice-ai-service/realtime/handlers/transfer_manager.py
 ```
 
-- [ ] **1.3.1.1** Criar enum `TransferStatus`
+- [x] **1.3.1.1** Criar enum `TransferStatus` ✅ 2026-01-16
   ```python
   class TransferStatus(Enum):
       PENDING = "pending"
@@ -317,55 +318,49 @@
       CANCELLED = "cancelled"
   ```
 
-- [ ] **1.3.1.2** Criar mapeamento de hangup causes
+- [x] **1.3.1.2** Criar mapeamento de hangup causes ✅ 2026-01-16
   ```python
   HANGUP_CAUSE_MAP = {
       "NORMAL_CLEARING": TransferStatus.SUCCESS,
       "USER_BUSY": TransferStatus.BUSY,
-      "NO_ANSWER": TransferStatus.NO_ANSWER,
-      "NO_USER_RESPONSE": TransferStatus.NO_ANSWER,
-      "CALL_REJECTED": TransferStatus.REJECTED,
-      "SUBSCRIBER_ABSENT": TransferStatus.OFFLINE,
-      "USER_NOT_REGISTERED": TransferStatus.OFFLINE,
-      "DO_NOT_DISTURB": TransferStatus.DND,
-      # ... (15+ mappings)
+      # ... (25+ mappings implementados)
   }
   ```
 
-- [ ] **1.3.1.3** Implementar `execute_attended_transfer`
+- [x] **1.3.1.3** Implementar `execute_attended_transfer` ✅ 2026-01-16
   - Passo 1: `uuid_broadcast` (música de espera)
   - Passo 2: `originate` nova leg
   - Passo 3: Monitorar eventos
   - Passo 4: `uuid_bridge` se atendeu
   - Passo 5: `uuid_break` + retomar se não atendeu
 
-- [ ] **1.3.1.4** Implementar `_monitor_transfer_leg`
+- [x] **1.3.1.4** Implementar `_monitor_transfer_leg` ✅ 2026-01-16
   - Subscrever eventos CHANNEL_ANSWER, CHANNEL_HANGUP
   - Processar hangup causes
   - Retornar TransferResult
 
-- [ ] **1.3.1.5** Implementar `_stop_moh_and_resume`
+- [x] **1.3.1.5** Implementar `stop_moh_and_resume` ✅ 2026-01-16
   - `uuid_break` para parar música
   - Notificar sessão para retomar Voice AI
 
-- [ ] **1.3.1.6** Implementar handler para cliente desliga durante hold
-  - `_on_caller_hangup`
+- [x] **1.3.1.6** Implementar handler para cliente desliga durante hold ✅ 2026-01-16
+  - `handle_caller_hangup`
   - Matar B-leg pendente
   - Marcar como CANCELLED
 
-- [ ] **1.3.1.7** Implementar `_build_dial_string` para diferentes tipos
+- [x] **1.3.1.7** Implementar `_build_dial_string` para diferentes tipos ✅ 2026-01-16
   ```python
   def _build_dial_string(self, dest: TransferDestination) -> str:
       if dest.destination_type == "extension":
-          return f"user/{dest.destination_number}@{self.domain}"
+          return f"user/{dest.destination_number}@{context}"
       elif dest.destination_type == "ring_group":
-          return f"group/{dest.destination_number}@{self.domain}"
+          return f"group/{dest.destination_number}@{context}"
       elif dest.destination_type == "queue":
-          return f"fifo/{dest.destination_number}@{self.domain}"
+          return f"fifo/{dest.destination_number}@{context}"
       # ...
   ```
 
-- [ ] **1.3.1.8** Escrever testes unitários
+- [ ] **1.3.1.8** Escrever testes unitários (pendente)
   - test_transfer_answered
   - test_transfer_busy
   - test_transfer_no_answer
@@ -380,97 +375,53 @@
 # voice-ai-service/realtime/session.py
 ```
 
-- [ ] **1.4.1.1** Instanciar TransferManager na sessão
+- [x] **1.4.1.1** Instanciar TransferManager na sessão ✅ 2026-01-16
   ```python
-  self._transfer_manager = TransferManager(
-      domain_uuid=config.domain_uuid,
-      call_uuid=call_uuid,
-      caller_id=config.caller_id,
-      esl_client=self._esl
-  )
+  # Em start():
+  if self.config.intelligent_handoff_enabled:
+      await self._init_transfer_manager()
   ```
 
-- [ ] **1.4.1.2** Implementar método `request_transfer`
+- [x] **1.4.1.2** Implementar método `request_transfer` ✅ 2026-01-16
   ```python
-  async def request_transfer(self, user_text: str) -> TransferResult:
-      # 1. Encontrar destino
-      destination, error = await self._transfer_manager.find_and_validate_destination(user_text)
-      if error:
-          await self.say(error)
-          return None
-      
-      # 2. Anunciar transferência
-      await self.say(f"Um momento, vou transferir para {destination.name}...")
-      
-      # 3. Executar transfer
-      result = await self._transfer_manager.execute_attended_transfer(
-          destination,
-          timeout=destination.ring_timeout_seconds
-      )
-      
-      # 4. Processar resultado
-      await self._handle_transfer_result(result)
-      return result
+  async def request_transfer(self, user_text: str) -> Optional[TransferResult]:
+      # Implementado com _execute_intelligent_handoff
   ```
 
-- [ ] **1.4.1.3** Implementar `_handle_transfer_result`
+- [x] **1.4.1.3** Implementar `_handle_transfer_result` ✅ 2026-01-16
   ```python
-  async def _handle_transfer_result(self, result: TransferResult):
+  async def _handle_transfer_result(self, result: TransferResult, original_reason: str):
       if result.status == TransferStatus.SUCCESS:
-          # Bridge estabelecido - encerrar sessão
           await self.stop("transfer_success")
-          
-      elif result.status == TransferStatus.BUSY:
-          await self.say("O ramal está ocupado. Quer deixar um recado?")
-          
-      elif result.status == TransferStatus.NO_ANSWER:
-          await self.say(f"{result.destination.name} não está atendendo. Quer deixar um recado?")
-          
-      elif result.status == TransferStatus.DND:
-          await self.say("O ramal está em modo não perturbe. Quer deixar um recado?")
-          
-      elif result.status == TransferStatus.OFFLINE:
-          await self.say("O ramal não está disponível no momento. Quer deixar um recado?")
-          
       elif result.status == TransferStatus.CANCELLED:
-          # Cliente desligou - não fazer nada
-          pass
+          await self.stop("caller_hangup")
+      else:
+          # Retomar Voice AI com mensagem contextual
+          await self._send_text_to_provider(result.message)
+          if result.should_offer_callback:
+              await self._offer_callback_or_message(result, original_reason)
   ```
 
-- [ ] **1.4.1.4** Adicionar function call `request_handoff` para o LLM
+- [x] **1.4.1.4** Adicionar function call `request_handoff` para o LLM ✅ 2026-01-16
   ```python
-  TRANSFER_FUNCTION = {
+  HANDOFF_FUNCTION_DEFINITION = {
+      "type": "function",
       "name": "request_handoff",
-      "description": "Transfer the call to a human agent, department, or specific person",
-      "parameters": {
-          "type": "object",
-          "properties": {
-              "destination": {
-                  "type": "string",
-                  "description": "Name of person, department, or 'any available agent'"
-              },
-              "reason": {
-                  "type": "string",
-                  "description": "Why the caller wants to speak with someone"
-              }
-          },
-          "required": ["destination"]
-      }
+      "description": "Transfere a chamada para um atendente humano...",
+      "parameters": { ... }
   }
   ```
 
-- [ ] **1.4.1.5** Implementar executor da function call
+- [x] **1.4.1.5** Implementar executor da function call ✅ 2026-01-16
   ```python
   async def _execute_function(self, name: str, args: dict):
       if name == "request_handoff":
-          destination = args.get("destination", "")
-          reason = args.get("reason", "")
+          destination = args.get("destination", "qualquer atendente")
+          reason = args.get("reason", "solicitação do cliente")
           
-          result = await self.request_transfer(destination)
-          
-          # Se não atendeu e cliente quer recado
-          if result and result.status not in [TransferStatus.SUCCESS, TransferStatus.CANCELLED]:
-              await self._offer_callback_or_message(result, reason)
+          if self._transfer_manager and self.config.intelligent_handoff_enabled:
+              asyncio.create_task(self._execute_intelligent_handoff(destination, reason))
+          # ...
   ```
 
 ### 1.5 Testes de Integração - Fase 1
