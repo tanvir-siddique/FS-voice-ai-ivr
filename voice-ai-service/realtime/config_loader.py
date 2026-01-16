@@ -797,7 +797,84 @@ async def load_secretary_config(
     Returns:
         Dict com configuração ou None se não encontrada
     """
-    loader = ConfigLoader.get_instance()
+    # Usar get_config_loader() para obter a instância singleton
+    loader = get_config_loader()
+    
+    if loader is None:
+        # Se o loader não foi inicializado, criar conexão direta
+        import os
+        import asyncpg
+        
+        db_host = os.getenv("DB_HOST", "host.docker.internal")
+        db_port = int(os.getenv("DB_PORT", "5432"))
+        db_name = os.getenv("DB_NAME", "fusionpbx")
+        db_user = os.getenv("DB_USER", "fusionpbx")
+        db_pass = os.getenv("DB_PASS", "")
+        
+        try:
+            conn = await asyncpg.connect(
+                host=db_host,
+                port=db_port,
+                database=db_name,
+                user=db_user,
+                password=db_pass,
+            )
+            
+            row = await conn.fetchrow("""
+                SELECT 
+                    s.voice_secretary_uuid,
+                    s.domain_uuid,
+                    s.secretary_name,
+                    s.extension,
+                    s.processing_mode,
+                    s.personality_prompt,
+                    s.greeting_message,
+                    s.farewell_message,
+                    s.tts_voice_id,
+                    s.language,
+                    s.max_turns,
+                    s.is_enabled,
+                    p.provider_name as realtime_provider_name,
+                    p.config as realtime_provider_config
+                FROM v_voice_secretaries s
+                LEFT JOIN v_voice_ai_providers p ON p.voice_ai_provider_uuid = s.realtime_provider_uuid
+                WHERE s.domain_uuid = $1 
+                  AND s.voice_secretary_uuid = $2
+            """, domain_uuid, secretary_uuid)
+            
+            await conn.close()
+            
+            if not row:
+                logger.warning(
+                    f"Secretary not found: domain={domain_uuid}, uuid={secretary_uuid}"
+                )
+                return None
+            
+            # Config pode vir como string JSON
+            import json
+            provider_config = row['realtime_provider_config']
+            if isinstance(provider_config, str):
+                provider_config = json.loads(provider_config)
+            
+            return {
+                "secretary_uuid": str(row['voice_secretary_uuid']),
+                "domain_uuid": str(row['domain_uuid']),
+                "secretary_name": row['secretary_name'] or 'Secretária',
+                "extension": row['extension'] or '',
+                "system_prompt": row['personality_prompt'] or '',
+                "first_message": row['greeting_message'] or 'Olá!',
+                "farewell": row['farewell_message'] or 'Até logo!',
+                "provider_name": row['realtime_provider_name'] or "elevenlabs",
+                "voice": row['tts_voice_id'] or 'alloy',
+                "language": row['language'] or 'pt-BR',
+                "provider_config": provider_config or {},
+            }
+            
+        except Exception as e:
+            logger.error(f"Error loading secretary config from DB: {e}")
+            return None
+    
+    # Se loader já foi inicializado, usar normalmente
     config = await loader.get_secretary_by_uuid(domain_uuid, secretary_uuid)
     
     if not config:
@@ -818,12 +895,5 @@ async def load_secretary_config(
         "provider_name": config.realtime_provider or "elevenlabs",
         "voice": config.voice,
         "language": config.language,
-        "vad_threshold": config.vad_threshold,
-        "silence_duration_ms": config.silence_duration_ms,
         "provider_config": config.realtime_provider_config,
-        # Handoff
-        "handoff_enabled": config.handoff_enabled,
-        "handoff_keywords": config.handoff_keywords,
-        "handoff_max_turns": config.handoff_max_turns,
-        "handoff_queue_id": config.handoff_queue_id,
     }
