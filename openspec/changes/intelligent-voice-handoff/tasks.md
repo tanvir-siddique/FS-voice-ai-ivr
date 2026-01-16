@@ -1043,6 +1043,7 @@
 
 **Duração Estimada:** 2-3 dias
 **Objetivo:** Criar interface para atendentes verem e gerenciarem callbacks
+**Status:** ✅ CONCLUÍDA em 2026-01-16 (estrutura básica)
 
 ### 3.1 Frontend - Componente de Widget de Callback
 
@@ -1051,7 +1052,7 @@
 // frontend/src/components/CallbackWidget/index.js
 ```
 
-- [ ] **3.1.1.1** Criar estrutura do componente
+- [x] **3.1.1.1** Criar estrutura do componente ✅ 2026-01-16
   ```jsx
   const CallbackWidget = () => {
     const [callbacks, setCallbacks] = useState([]);
