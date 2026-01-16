@@ -78,7 +78,7 @@ class RealtimeSessionConfig:
     jitter_buffer_min: int = 100  # FreeSWITCH jitter buffer min (ms)
     jitter_buffer_max: int = 300  # FreeSWITCH jitter buffer max (ms)
     jitter_buffer_step: int = 40  # FreeSWITCH jitter buffer step (ms)
-    stream_buffer_size: int = 320  # mod_audio_stream buffer (samples)
+    stream_buffer_size: int = 20  # mod_audio_stream buffer in MILLISECONDS (not samples!)
 
 
 class RealtimeSession:

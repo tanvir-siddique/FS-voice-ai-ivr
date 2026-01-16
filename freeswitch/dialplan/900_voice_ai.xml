@@ -78,7 +78,8 @@
       <!-- Configurar streaming -->
       <action application="set" data="STREAM_PLAYBACK=true"/>
       <action application="set" data="STREAM_SAMPLE_RATE=16000"/>
-      <action application="set" data="STREAM_BUFFER_SIZE=320"/>
+      <!-- STREAM_BUFFER_SIZE é em MILISSEGUNDOS, não samples! -->
+      <action application="set" data="STREAM_BUFFER_SIZE=20"/>
       
       <!-- Metadata para o bridge -->
       <action application="set" data="STREAM_EXTRA_HEADERS=caller_id:${caller_id_number},extension:${voice_ai_extension},domain:${domain_uuid}"/>

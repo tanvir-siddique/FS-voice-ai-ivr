@@ -23,7 +23,10 @@ freeswitch.consoleLog("INFO", "[VoiceSecretary] Starting - domain: " .. domain_u
 local jitter_min = 100
 local jitter_max = 300
 local jitter_step = 40
-local stream_buffer = 320
+-- IMPORTANTE: STREAM_BUFFER_SIZE é em MILISSEGUNDOS, não samples!
+-- Default: 20ms (frame size padrão do FreeSWITCH)
+-- 320 samples @ 16kHz = 20ms, mas a variável espera MS diretamente!
+local stream_buffer = 20  -- 20ms = valor padrão correto
 
 -- Tentar ler as configurações do banco se secretary_uuid existir
 if secretary_uuid and secretary_uuid ~= "" then
@@ -34,7 +37,8 @@ if secretary_uuid and secretary_uuid ~= "" then
                 COALESCE(jitter_buffer_min, 100) as jitter_min,
                 COALESCE(jitter_buffer_max, 300) as jitter_max,
                 COALESCE(jitter_buffer_step, 40) as jitter_step,
-                COALESCE(stream_buffer_size, 320) as stream_buffer
+                -- STREAM_BUFFER_SIZE é em MS, não samples! Default 20ms
+                COALESCE(stream_buffer_size, 20) as stream_buffer
             FROM v_voice_secretaries 
             WHERE voice_secretary_uuid = '%s']], 
             secretary_uuid:gsub("'", "''")  -- escape SQL injection
@@ -44,7 +48,7 @@ if secretary_uuid and secretary_uuid ~= "" then
             jitter_min = tonumber(row.jitter_min) or 100
             jitter_max = tonumber(row.jitter_max) or 300
             jitter_step = tonumber(row.jitter_step) or 40
-            stream_buffer = tonumber(row.stream_buffer) or 320
+            stream_buffer = tonumber(row.stream_buffer) or 20  -- 20ms default
             freeswitch.consoleLog("INFO", "[VoiceSecretary] Audio config from DB: jitter=" .. jitter_min .. ":" .. jitter_max .. ":" .. jitter_step .. ", buffer=" .. stream_buffer .. "\n")
         end)
         

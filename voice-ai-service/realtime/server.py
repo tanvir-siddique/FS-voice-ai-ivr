@@ -312,7 +312,7 @@ class RealtimeServer:
                     COALESCE(s.jitter_buffer_min, 100) as jitter_buffer_min,
                     COALESCE(s.jitter_buffer_max, 300) as jitter_buffer_max,
                     COALESCE(s.jitter_buffer_step, 40) as jitter_buffer_step,
-                    COALESCE(s.stream_buffer_size, 320) as stream_buffer_size
+                    COALESCE(s.stream_buffer_size, 20) as stream_buffer_size  -- 20ms default (NOT samples!)
                 FROM v_voice_secretaries s
                 LEFT JOIN v_voice_ai_providers p ON p.voice_ai_provider_uuid = s.realtime_provider_uuid
                 WHERE s.domain_uuid = $1
@@ -453,7 +453,7 @@ class RealtimeServer:
         db_jitter_min = int(row.get("jitter_buffer_min") or 100)
         db_jitter_max = int(row.get("jitter_buffer_max") or 300)
         db_jitter_step = int(row.get("jitter_buffer_step") or 40)
-        db_stream_buffer = int(row.get("stream_buffer_size") or 320)
+        db_stream_buffer = int(row.get("stream_buffer_size") or 20)  # 20ms default
         
         logger.info("Audio config from DB", extra={
             "call_uuid": call_uuid,

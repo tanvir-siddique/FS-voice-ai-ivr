@@ -99,7 +99,7 @@
 			'jitter_buffer_min' => intval($_POST['jitter_buffer_min'] ?? 100),
 			'jitter_buffer_max' => intval($_POST['jitter_buffer_max'] ?? 300),
 			'jitter_buffer_step' => intval($_POST['jitter_buffer_step'] ?? 40),
-			'stream_buffer_size' => intval($_POST['stream_buffer_size'] ?? 320),
+			'stream_buffer_size' => intval($_POST['stream_buffer_size'] ?? 20),  // 20ms default (milliseconds!)
 		];
 		
 		//validate
@@ -148,7 +148,7 @@
 			$array['voice_secretaries'][0]['jitter_buffer_min'] = $form_data['jitter_buffer_min'] ?: 100;
 			$array['voice_secretaries'][0]['jitter_buffer_max'] = $form_data['jitter_buffer_max'] ?: 300;
 			$array['voice_secretaries'][0]['jitter_buffer_step'] = $form_data['jitter_buffer_step'] ?: 40;
-			$array['voice_secretaries'][0]['stream_buffer_size'] = $form_data['stream_buffer_size'] ?: 320;
+			$array['voice_secretaries'][0]['stream_buffer_size'] = $form_data['stream_buffer_size'] ?: 20;  // 20ms default
 			
 			//add permissions
 			$p = permissions::new();
@@ -570,9 +570,9 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-stream_buffer'] ?? 'Stream Buffer Size')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='number' name='stream_buffer_size' min='160' max='1600' step='160' value='".intval($data['stream_buffer_size'] ?? 320)."' style='width: 80px;'>\n";
-	echo "		<span style='margin-left: 5px;'>samples</span>\n";
-	echo "		<br /><span class='vtable-hint'>".($text['description-stream_buffer'] ?? 'mod_audio_stream buffer size in samples. 320 = 20ms @ 16kHz. Higher = more stable.')."</span>\n";
+	echo "		<input class='formfld' type='number' name='stream_buffer_size' min='20' max='100' step='20' value='".intval($data['stream_buffer_size'] ?? 20)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>ms</span>\n";
+	echo "		<br /><span class='vtable-hint'>".($text['description-stream_buffer'] ?? 'mod_audio_stream buffer size in MILLISECONDS. 20ms = default (recommended). Higher = more stable but higher latency.')."</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
