@@ -7,7 +7,7 @@
 --
 -- Configuração:
 -- - URL: ws://127.0.0.1:8085/stream/{domain_uuid}/{call_uuid}
--- - Parâmetro mod_audio_stream: mixed 16k
+-- - Parâmetro mod_audio_stream: mono 16k (mono = apenas caller, evita eco)
 -- - Formato de resposta: JSON com type="streamAudio"
 
 local domain_uuid = session:getVariable("domain_uuid") or ""
@@ -88,10 +88,14 @@ freeswitch.consoleLog("INFO", "[VoiceSecretary] Connecting to WebSocket: " .. ws
 
 -- Iniciar audio stream via API
 -- Sintaxe: uuid_audio_stream <uuid> start <url> <mix-type> <sampling-rate> [metadata]
--- mix-type: mono, mixed, stereo
+-- mix-type: 
+--   mono   = apenas áudio do CALLER (usuário) - CORRETO para Voice AI!
+--   mixed  = caller + callee (causa eco do playback voltando ao AI)
+--   stereo = caller em canal 1, callee em canal 2
 -- sampling-rate: "8k" ou "16k" (não 8000 ou 16000!)
 local api = freeswitch.API()
-local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mixed 16k"
+-- IMPORTANTE: usar MONO para evitar eco do playback!
+local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mono 16k"
 freeswitch.consoleLog("INFO", "[VoiceSecretary] Executing: " .. cmd .. "\n")
 
 local result = api:executeString(cmd)
