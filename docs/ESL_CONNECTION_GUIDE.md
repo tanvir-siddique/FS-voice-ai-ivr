@@ -86,86 +86,254 @@ Conteúdo recomendado:
 
 > ⚠️ **IMPORTANTE**: A senha padrão `ClueCon` é conhecida publicamente. **SEMPRE** altere para uma senha segura em produção!
 
-### 1.3 Instalar Dialplan ESL
+### 1.3 Criar Dialplan ESL via FusionPBX (Interface Visual)
 
-Copie o dialplan para o FreeSWITCH:
+> ⚠️ **IMPORTANTE**: O FusionPBX armazena dialplans no banco de dados PostgreSQL (tabela `v_dialplans`), NÃO em arquivos XML. Não edite arquivos diretamente em `/etc/freeswitch/dialplan/`.
+
+#### Opção 1: Via Interface Visual do FusionPBX (Recomendado)
+
+**Passo 1:** Acesse o FusionPBX como administrador
+
+**Passo 2:** Navegue até **Dialplan → Dialplan Manager**
+
+**Passo 3:** Clique em **+ Add** (canto superior direito)
+
+**Passo 4:** Preencha os campos:
+
+| Campo | Valor | Descrição |
+|-------|-------|-----------|
+| **Name** | `voice_ai_esl_8000` | Nome único do dialplan |
+| **Number** | `8000` | Número/ramal que acionará o Voice AI |
+| **Context** | `${domain_name}` ou `public` | Contexto (use o do seu domínio) |
+| **Order** | `5` | Ordem baixa = executa antes de outros |
+| **Enabled** | `true` | Ativar o dialplan |
+| **Continue** | `false` | **CRÍTICO**: Impede cair em "not-found" |
+| **Description** | `Voice AI ESL - Secretária Virtual` | Descrição para referência |
+
+**Passo 5:** Na seção **Dialplan Details**, adicione as seguintes linhas na ordem:
+
+| Tag | Type | Data |
+|-----|------|------|
+| **condition** | `field` | `destination_number` |
+| **condition** | `expression` | `^8000$` |
+| **action** | `set` | `domain_uuid=${domain_uuid}` |
+| **action** | `set` | `secretary_uuid=SEU_UUID_DA_SECRETARIA` |
+| **action** | `set` | `absolute_codec_string=PCMU` |
+| **action** | `answer` | *(deixe vazio)* |
+| **action** | `socket` | `127.0.0.1:8022 async full` |
+
+**Passo 6:** Clique em **Save**
+
+**Passo 7:** Limpe o cache e recarregue:
 
 ```bash
-# Copiar arquivo do projeto
-sudo cp /path/to/voice-ai-ivr/freeswitch/dialplan/900_voice_ai_esl.xml \
-        /etc/freeswitch/dialplan/default/
+# Limpar cache do FusionPBX
+rm -rf /var/cache/fusionpbx/*
 
-# Ou criar manualmente
-sudo nano /etc/freeswitch/dialplan/default/900_voice_ai_esl.xml
+# Recarregar XML no FreeSWITCH
+fs_cli -x "reloadxml"
 ```
 
-Conteúdo do dialplan:
+---
 
-```xml
-<include>
-  <!-- 
-    Voice AI ESL - Pattern: 8XXX (ramais 8000-8999 reservados para Voice AI)
-    Ajuste o pattern conforme necessidade.
-  -->
-  <extension name="voice_ai_esl" continue="false">
-    <condition field="destination_number" expression="^(8\d{3})$">
-      <!-- Log da chamada -->
-      <action application="log" data="INFO Voice AI ESL: Incoming call to $1 from ${caller_id_number}"/>
-      
-      <!-- Variáveis obrigatórias para o Voice AI -->
-      <action application="set" data="domain_uuid=${domain_uuid}"/>
-      <action application="set" data="secretary_uuid=${secretary_uuid}"/>
-      
-      <!-- Configuração de codec para RTP -->
-      <action application="set" data="absolute_codec_string=PCMU"/>
-      <action application="set" data="rtp_use_timer_name=none"/>
-      
-      <!-- Atender a chamada -->
-      <action application="answer"/>
-      
-      <!-- 
-        Conectar ao ESL Outbound Server do Voice AI
-        
-        Parâmetros:
-        - IP:PORT = Endereço do Voice AI container
-        - async = Execução assíncrona
-        - full = Enviar todas as variáveis do canal
-      -->
-      <action application="socket" data="127.0.0.1:8022 async full"/>
-    </condition>
-  </extension>
-</include>
-```
+#### Opção 2: Via SQL Direto no Banco de Dados
 
-### 1.4 Associar Secretária a um Ramal
+Se preferir usar SQL (útil para automação ou bulk insert):
 
-Para associar uma secretária específica a um ramal:
-
-```xml
-<extension name="voice_ai_secretaria_vendas" continue="false">
-  <condition field="destination_number" expression="^8001$">
+```sql
+-- Inserir dialplan Voice AI ESL
+INSERT INTO v_dialplans (
+    dialplan_uuid,
+    domain_uuid,
+    dialplan_name,
+    dialplan_number,
+    dialplan_context,
+    dialplan_continue,
+    dialplan_order,
+    dialplan_enabled,
+    dialplan_description,
+    dialplan_xml
+)
+SELECT 
+    gen_random_uuid(),
+    domain_uuid,
+    'voice_ai_esl_8000',
+    '8000',
+    domain_name,  -- ou 'public' para chamadas externas
+    'false',      -- CRÍTICO: impede cair em not-found
+    5,            -- Ordem baixa = executa primeiro
+    'true',
+    'Voice AI ESL - Secretária Virtual',
+    '<extension name="voice_ai_esl_8000" continue="false">
+  <condition field="destination_number" expression="^8000$">
     <action application="set" data="domain_uuid=${domain_uuid}"/>
-    <!-- UUID da secretária configurada no FusionPBX -->
+    <action application="set" data="secretary_uuid=SEU_UUID_DA_SECRETARIA"/>
+    <action application="set" data="absolute_codec_string=PCMU"/>
+    <action application="answer"/>
+    <action application="socket" data="127.0.0.1:8022 async full"/>
+  </condition>
+</extension>'
+FROM v_domains
+WHERE domain_name = 'seu.dominio.com.br'
+LIMIT 1;
+```
+
+Executar:
+
+```bash
+sudo -u postgres psql fusionpbx < seu_script.sql
+```
+
+---
+
+#### Opção 3: Criar Dialplan para Range de Ramais (8000-8999)
+
+Para criar um dialplan que atenda vários ramais Voice AI:
+
+**Via Interface:**
+
+| Campo | Valor |
+|-------|-------|
+| **Name** | `voice_ai_esl_range` |
+| **Number** | `8XXX` |
+| **Expression** | `^(8\d{3})$` |
+
+**Via SQL:**
+
+```sql
+INSERT INTO v_dialplans (
+    dialplan_uuid,
+    domain_uuid,
+    dialplan_name,
+    dialplan_number,
+    dialplan_context,
+    dialplan_continue,
+    dialplan_order,
+    dialplan_enabled,
+    dialplan_description,
+    dialplan_xml
+)
+SELECT 
+    gen_random_uuid(),
+    domain_uuid,
+    'voice_ai_esl_range',
+    '8XXX',
+    domain_name,
+    'false',
+    5,
+    'true',
+    'Voice AI ESL - Range 8000-8999',
+    '<extension name="voice_ai_esl_range" continue="false">
+  <condition field="destination_number" expression="^(8\d{3})$">
+    <action application="log" data="INFO Voice AI ESL: Incoming call to $1 from ${caller_id_number}"/>
+    <action application="set" data="domain_uuid=${domain_uuid}"/>
+    <action application="set" data="absolute_codec_string=PCMU"/>
+    <action application="set" data="rtp_use_timer_name=none"/>
+    <action application="answer"/>
+    <action application="socket" data="127.0.0.1:8022 async full"/>
+  </condition>
+</extension>'
+FROM v_domains
+WHERE domain_name = 'seu.dominio.com.br'
+LIMIT 1;
+```
+
+### 1.4 Associar Secretária a um Ramal Específico
+
+Para associar uma secretária específica a um ramal, você precisa do UUID da secretária.
+
+**Encontrar o UUID da secretária no FusionPBX:**
+
+```sql
+-- Listar todas as secretárias do domínio
+SELECT 
+    voice_secretary_uuid,
+    secretary_name,
+    extension
+FROM v_voice_secretaries
+WHERE domain_uuid = 'SEU_DOMAIN_UUID';
+```
+
+**Ou via Interface:** Apps → Voice Secretary → Editar → Copiar UUID da URL
+
+**Criar dialplan com secretária específica:**
+
+```sql
+UPDATE v_dialplans 
+SET dialplan_xml = '<extension name="voice_ai_esl_vendas" continue="false">
+  <condition field="destination_number" expression="^8001$">
+    <action application="set" data="domain_uuid=96f6142d-02b1-49fa-8bcb-f98658bb831f"/>
     <action application="set" data="secretary_uuid=dc923a2f-b88a-4a2f-8029-d6e0c06893c5"/>
     <action application="set" data="absolute_codec_string=PCMU"/>
     <action application="answer"/>
     <action application="socket" data="127.0.0.1:8022 async full"/>
   </condition>
-</extension>
+</extension>'
+WHERE dialplan_name = 'voice_ai_esl_vendas';
 ```
 
-### 1.5 Recarregar configurações
+### 1.5 Limpar Cache e Recarregar
+
+> ⚠️ **CRÍTICO**: O FusionPBX usa cache de arquivos. Após qualquer alteração no dialplan, SEMPRE execute:
 
 ```bash
-# Recarregar XML (dialplan)
+# 1. Limpar cache do FusionPBX
+rm -rf /var/cache/fusionpbx/*
+
+# 2. Recarregar XML no FreeSWITCH
 fs_cli -x "reloadxml"
 
-# Recarregar módulo ESL (se alterou event_socket.conf.xml)
-fs_cli -x "reload mod_event_socket"
+# 3. (Opcional) Limpar cache específico
+fs_cli -x "xml_flush_cache dialplan"
 
-# Verificar se dialplan foi carregado
+# 4. Verificar se dialplan foi carregado
 fs_cli -x "show dialplan" | grep voice_ai
 ```
+
+**Via PHP (alternativa):**
+
+```bash
+php -r "
+require '/var/www/fusionpbx/resources/require.php';
+\$cache = new cache;
+\$cache->delete('dialplan:seu.dominio.com.br');
+echo 'Cache cleared';
+"
+```
+
+### 1.6 Verificar Dialplan no Banco
+
+```sql
+-- Verificar se o dialplan existe e está correto
+SELECT 
+    dialplan_uuid,
+    dialplan_name,
+    dialplan_number,
+    dialplan_order,
+    dialplan_continue,
+    dialplan_enabled,
+    dialplan_xml
+FROM v_dialplans
+WHERE dialplan_name LIKE '%voice_ai%'
+ORDER BY dialplan_order;
+```
+
+### 1.7 Estrutura da Tabela v_dialplans (Referência)
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `dialplan_uuid` | UUID | Identificador único |
+| `domain_uuid` | UUID | Domínio (multi-tenant) |
+| `dialplan_name` | VARCHAR | Nome único do dialplan |
+| `dialplan_number` | VARCHAR | Número de referência |
+| `dialplan_context` | VARCHAR | Contexto (domain_name ou public) |
+| `dialplan_continue` | VARCHAR | 'true' ou 'false' |
+| `dialplan_order` | INT | Ordem de execução (menor = primeiro) |
+| `dialplan_enabled` | VARCHAR | 'true' ou 'false' |
+| `dialplan_description` | TEXT | Descrição para referência |
+| `dialplan_xml` | TEXT | **XML real usado pelo FreeSWITCH** |
+
+> **IMPORTANTE**: O campo `dialplan_xml` é o que realmente é executado pelo FreeSWITCH. Os registros em `v_dialplan_details` são apenas para a interface visual.
 
 ---
 
@@ -499,6 +667,38 @@ event plain CHANNEL_CREATE CHANNEL_ANSWER CHANNEL_HANGUP
 
 ## FASE 6: Troubleshooting
 
+### Problema: DESTINATION_OUT_OF_ORDER
+
+**Sintomas:**
+- Chamada falha com erro `DESTINATION_OUT_OF_ORDER`
+- Nenhum log no Voice AI
+
+**Soluções:**
+
+```bash
+# 1. Verificar se dialplan existe no banco
+sudo -u postgres psql fusionpbx -c "
+SELECT dialplan_name, dialplan_enabled, dialplan_continue, dialplan_order 
+FROM v_dialplans 
+WHERE dialplan_name LIKE '%voice_ai%' OR dialplan_number = '8000';"
+
+# 2. Verificar se dialplan_xml está correto
+sudo -u postgres psql fusionpbx -c "
+SELECT dialplan_xml 
+FROM v_dialplans 
+WHERE dialplan_name LIKE '%voice_ai%';"
+
+# 3. Verificar se dialplan_continue = 'false'
+# Se for 'true', a chamada pode cair em "not-found"
+
+# 4. Limpar cache do FusionPBX
+rm -rf /var/cache/fusionpbx/*
+fs_cli -x "reloadxml"
+
+# 5. Verificar ordem do dialplan (deve ser baixa, ex: 5)
+# Dialplans com ordem alta podem ser sobrescritos por catch-all
+```
+
 ### Problema: ESL Connection Refused
 
 **Sintomas:**
@@ -563,15 +763,50 @@ ss -tlnp | grep 8022
 # 2. Testar do FreeSWITCH
 nc -zv 127.0.0.1 8022
 
-# 3. Verificar IP no dialplan
-# Se Docker, pode precisar do IP do container
+# 3. Verificar IP no dialplan (campo dialplan_xml)
+sudo -u postgres psql fusionpbx -c "
+SELECT dialplan_xml FROM v_dialplans 
+WHERE dialplan_name LIKE '%voice_ai%';" | grep socket
+
+# 4. Se Docker, verificar IP do container
 docker inspect voice-ai-realtime | grep IPAddress
 
-# 4. Verificar logs do Voice AI
+# 5. Verificar logs do Voice AI
 docker compose logs voice-ai-realtime | grep -i "connection\|accept"
 
-# 5. Se Docker bridge, verificar rede
+# 6. Se Docker bridge, verificar rede
 docker network inspect voice-ai-ivr_default
+```
+
+### Problema: Cache do FusionPBX
+
+**Sintomas:**
+- Alterações no dialplan não surtem efeito
+- FreeSWITCH continua usando XML antigo
+
+**Soluções:**
+
+```bash
+# 1. Verificar configuração do cache
+cat /etc/fusionpbx/config.conf | grep cache
+
+# 2. Limpar cache de arquivos
+rm -rf /var/cache/fusionpbx/*
+
+# 3. Limpar cache via PHP
+php -r "
+require '/var/www/fusionpbx/resources/require.php';
+\$cache = new cache;
+\$cache->delete('dialplan:');
+echo 'Cache cleared';
+"
+
+# 4. Recarregar XML no FreeSWITCH
+fs_cli -x "reloadxml"
+fs_cli -x "xml_flush_cache dialplan"
+
+# 5. Verificar se novo dialplan está ativo
+fs_cli -x "show dialplan" | grep voice_ai
 ```
 
 ### Problema: RTP não recebe áudio
@@ -619,6 +854,40 @@ ping -c 10 127.0.0.1
 fs_cli -x "show channels count"
 fs_cli -x "status"
 ```
+
+### Problema: Dialplan Details vs Dialplan XML
+
+**Sintomas:**
+- Interface do FusionPBX mostra uma coisa, FreeSWITCH executa outra
+- Alterações na interface não funcionam
+
+**Explicação:**
+
+O FusionPBX usa **duas tabelas** para dialplans:
+
+| Tabela | Uso |
+|--------|-----|
+| `v_dialplans` | Campo `dialplan_xml` é o **XML real** executado pelo FreeSWITCH |
+| `v_dialplan_details` | Apenas para **exibição na interface** |
+
+**Se os dois estiverem dessincronizados:**
+
+```sql
+-- Verificar se estão sincronizados
+SELECT 
+    p.dialplan_name,
+    p.dialplan_xml,
+    d.dialplan_detail_data
+FROM v_dialplans p
+LEFT JOIN v_dialplan_details d ON p.dialplan_uuid = d.dialplan_uuid
+WHERE p.dialplan_name LIKE '%voice_ai%';
+```
+
+**Para sincronizar, use a interface do FusionPBX:**
+1. Dialplan → Dialplan Manager → Selecione o dialplan
+2. Faça qualquer alteração pequena
+3. Clique em Save
+4. Isso regenera o `dialplan_xml` a partir dos `dialplan_details`
 
 ---
 
