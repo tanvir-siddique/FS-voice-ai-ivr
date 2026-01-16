@@ -30,6 +30,10 @@ OMNIPLAY_SERVICE_TOKEN = os.getenv("VOICE_AI_SERVICE_TOKEN", "")  # Token para a
 HANDOFF_TIMEOUT_MS = int(os.getenv("HANDOFF_TIMEOUT_MS", "30000"))
 HANDOFF_KEYWORDS = os.getenv("HANDOFF_KEYWORDS", "atendente,humano,pessoa,operador,falar com alguém").split(",")
 
+# Número de teste para usar quando caller_id for ramal interno (desenvolvimento)
+# Se vazio, handoff é bloqueado para ramais
+DEV_TEST_NUMBER = os.getenv("DEV_TEST_NUMBER", "5518999999999")
+
 
 @dataclass
 class TranscriptEntry:
@@ -484,25 +488,39 @@ class HandoffHandler:
         
         self._handoff_initiated = True
         
-        # Verificar se é ramal interno (< 8 dígitos)
+        # Verificar se é ramal interno (2-4 dígitos)
         if self.is_internal_extension(caller_number):
-            logger.info(
-                "Handoff skipped: internal extension (no real phone number)",
-                extra={
-                    "call_uuid": self.call_uuid,
-                    "caller_number": caller_number,
-                    "reason": reason,
-                }
-            )
-            return HandoffResult(
-                success=False,
-                action="abandoned",
-                reason=reason,
-                error="Internal extension - handoff not available for internal calls"
-            )
-        
-        # Normalizar número brasileiro (adicionar 55 se necessário)
-        normalized_number = self.normalize_brazilian_number(caller_number)
+            if DEV_TEST_NUMBER:
+                # Modo desenvolvimento: usar número de teste
+                logger.info(
+                    "Internal extension detected - using DEV_TEST_NUMBER for testing",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "original_number": caller_number,
+                        "test_number": DEV_TEST_NUMBER,
+                        "reason": reason,
+                    }
+                )
+                normalized_number = DEV_TEST_NUMBER
+            else:
+                # Produção: bloquear handoff para ramais
+                logger.info(
+                    "Handoff skipped: internal extension (no real phone number)",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "caller_number": caller_number,
+                        "reason": reason,
+                    }
+                )
+                return HandoffResult(
+                    success=False,
+                    action="abandoned",
+                    reason=reason,
+                    error="Internal extension - handoff not available for internal calls"
+                )
+        else:
+            # Normalizar número brasileiro (adicionar 55 se necessário)
+            normalized_number = self.normalize_brazilian_number(caller_number)
         
         logger.info(
             "Initiating handoff",

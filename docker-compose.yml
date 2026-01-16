@@ -325,6 +325,9 @@ services:
       - OMNIPLAY_API_URL=${OMNIPLAY_API_URL:-}
       - VOICE_AI_SERVICE_TOKEN=${VOICE_AI_SERVICE_TOKEN:-}
       - OMNIPLAY_WEBHOOK_URL=${OMNIPLAY_WEBHOOK_URL:-}
+      # Número de teste para handoff quando caller_id for ramal (desenvolvimento)
+      # Em produção, deixar vazio para bloquear handoff de ramais
+      - DEV_TEST_NUMBER=${DEV_TEST_NUMBER:-5518999999999}
     
     volumes:
       - voice-ai-logs:/app/logs
