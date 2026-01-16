@@ -14,8 +14,14 @@
 Implementar um sistema de transferência de chamadas inteligente onde o agente IA atua como uma **secretária eletrônica real**:
 
 1. **Tenta transferir** a chamada para o destino solicitado
-2. **Monitora o resultado** (atendeu, ocupado, não atendeu)
-3. **Retorna ao cliente** informando o status
+2. **Monitora o resultado**:
+   - ✅ `ANSWERED` - Atendeu, bridge completo
+   - 🔴 `BUSY` - Ramal ocupado em outra chamada
+   - ⏰ `NO_ANSWER` - Não atendeu (timeout)
+   - 🚫 `DND` - Do Not Disturb ativado
+   - 📴 `OFFLINE` - Ramal não registrado/sem conexão
+   - ❌ `REJECTED` - Chamada rejeitada manualmente
+3. **Retorna ao cliente** informando o status com mensagem contextual
 4. **Cria ticket/recado** apenas quando não há atendimento disponível
 
 ## Problema Atual
@@ -71,15 +77,17 @@ Atualmente, quando o cliente pede para falar com um atendente:
 │  │ (Attended Transfer)     │                               │            │
 │  └──────┬──────────────────┘                               │            │
 │         │                                                  │            │
-│    ┌────┴────┬─────────────┐                               │            │
-│    ▼         ▼             ▼                               │            │
-│ ATENDEU   OCUPADO      TIMEOUT                             │            │
-│    │         │             │                               │            │
-│    ▼         ▼             ▼                               │            │
-│ Bridge    "Ramal        "Não está                          │            │
-│ Completo  ocupado"      disponível"                        │            │
-│    │         │             │                               │            │
-│    ▼         └─────┬───────┘                               │            │
+│    ┌────┴────┬────────┬────────┬────────┬────────┐         │            │
+│    ▼         ▼        ▼        ▼        ▼        ▼         │            │
+│ ANSWERED  BUSY    NO_ANSWER   DND    OFFLINE  REJECTED     │            │
+│    │         │        │        │        │        │         │            │
+│    ▼         ▼        ▼        ▼        ▼        ▼         │            │
+│ Bridge   "Ramal   "Não está "Ramal em "Ramal   "Chamada    │            │
+│ OK ✅    ocupado" atendendo" modo não  offline" recusada"  │            │
+│    │         │        │      perturbe"    │        │       │            │
+│    │         │        │        │        │        │         │            │
+│    ▼         └────────┴────────┴────────┴────────┘         │            │
+│    │                          │                            │            │
 │    │               ▼                                       │            │
 │    │    ┌─────────────────────────┐                        │            │
 │    │    │ "Quer deixar recado?"   │                        │            │
@@ -435,7 +443,115 @@ CREATE TABLE v_voice_transfer_destinations (
 ```
 
 #### 2. Lógica de Transferência (FreeSWITCH + ESL)
-- Attended transfer com monitoramento
+
+**Estados de Resultado e Detecção:**
+
+| Estado | SIP Response | FreeSWITCH Cause | Mensagem do Agente IA |
+|--------|--------------|------------------|----------------------|
+| `ANSWERED` | 200 OK | `NORMAL_CLEARING` | *(bridge completo, IA desconecta)* |
+| `BUSY` | 486 Busy Here | `USER_BUSY` | "O ramal da {nome} está ocupado no momento." |
+| `NO_ANSWER` | 408 Timeout | `NO_ANSWER` | "A {nome} não está atendendo no momento." |
+| `DND` | 480 Temporarily Unavailable | `CALL_REJECTED` + DND flag | "A {nome} está em modo não perturbe." |
+| `OFFLINE` | 480/404 | `SUBSCRIBER_ABSENT` | "O ramal da {nome} está offline no momento." |
+| `REJECTED` | 603 Decline | `CALL_REJECTED` | "A chamada foi recusada." |
+
+**Detecção via ESL:**
+
+```python
+# voice-ai-service/realtime/handlers/transfer.py
+
+TRANSFER_RESULT_MAP = {
+    # SIP response → Estado interno
+    "200": "ANSWERED",
+    "486": "BUSY",
+    "408": "NO_ANSWER",
+    "480": "OFFLINE",      # Pode ser DND também, verificar variável
+    "404": "OFFLINE",
+    "603": "REJECTED",
+    "487": "CANCELLED",    # Caller desligou durante ring
+}
+
+# Verificar DND separadamente
+async def detect_transfer_result(call_uuid: str, esl: ESLConnection) -> str:
+    """Detecta resultado do transfer via eventos ESL."""
+    
+    # Aguardar evento CHANNEL_HANGUP ou CHANNEL_BRIDGE
+    event = await esl.wait_for_event(
+        call_uuid, 
+        ["CHANNEL_BRIDGE", "CHANNEL_HANGUP"],
+        timeout=30
+    )
+    
+    if event.name == "CHANNEL_BRIDGE":
+        return "ANSWERED"
+    
+    # Analisar causa do hangup
+    hangup_cause = event.get("Hangup-Cause", "NORMAL_CLEARING")
+    sip_code = event.get("variable_sip_term_status", "200")
+    
+    # Verificar DND explicitamente
+    if event.get("variable_dnd", "false") == "true":
+        return "DND"
+    
+    # Verificar se ramal estava offline
+    reg_status = event.get("variable_sofia_profile_reg_status", "")
+    if reg_status == "unregistered":
+        return "OFFLINE"
+    
+    return TRANSFER_RESULT_MAP.get(sip_code, "NO_ANSWER")
+```
+
+**Mensagens Contextuais por Estado:**
+
+```python
+# voice-ai-service/realtime/handlers/transfer_messages.py
+
+TRANSFER_MESSAGES = {
+    "BUSY": {
+        "pt-BR": "O ramal {dest_name} está ocupado no momento. {offer_options}",
+        "en-US": "The extension {dest_name} is currently busy. {offer_options}",
+    },
+    "NO_ANSWER": {
+        "pt-BR": "{dest_name} não está atendendo no momento. {offer_options}",
+        "en-US": "{dest_name} is not answering at the moment. {offer_options}",
+    },
+    "DND": {
+        "pt-BR": "{dest_name} está em modo não perturbe. {offer_options}",
+        "en-US": "{dest_name} has Do Not Disturb enabled. {offer_options}",
+    },
+    "OFFLINE": {
+        "pt-BR": "O ramal {dest_name} está offline no momento. {offer_options}",
+        "en-US": "The extension {dest_name} is currently offline. {offer_options}",
+    },
+    "REJECTED": {
+        "pt-BR": "A chamada foi recusada. {offer_options}",
+        "en-US": "The call was declined. {offer_options}",
+    },
+}
+
+OFFER_OPTIONS = {
+    "pt-BR": "Posso pedir para retornarem sua ligação, ou você prefere deixar um recado?",
+    "en-US": "Would you like them to call you back, or would you prefer to leave a message?",
+}
+
+def get_transfer_failed_message(
+    result: str, 
+    dest_name: str, 
+    language: str = "pt-BR"
+) -> str:
+    """Gera mensagem contextual para transfer falhado."""
+    template = TRANSFER_MESSAGES.get(result, TRANSFER_MESSAGES["NO_ANSWER"])
+    message = template.get(language, template["pt-BR"])
+    
+    return message.format(
+        dest_name=dest_name,
+        offer_options=OFFER_OPTIONS.get(language, OFFER_OPTIONS["pt-BR"])
+    )
+```
+
+- Attended transfer com monitoramento de eventos ESL
+- Detecção de 6 estados possíveis (ANSWERED, BUSY, NO_ANSWER, DND, OFFLINE, REJECTED)
+- Mensagens contextuais por estado e idioma
 - Callback para Voice AI com resultado
 - Retorno ao agente se falhar
 
@@ -1381,29 +1497,86 @@ Esta seção identifica problemas de lógica e funcionalidades que seriam difíc
 ```python
 # voice-ai-service/api/extension_routes.py
 
+from enum import Enum
+
+class ExtensionStatus(str, Enum):
+    AVAILABLE = "available"       # Registrado, não em chamada, sem DND
+    IN_CALL = "in_call"          # Em chamada ativa
+    DND = "dnd"                  # Do Not Disturb ativado
+    OFFLINE = "offline"          # Não registrado
+    RINGING = "ringing"          # Recebendo chamada (não disponível)
+    UNKNOWN = "unknown"          # Não foi possível determinar
+
 @router.get("/extension/status/{extension}")
 async def check_extension_status(extension: str, domain_uuid: str):
     """
-    Verifica se ramal está:
-    1. Registrado (sofia status)
-    2. Não em chamada (show channels)
+    Verifica status completo do ramal:
+    1. Registrado? (sofia status)
+    2. Em chamada? (show channels)
+    3. DND ativado? (db show dnd)
+    4. Recebendo chamada? (show calls)
     """
     esl = await get_esl_connection()
     
-    # Verificar registro
-    result = await esl.send(f"sofia status profile internal reg {extension}")
-    is_registered = "Registered" in result
+    # 1. Verificar registro
+    reg_result = await esl.send(f"sofia status profile internal reg {extension}@{domain}")
+    is_registered = "Registered" in reg_result
     
-    # Verificar se em chamada
+    if not is_registered:
+        return {
+            "extension": extension,
+            "status": ExtensionStatus.OFFLINE,
+            "available": False,
+            "reason": "Ramal não registrado"
+        }
+    
+    # 2. Verificar DND (Do Not Disturb)
+    # FusionPBX armazena DND no banco de dados
+    dnd_result = await check_dnd_database(extension, domain_uuid)
+    if dnd_result:
+        return {
+            "extension": extension,
+            "status": ExtensionStatus.DND,
+            "available": False,
+            "reason": "Modo não perturbe ativado"
+        }
+    
+    # 3. Verificar se em chamada ativa
     channels = await esl.send(f"show channels like {extension}")
-    in_call = extension in channels
+    if extension in channels:
+        # Verificar se está tocando ou já atendeu
+        if "CS_RING" in channels or "CS_ROUTING" in channels:
+            return {
+                "extension": extension,
+                "status": ExtensionStatus.RINGING,
+                "available": False,
+                "reason": "Recebendo chamada"
+            }
+        return {
+            "extension": extension,
+            "status": ExtensionStatus.IN_CALL,
+            "available": False,
+            "reason": "Em chamada ativa"
+        }
     
+    # 4. Disponível!
     return {
         "extension": extension,
-        "registered": is_registered,
-        "in_call": in_call,
-        "available": is_registered and not in_call
+        "status": ExtensionStatus.AVAILABLE,
+        "available": True,
+        "reason": None
     }
+
+async def check_dnd_database(extension: str, domain_uuid: str) -> bool:
+    """Verifica DND no banco de dados do FusionPBX."""
+    # FusionPBX armazena DND em v_extensions ou v_extension_settings
+    query = """
+        SELECT do_not_disturb 
+        FROM v_extensions 
+        WHERE extension = $1 AND domain_uuid = $2
+    """
+    result = await db.fetchone(query, extension, domain_uuid)
+    return result and result.get("do_not_disturb") == "true"
 ```
 
 ---
