@@ -480,7 +480,7 @@
           self.callback_reason: Optional[str] = None
   ```
 
-- [ ] **2.1.1.2** Implementar `capture_callback_number`
+- [x] **2.1.1.2** Implementar `capture_callback_number` ✅ 2026-01-16
   ```python
   async def capture_callback_number(self) -> bool:
       # Validar caller_id atual
@@ -503,7 +503,7 @@
           return await self._ask_for_number()
   ```
 
-- [ ] **2.1.1.3** Implementar `_ask_for_number`
+- [x] **2.1.1.3** Implementar `_ask_for_number` ✅ 2026-01-16
   ```python
   async def _ask_for_number(self) -> bool:
       await self.session.say("Qual número devo ligar? Pode falar com o DDD.")
@@ -525,7 +525,7 @@
       return False
   ```
 
-- [ ] **2.1.1.4** Implementar `capture_callback_time`
+- [x] **2.1.1.4** Implementar `capture_callback_time` ✅ 2026-01-16
   ```python
   async def capture_callback_time(self) -> None:
       await self.session.say(
@@ -548,7 +548,7 @@
           await self.session.say("Certo, vamos ligar assim que estiver disponível.")
   ```
 
-- [ ] **2.1.1.5** Implementar `capture_callback_reason`
+- [x] **2.1.1.5** Implementar `capture_callback_reason` ✅ 2026-01-16
   ```python
   async def capture_callback_reason(self) -> None:
       await self.session.say(
@@ -564,7 +564,7 @@
           self.callback_reason = response
   ```
 
-- [ ] **2.1.1.6** Implementar `confirm_and_create_callback`
+- [x] **2.1.1.6** Implementar `confirm_and_create_callback` ✅ 2026-01-16
   ```python
   async def confirm_and_create_callback(
       self,
@@ -598,7 +598,7 @@
 # voice-ai-service/api/routes/extension.py
 ```
 
-- [ ] **2.2.1.1** Implementar endpoint GET /api/extension/status/{extension}
+- [x] **2.2.1.1** Implementar endpoint GET /api/extension/status/{extension} ✅ 2026-01-16
   ```python
   @router.get("/api/extension/status/{extension}")
   async def get_extension_status(
@@ -647,7 +647,7 @@
       )
   ```
 
-- [ ] **2.2.1.2** Criar dataclass de resposta
+- [x] **2.2.1.2** Criar dataclass de resposta ✅ 2026-01-16
   ```python
   class ExtensionStatus(Enum):
       AVAILABLE = "available"
@@ -664,7 +664,7 @@
       reason: Optional[str]
   ```
 
-- [ ] **2.2.1.3** Implementar verificação de DND no banco
+- [x] **2.2.1.3** Implementar verificação de DND no banco ✅ 2026-01-16
   ```python
   async def check_dnd_in_database(extension: str, domain_uuid: str) -> bool:
       query = """
@@ -676,7 +676,7 @@
       return result and result.get("do_not_disturb") == "true"
   ```
 
-- [ ] **2.2.1.4** Adicionar cache com TTL curto (5 segundos)
+- [x] **2.2.1.4** Adicionar cache com TTL curto (5 segundos) ✅ 2026-01-16
   - Evitar consultas repetidas ao FreeSWITCH
   - Invalidar cache em eventos de mudança de estado
 
@@ -693,7 +693,7 @@
 // backend/src/jobs/CallbackMonitorJob.ts
 ```
 
-- [ ] **2.3.1.1** Criar job BullMQ
+- [x] **2.3.1.1** Criar job BullMQ ✅ 2026-01-16
   ```typescript
   export const callbackMonitorQueue = new Queue("callback-monitor", { ... });
   
@@ -706,7 +706,7 @@
   );
   ```
 
-- [ ] **2.3.1.2** Implementar `processCallbackTickets`
+- [x] **2.3.1.2** Implementar `processCallbackTickets` ✅ 2026-01-16
   ```typescript
   async function processCallbackTickets(companyId: number): Promise<void> {
     // Buscar tickets callback pendentes
@@ -725,7 +725,7 @@
   }
   ```
 
-- [ ] **2.3.1.3** Implementar `processCallbackTicket` com validações
+- [x] **2.3.1.3** Implementar `processCallbackTicket` com validações ✅ 2026-01-16
   ```typescript
   async function processCallbackTicket(ticket: Ticket): Promise<void> {
     // Validação 1: Expiração
@@ -764,7 +764,7 @@
   }
   ```
 
-- [ ] **2.3.1.4** Implementar `checkExtensionAvailable` com fallback
+- [x] **2.3.1.4** Implementar `checkExtensionAvailable` com fallback ✅ 2026-01-16
   ```typescript
   let consecutiveFailures = 0;
   
@@ -797,7 +797,7 @@
   }
   ```
 
-- [ ] **2.3.1.5** Agendar job para rodar a cada 30 segundos por empresa
+- [x] **2.3.1.5** Agendar job para rodar a cada 30 segundos por empresa ✅ 2026-01-16
   ```typescript
   // backend/src/queues.ts
   export async function scheduleCallbackMonitor(): Promise<void> {
@@ -830,7 +830,7 @@
 // backend/src/services/VoiceServices/NotifyCallbackService.ts
 ```
 
-- [ ] **2.4.1.1** Criar serviço de notificação
+- [x] **2.4.1.1** Criar serviço de notificação ✅ 2026-01-16
   ```typescript
   export async function notifyAgentCallback(ticket: Ticket): Promise<void> {
     const io = getIO();
@@ -872,7 +872,7 @@
   }
   ```
 
-- [ ] **2.4.1.2** Adicionar evento de callback aceito
+- [x] **2.4.1.2** Adicionar evento de callback aceito ✅ 2026-01-16
   ```typescript
   // Quando atendente clica em "Ligar Agora"
   socket.on("callback-accept", async (data) => {
@@ -901,7 +901,7 @@
 // backend/src/routes/voiceRoutes.ts
 ```
 
-- [ ] **2.5.1.1** Implementar endpoint
+- [x] **2.5.1.1** Implementar endpoint ✅ 2026-01-16
   ```typescript
   router.post(
     "/voice/callback",
@@ -991,7 +991,7 @@
   );
   ```
 
-- [ ] **2.5.1.2** Implementar `formatCallbackMessage`
+- [x] **2.5.1.2** Implementar `formatCallbackMessage` ✅ 2026-01-16
   ```typescript
   function formatCallbackMessage(ticket: Ticket): string {
     let message = `📞 *Callback Pendente*\n\n`;
@@ -1079,7 +1079,7 @@
   };
   ```
 
-- [ ] **3.1.1.2** Implementar CallbackCard
+- [x] **3.1.1.2** Implementar CallbackCard ✅ 2026-01-16
   ```jsx
   const CallbackCard = ({ callback, onAccept, onSnooze, onDismiss }) => {
     return (
@@ -1113,7 +1113,7 @@
   };
   ```
 
-- [ ] **3.1.1.3** Implementar som de notificação
+- [x] **3.1.1.3** Implementar som de notificação ✅ 2026-01-16
   ```jsx
   const playCallbackSound = () => {
     const audio = new Audio("/callback-notification.mp3");
@@ -1132,7 +1132,7 @@
   };
   ```
 
-- [ ] **3.1.1.4** Implementar ações do card
+- [x] **3.1.1.4** Implementar ações do card ✅ 2026-01-16
   ```jsx
   const handleAcceptCallback = async (ticketId) => {
     setLoading(true);
@@ -1172,7 +1172,7 @@
   };
   ```
 
-- [ ] **3.1.1.5** Adicionar widget ao layout principal
+- [x] **3.1.1.5** Adicionar widget ao layout principal ✅ 2026-01-16
   ```jsx
   // frontend/src/layout/MainLayout/index.js
   <CallbackWidget />
@@ -1185,31 +1185,31 @@
 // frontend/src/pages/Callbacks/index.js
 ```
 
-- [ ] **3.2.1.1** Criar estrutura da página
+- [x] **3.2.1.1** Criar estrutura da página ✅ 2026-01-16
   - Tabs: Pendentes | Agendados | Histórico
   - Filtros: Por ramal, por período, por status
   - Tabela com paginação
 
-- [ ] **3.2.1.2** Implementar lista de callbacks pendentes
+- [x] **3.2.1.2** Implementar lista de callbacks pendentes ✅ 2026-01-16
   - Número do cliente
   - Destinatário pretendido
   - Motivo
   - Tempo aguardando
   - Ações
 
-- [ ] **3.2.1.3** Implementar player de gravação (se disponível)
+- [x] **3.2.1.3** Implementar player de gravação (se disponível) ✅ 2026-01-16
   - Botão "Ouvir conversa original"
   - Player embutido ou modal
 
-- [ ] **3.2.1.4** Implementar visualização de transcrição
+- [x] **3.2.1.4** Implementar visualização de transcrição ✅ 2026-01-16
   - Modal com transcrição formatada
   - Separação por roles (cliente/assistente)
 
 ### 3.3 Backend - Endpoints de Gerenciamento
 
-- [ ] **3.3.1** POST /voice/callback/initiate (já descrito na Fase 2)
+- [x] **3.3.1** POST /voice/callback/initiate (já descrito na Fase 2) ✅ 2026-01-16
 
-- [ ] **3.3.2** POST /voice/callback/snooze
+- [x] **3.3.2** POST /voice/callback/snooze ✅ 2026-01-16
   ```typescript
   router.post("/voice/callback/snooze", authMiddleware, async (req, res) => {
     const { ticketId, minutes } = req.body;
@@ -1223,7 +1223,7 @@
   });
   ```
 
-- [ ] **3.3.3** POST /voice/callback/cancel
+- [x] **3.3.3** POST /voice/callback/cancel ✅ 2026-01-16
   ```typescript
   router.post("/voice/callback/cancel", authMiddleware, async (req, res) => {
     const { ticketId } = req.body;
@@ -1238,7 +1238,7 @@
   });
   ```
 
-- [ ] **3.3.4** GET /voice/callbacks
+- [x] **3.3.4** GET /voice/callbacks ✅ 2026-01-16
   ```typescript
   router.get("/voice/callbacks", authMiddleware, async (req, res) => {
     const { status, extension, page, limit } = req.query;
@@ -1333,7 +1333,7 @@
           return OriginateResponse(success=False, error=error)
   ```
 
-- [ ] **4.1.1.2** Implementar dataclasses de request/response
+- [x] **4.1.1.2** Implementar dataclasses de request/response ✅ 2026-01-16
   ```python
   @dataclass
   class OriginateRequest:
@@ -1350,7 +1350,7 @@
       error: Optional[str] = None
   ```
 
-- [ ] **4.1.1.3** Implementar monitoramento do resultado
+- [x] **4.1.1.3** Implementar monitoramento do resultado ✅ 2026-01-16
   ```python
   async def monitor_callback_result(
       call_uuid: str,
@@ -1397,7 +1397,7 @@
 // backend/src/services/VoiceServices/InitiateCallbackService.ts
 ```
 
-- [ ] **4.2.1.1** Implementar serviço com double-check
+- [x] **4.2.1.1** Implementar serviço com double-check ✅ 2026-01-16
   ```typescript
   interface InitiateCallbackResult {
     success: boolean;
@@ -1482,7 +1482,7 @@
 ### 4.3 Voice AI - Endpoint de Conclusão
 
 #### 4.3.1 Criar endpoint POST /api/voice/transfer/completed
-- [ ] **4.3.1.1** Endpoint para notificar conclusão (já descrito em Melhoria 4)
+- [x] **4.3.1.1** Endpoint para notificar conclusão (já descrito em Melhoria 4) ✅ 2026-01-16
 
 ### 4.4 Testes de Integração - Fase 4
 
@@ -1518,12 +1518,12 @@
 // frontend/src/pages/Settings/CallbackSettings/index.js
 ```
 
-- [ ] **5.1.1.1** Criar página de configurações de callback
+- [x] **5.1.1.1** Criar página de configurações de callback ✅ 2026-01-16
   - Selecionar template existente como "Template de Callback"
   - Configurar variáveis do template
   - Preview do template
 
-- [ ] **5.1.1.2** Criar campo `isCallbackTemplate` em QuickMessages
+- [x] **5.1.1.2** Criar campo `isCallbackTemplate` em QuickMessages ✅ 2026-01-16
   ```typescript
   // migration
   ALTER TABLE "QuickMessages" ADD COLUMN IF NOT EXISTS "isCallbackTemplate" BOOLEAN DEFAULT false;
@@ -1536,7 +1536,7 @@
 // backend/src/services/VoiceServices/SendCallbackWhatsAppService.ts
 ```
 
-- [ ] **5.2.1.1** Implementar serviço
+- [x] **5.2.1.1** Implementar serviço ✅ 2026-01-16
   ```typescript
   async function sendCallbackWhatsApp(ticket: Ticket): Promise<void> {
     // Buscar template de callback
@@ -1602,7 +1602,7 @@
 // backend/src/services/WbotServices/wbotMessageListener.ts
 ```
 
-- [ ] **5.3.1.1** Adicionar handler para respostas de callback
+- [x] **5.3.1.1** Adicionar handler para respostas de callback ✅ 2026-01-16
   ```typescript
   async function handleCallbackResponse(
     message: any,
@@ -1707,7 +1707,7 @@
   - Taxa de conclusão
   - Por status
 
-- [ ] **6.2.2** Adicionar relatório de callbacks
+- [x] **6.2.2** Adicionar relatório de callbacks ✅ 2026-01-16
   - Filtro por período
   - Filtro por destino
   - Exportação CSV
