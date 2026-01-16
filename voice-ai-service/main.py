@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import settings
-from api import transcribe, synthesize, chat, documents, conversations, webhook
+from api import transcribe, synthesize, chat, documents, conversations, webhook, callback
 from api.middleware import RateLimitMiddleware, RequestLoggingMiddleware
 
 
@@ -99,6 +99,7 @@ app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(conversations.router, prefix="/api/v1", tags=["Conversations"])
 app.include_router(webhook.router, prefix="/api/v1", tags=["Webhooks"])
+app.include_router(callback.router, prefix="/api/v1", tags=["Callback"])  # FASE 4: Click-to-Call
 
 
 @app.get("/health")

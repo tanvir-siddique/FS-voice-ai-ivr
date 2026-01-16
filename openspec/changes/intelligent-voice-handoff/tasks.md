@@ -1287,15 +1287,16 @@
 
 **Duração Estimada:** 2-3 dias
 **Objetivo:** Implementar originação de chamadas via Voice AI
+**Status:** ✅ CONCLUÍDA em 2026-01-16
 
 ### 4.1 Voice AI - API de Originação
 
 #### 4.1.1 Criar endpoint POST /api/callback/originate
 ```python
-# voice-ai-service/api/routes/callback.py
+# voice-ai-service/api/callback.py
 ```
 
-- [ ] **4.1.1.1** Implementar endpoint
+- [x] **4.1.1.1** Implementar endpoint ✅ 2026-01-16
   ```python
   @router.post("/api/callback/originate")
   async def originate_callback(
