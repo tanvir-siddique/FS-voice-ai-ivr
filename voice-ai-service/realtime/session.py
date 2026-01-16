@@ -557,8 +557,9 @@ class RealtimeSession:
         })
         
         # Se criou ticket ou transferiu, encerrar após mensagem de despedida
+        # 6 segundos = tempo suficiente para TTS terminar (média ~4-5s)
         if self._handoff_result.action in ("ticket_created", "transferred"):
-            await asyncio.sleep(3.0)  # Aguardar mensagem de despedida
+            await asyncio.sleep(6.0)  # Aguardar mensagem de despedida
             await self.stop(f"handoff_{self._handoff_result.action}")
     
     async def _timeout_monitor(self) -> None:

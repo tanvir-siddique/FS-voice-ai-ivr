@@ -600,7 +600,9 @@ class RealtimeServer:
                 warmup_chunks = max(warmup_min, min(warmup_default, warmup_max))
                 underrun_count = 0
                 consecutive_underruns = 0  # NEW: contador de underruns consecutivos
-                max_consecutive_underruns = 5  # NEW: permitir até 5 underruns (100ms) antes de resetar
+                # TTS envia audio em bursts - entre bursts pode haver 200-500ms de pausa
+                # 25 underruns × 20ms = 500ms de tolerância
+                max_consecutive_underruns = 25
                 last_health_update = 0.0
 
                 while True:
