@@ -171,13 +171,13 @@ class RealtimeServer:
                 websocket=websocket,
             )
             logger.info("Session created", extra={
-                "domain_uuid": domain_uuid,
+                "secretary_uuid": secretary_uuid,
                 "call_uuid": call_uuid,
                 "session_active": session.is_active if session else False,
             })
         except Exception as e:
             logger.error(f"Failed to create session: {e}", extra={
-                "domain_uuid": domain_uuid,
+                "secretary_uuid": secretary_uuid,
                 "call_uuid": call_uuid,
             })
             await websocket.close(1011, f"Session creation failed: {e}")
