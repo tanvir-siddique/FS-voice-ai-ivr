@@ -433,15 +433,17 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_extension'] ?? 'Transfer Extension')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='text' name='transfer_extension' maxlength='20' value='".escape($data['transfer_extension'] ?? '200')."'>\n";
+	echo "		<input class='formfld' type='text' name='transfer_extension' maxlength='20' value='".escape($data['transfer_extension'] ?? '200')."' placeholder='ex: 200, 1001, *1'>\n";
+	echo "		<br /><span class='vtable-hint'>Ramal ou fila para transferir chamadas. <b>Padrão:</b> 200</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
 	echo "<tr>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_timeout'] ?? 'Handoff Timeout (seconds)')."</td>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_timeout'] ?? 'Handoff Timeout')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='number' name='handoff_timeout' min='5' max='120' value='".intval($data['handoff_timeout'] ?? 30)."'>\n";
-	echo "		<br />".($text['description-handoff_timeout'] ?? 'Timeout in seconds before fallback to ticket (default: 30)')."\n";
+	echo "		<input class='formfld' type='number' name='handoff_timeout' min='5' max='120' value='".intval($data['handoff_timeout'] ?? 30)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>segundos</span>\n";
+	echo "		<br /><span class='vtable-hint'>Tempo aguardando atendente antes de criar callback/ticket. <b>Padrão:</b> 30s</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -472,8 +474,9 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-max_turns'] ?? 'Max AI Turns')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='number' name='max_turns' min='1' max='100' value='".escape($data['max_turns'] ?? 20)."'>\n";
-	echo "		<br />".($text['description-max_turns'] ?? 'After this many turns, automatically initiate handoff')."\n";
+	echo "		<input class='formfld' type='number' name='max_turns' min='1' max='100' value='".escape($data['max_turns'] ?? 20)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>turnos</span>\n";
+	echo "		<br /><span class='vtable-hint'>Apos X turnos, oferece transferencia para humano. <b>Padrao:</b> 20</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
