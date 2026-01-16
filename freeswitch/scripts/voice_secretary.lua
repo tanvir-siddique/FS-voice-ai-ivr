@@ -13,9 +13,10 @@
 local domain_uuid = session:getVariable("domain_uuid") or ""
 local secretary_uuid = session:getVariable("secretary_uuid") or ""
 local call_uuid = session:getVariable("uuid") or ""
+local caller_id = session:getVariable("caller_id_number") or session:getVariable("ani") or "unknown"
 
 -- Log inicial
-freeswitch.consoleLog("INFO", "[VoiceSecretary] Starting - domain: " .. domain_uuid .. ", secretary: " .. secretary_uuid .. ", call: " .. call_uuid .. "\n")
+freeswitch.consoleLog("INFO", "[VoiceSecretary] Starting - domain: " .. domain_uuid .. ", secretary: " .. secretary_uuid .. ", call: " .. call_uuid .. ", caller: " .. caller_id .. "\n")
 
 -- =============================================================================
 -- BUSCAR CONFIGURAÇÕES DE ÁUDIO DO BANCO DE DADOS
@@ -81,8 +82,9 @@ session:answer()
 session:sleep(500)
 
 -- Montar URL do WebSocket
--- Formato: ws://127.0.0.1:8085/stream/{domain_uuid}/{call_uuid}
-local ws_url = "ws://127.0.0.1:8085/stream/" .. domain_uuid .. "/" .. call_uuid
+-- Formato: ws://127.0.0.1:8085/stream/{secretary_uuid}/{call_uuid}/{caller_id}
+-- secretary_uuid é usado para buscar configuração no banco
+local ws_url = "ws://127.0.0.1:8085/stream/" .. secretary_uuid .. "/" .. call_uuid .. "/" .. caller_id
 
 freeswitch.consoleLog("INFO", "[VoiceSecretary] Connecting to WebSocket: " .. ws_url .. "\n")
 

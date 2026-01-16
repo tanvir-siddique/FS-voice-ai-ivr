@@ -119,28 +119,31 @@ class RealtimeServer:
             await websocket.close(1000, "OK")
             return
         
-        # Parsear path: /stream/{domain_uuid}/{call_uuid}
+        # Parsear path: /stream/{secretary_uuid}/{call_uuid}/{caller_id}
+        # caller_id é opcional para compatibilidade com versões antigas
         parts = path.strip("/").split("/")
         if len(parts) < 3 or parts[0] != "stream":
             logger.warning(f"Invalid path: {path}")
             await websocket.close(1008, "Invalid path")
             return
         
-        domain_uuid = parts[1]
+        secretary_uuid = parts[1]
         call_uuid = parts[2]
+        caller_id = parts[3] if len(parts) > 3 else "unknown"
         
         # Log estruturado conforme backend-specialist.md
         logger.info("WebSocket connection received", extra={
-            "domain_uuid": domain_uuid,
+            "secretary_uuid": secretary_uuid,
             "call_uuid": call_uuid,
+            "caller_id": caller_id,
             "path": path,
         })
         
         try:
-            await self._handle_session(websocket, domain_uuid, call_uuid)
+            await self._handle_session(websocket, secretary_uuid, call_uuid, caller_id)
         except Exception as e:
             logger.error(f"Session error: {e}", extra={
-                "domain_uuid": domain_uuid,
+                "secretary_uuid": secretary_uuid,
                 "call_uuid": call_uuid,
             })
         finally:
@@ -149,20 +152,20 @@ class RealtimeServer:
     async def _handle_session(
         self,
         websocket: ServerConnection,
-        domain_uuid: str,
+        secretary_uuid: str,
         call_uuid: str,
+        caller_id: str,
     ) -> None:
         """Gerencia uma sessão de chamada."""
         manager = get_session_manager()
         metrics = get_metrics()
         session = None
-        caller_id = ""
         
         # Criar sessão imediatamente (mod_audio_stream não envia metadata)
-        # Buscar secretária pela extensão de destino (8000)
+        # caller_id agora é recebido via URL
         try:
             session = await self._create_session_from_db(
-                domain_uuid=domain_uuid,
+                secretary_uuid=secretary_uuid,
                 call_uuid=call_uuid,
                 caller_id=caller_id,
                 websocket=websocket,
@@ -269,7 +272,7 @@ class RealtimeServer:
     
     async def _create_session_from_db(
         self,
-        domain_uuid: str,
+        secretary_uuid: str,
         call_uuid: str,
         caller_id: str,
         websocket: ServerConnection,
@@ -280,12 +283,12 @@ class RealtimeServer:
         pool = await db.get_pool()
         
         async with pool.acquire() as conn:
-            # Buscar secretária pela extensão de destino (8000)
-            # Primeiro tenta buscar pela extensão, depois fallback para qualquer secretária do domínio
+            # Buscar secretária diretamente pelo UUID (passado na URL)
             row = await conn.fetchrow(
                 """
                 SELECT 
                     s.voice_secretary_uuid as secretary_uuid,
+                    s.domain_uuid,
                     s.secretary_name as name,
                     s.personality_prompt as system_prompt,
                     s.greeting_message as greeting,
@@ -315,19 +318,18 @@ class RealtimeServer:
                     COALESCE(s.stream_buffer_size, 20) as stream_buffer_size  -- 20ms default (NOT samples!)
                 FROM v_voice_secretaries s
                 LEFT JOIN v_voice_ai_providers p ON p.voice_ai_provider_uuid = s.realtime_provider_uuid
-                WHERE s.domain_uuid = $1
+                WHERE s.voice_secretary_uuid = $1::uuid
                   AND s.enabled = true
-                  AND s.processing_mode IN ('realtime', 'auto')
-                ORDER BY 
-                    CASE WHEN s.extension = '8000' THEN 0 ELSE 1 END,
-                    s.insert_date DESC
                 LIMIT 1
                 """,
-                domain_uuid
+                secretary_uuid
             )
             
             if not row:
-                raise ValueError(f"No realtime secretary configured for domain {domain_uuid}")
+                raise ValueError(f"No secretary found with UUID {secretary_uuid}")
+            
+            # Extrair domain_uuid da row para uso posterior
+            domain_uuid = str(row["domain_uuid"]) if row["domain_uuid"] else ""
             
             logger.info("Secretary found", extra={
                 "domain_uuid": domain_uuid,
