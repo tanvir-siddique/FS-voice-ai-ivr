@@ -3,9 +3,11 @@
 ## Metadata
 - **Author:** Claude AI + Juliano Targa
 - **Created:** 2026-01-16
+- **Updated:** 2026-01-16
 - **Status:** PROPOSED
 - **Priority:** HIGH
-- **Estimated Effort:** 5-7 dias
+- **Estimated Effort:** 9-14 dias (5 fases)
+- **Multi-tenant:** ✅ Sim (domain_uuid obrigatório)
 
 ## Resumo Executivo
 
@@ -154,6 +156,254 @@ Atualmente, quando o cliente pede para falar com um atendente:
 
 ### Componentes Necessários
 
+#### 0. Sistema de Callback Inteligente (NOVO)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    SISTEMA DE CALLBACK INTELIGENTE                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 1: OFERTA DE CALLBACK                                                │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Ramal OCUPADO / INDISPONÍVEL / TIMEOUT                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│  Agente: "O ramal da Jeni está ocupado. Posso pedir para ela                │
+│           retornar sua ligação assim que estiver disponível?"               │
+│         │                                                                   │
+│    ┌────┴────┐                                                              │
+│    ▼         ▼                                                              │
+│   SIM       NÃO → Fluxo de recado normal                                    │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 2: CAPTURA DO NÚMERO (Inteligente)                                   │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Agente: "Qual número ela deve ligar?"                                      │
+│         │                                                                   │
+│    ┌────┴────────────────────────────┐                                      │
+│    ▼                                 ▼                                      │
+│  "Este mesmo"                    "Outro: 99888-7777"                        │
+│  "Esse número"                        │                                     │
+│  "O que tô ligando"                   │                                     │
+│    │                                  │                                     │
+│    ▼                                  │                                     │
+│  Usar caller_id automático            │                                     │
+│    │                                  │                                     │
+│    └──────────────┬───────────────────┘                                     │
+│                   ▼                                                         │
+│  Agente: "Vou anotar para retornar no 18 99775-1234. Está correto?"         │
+│         │                                                                   │
+│    ┌────┴────┐                                                              │
+│    ▼         ▼                                                              │
+│   SIM       NÃO → Pede número novamente                                     │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 3: HORÁRIO DO RETORNO (Opcional)                                     │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Agente: "Prefere que ligue agora que ela estiver livre,                    │
+│           ou em um horário específico?"                                     │
+│         │                                                                   │
+│    ┌────┴────────────────────────────┐                                      │
+│    ▼                                 ▼                                      │
+│  "Agora mesmo"               "Às 14h" / "Mais tarde"                        │
+│  "Assim que puder"                   │                                      │
+│    │                                 │                                      │
+│    ▼                                 ▼                                      │
+│  callback.scheduledAt = null    callback.scheduledAt = "14:00"              │
+│    │                                 │                                      │
+│    └──────────────┬──────────────────┘                                      │
+│                   ▼                                                         │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 4: CONTEXTO DO ASSUNTO                                               │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Agente: "Para ela já saber o assunto, pode me dizer                        │
+│           brevemente o motivo do contato?"                                  │
+│         │                                                                   │
+│         ▼                                                                   │
+│  Cliente: "É sobre o boleto que venceu"                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│  callback.reason = "Boleto vencido"                                         │
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 5: CONFIRMAÇÃO + OPCIONAL SMS/WHATSAPP                               │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Agente: "Perfeito! A Jeni vai retornar para 18 99775-1234                  │
+│           assim que possível. Deseja receber uma confirmação                │
+│           por WhatsApp quando ela estiver pronta para ligar?"               │
+│         │                                                                   │
+│    ┌────┴────┐                                                              │
+│    ▼         ▼                                                              │
+│   SIM       NÃO                                                             │
+│    │         │                                                              │
+│    ▼         │                                                              │
+│  Enviar msg │                                                               │
+│  WhatsApp   │                                                               │
+│    │         │                                                              │
+│    └────┬────┘                                                              │
+│         ▼                                                                   │
+│  Agente: "Anotado! Obrigada pela ligação. Tchau!"                           │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 6: CRIAR TICKET CALLBACK                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  TICKET COM FLAG CALLBACK                                      │        │
+│  │  ┌──────────────────────────────────────────────────────────┐  │        │
+│  │  │  ticketType = "callback"                                 │  │        │
+│  │  │  status = "pending"                                      │  │        │
+│  │  │  priority = "high" (callback é urgente)                  │  │        │
+│  │  │                                                          │  │        │
+│  │  │  callbackNumber = "5518997751234"                        │  │        │
+│  │  │  callbackIntendedFor = user_id (Jeni)                    │  │        │
+│  │  │  callbackExtension = "1004"                              │  │        │
+│  │  │  callbackScheduledAt = null ou "2026-01-16 14:00"        │  │        │
+│  │  │  callbackReason = "Boleto vencido"                       │  │        │
+│  │  │  callbackAttempts = 0                                    │  │        │
+│  │  │  callbackMaxAttempts = 3                                 │  │        │
+│  │  │  callbackNotifyViaWhatsApp = true                        │  │        │
+│  │  │                                                          │  │        │
+│  │  │  + Áudio da conversa original                            │  │        │
+│  │  │  + Transcrição                                           │  │        │
+│  │  │  + Resumo                                                │  │        │
+│  │  └──────────────────────────────────────────────────────────┘  │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│         │                                                                   │
+│         ▼                                                                   │
+│  DESLIGA CHAMADA                                                            │
+│                                                                             │
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 7: DETECÇÃO DE DISPONIBILIDADE                                       │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  WORKER MONITORA CALLBACKS PENDENTES                           │        │
+│  │  ─────────────────────────────────────────────────────────────  │        │
+│  │  A cada 30 segundos:                                           │        │
+│  │                                                                │        │
+│  │  1. Buscar tickets com ticketType = "callback" AND             │        │
+│  │     status = "pending" AND callbackIntendedFor = X             │        │
+│  │                                                                │        │
+│  │  2. Verificar se ramal X está disponível via FreeSWITCH        │        │
+│  │     (ESL: show channels / sofia status)                        │        │
+│  │                                                                │        │
+│  │  3. Se disponível E (scheduledAt is null OR now >= scheduledAt)│        │
+│  │     → Notificar atendente                                      │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 8: ALERTA NO OMNIPLAY                                                │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  🔔 CALLBACK ALERT - DESKTOP/MOBILE                            │        │
+│  │  ─────────────────────────────────────────────────────────────  │        │
+│  │                                                                │        │
+│  │  ┌────────────────────────────────────────────────────────┐    │        │
+│  │  │  🔔 Callback Pendente!                              ⏰  │    │        │
+│  │  │  ──────────────────────────────────────────────────────│    │        │
+│  │  │                                                        │    │        │
+│  │  │  📞 Cliente: 18 99775-1234                             │    │        │
+│  │  │  ⏱️  Solicitado há: 5 minutos                          │    │        │
+│  │  │  📝 Assunto: "Boleto vencido"                          │    │        │
+│  │  │                                                        │    │        │
+│  │  │  💬 Transcrição disponível                             │    │        │
+│  │  │  🎧 Áudio: [▶️ Ouvir conversa original]                │    │        │
+│  │  │                                                        │    │        │
+│  │  │  ┌──────────────────────────────────────────────────┐  │    │        │
+│  │  │  │ [📞 Ligar Agora]   [⏰ 5min]   [❌ Dispensar]    │  │    │        │
+│  │  │  └──────────────────────────────────────────────────┘  │    │        │
+│  │  └────────────────────────────────────────────────────────┘    │        │
+│  │                                                                │        │
+│  │  CARACTERÍSTICAS:                                              │        │
+│  │  - Notificação push (mobile)                                   │        │
+│  │  - Som de alerta                                               │        │
+│  │  - Badge no ícone (contador)                                   │        │
+│  │  - Toast/Snackbar persistente                                  │        │
+│  │  - Atalho de teclado para ligar                                │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 9: EXECUÇÃO DO CALLBACK                                              │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Jeni clica em [📞 Ligar Agora]                                             │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  ORIGINAÇÃO AUTOMÁTICA (Click-to-Call)                         │        │
+│  │  ─────────────────────────────────────────────────────────────  │        │
+│  │                                                                │        │
+│  │  1. FreeSWITCH origina chamada para ramal 1004 (Jeni)          │        │
+│  │                                                                │        │
+│  │  2. Jeni atende seu telefone                                   │        │
+│  │                                                                │        │
+│  │  3. Sistema toca mensagem:                                     │        │
+│  │     "Callback para cliente 18 99775-1234.                      │        │
+│  │      Assunto: boleto vencido. Conectando..."                   │        │
+│  │                                                                │        │
+│  │  4. FreeSWITCH disca para 18 99775-1234                        │        │
+│  │                                                                │        │
+│  │  5. Cliente atende → Bridge: Jeni ↔ Cliente                    │        │
+│  │                                                                │        │
+│  └───────────────────────────┬─────────────────────────────────────┘        │
+│                              │                                              │
+│         ┌────────────────────┼────────────────────┐                         │
+│         ▼                    ▼                    ▼                         │
+│    ATENDEU              NÃO ATENDEU          OCUPADO/ERRO                   │
+│         │                    │                    │                         │
+│         ▼                    ▼                    ▼                         │
+│   Ticket →            Incrementar         Tentar novamente                  │
+│   status: "open"      attempts            em 5 minutos                      │
+│         │                    │                    │                         │
+│         │                    ▼                    │                         │
+│         │            Se attempts >= 3:            │                         │
+│         │            → Notificar via WhatsApp     │                         │
+│         │            → Marcar como "failed"       │                         │
+│         │                                         │                         │
+│         └────────────────────┴────────────────────┘                         │
+│                                                                             │
+│                                                                             │
+│  ══════════════════════════════════════════════════════════════════════    │
+│  FASE 10: NOTIFICAÇÃO WHATSAPP (Opcional)                                  │
+│  ══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Se cliente optou por receber confirmação:                                  │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  📱 WHATSAPP DO CLIENTE                                        │        │
+│  │  ─────────────────────────────────────────────────────────────  │        │
+│  │                                                                │        │
+│  │  "Olá! Aqui é da Internet Play. 📞                             │        │
+│  │   A Jeni do Financeiro está pronta para retornar sua           │        │
+│  │   ligação sobre o boleto.                                      │        │
+│  │                                                                │        │
+│  │   Podemos ligar agora?                                         │        │
+│  │                                                                │        │
+│  │   [✅ Sim, podem ligar]  [⏰ Depois]  [❌ Não precisa mais]"    │        │
+│  │                                                                │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  Se cliente responder "Sim" → Iniciar callback                              │
+│  Se cliente responder "Depois" → Perguntar horário                          │
+│  Se cliente responder "Não precisa" → Fechar ticket                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 #### 1. Tabela de Destinos de Transferência (FusionPBX)
 ```sql
 CREATE TABLE v_voice_transfer_destinations (
@@ -199,10 +449,799 @@ CREATE TABLE v_voice_transfer_destinations (
 - Associação com secretárias
 - Configuração de timeouts e fallbacks
 
+#### 5. Model Ticket Atualizado (OmniPlay)
+```typescript
+// backend/src/models/Ticket.ts - Novos campos para callback
+
+// Campos existentes...
+
+// Campos de Callback (novos)
+ticketType: {
+  type: DataTypes.ENUM('chat', 'voice', 'callback'),
+  defaultValue: 'chat'
+},
+callbackNumber: {
+  type: DataTypes.STRING(50),  // E.164: 5518997751234
+  allowNull: true
+},
+callbackIntendedFor: {
+  type: DataTypes.INTEGER,     // user_id do atendente destino
+  allowNull: true
+},
+callbackExtension: {
+  type: DataTypes.STRING(10),  // 1004
+  allowNull: true
+},
+callbackDepartment: {
+  type: DataTypes.STRING(100), // "Financeiro"
+  allowNull: true
+},
+callbackScheduledAt: {
+  type: DataTypes.DATE,        // null = assim que disponível
+  allowNull: true
+},
+callbackReason: {
+  type: DataTypes.STRING(500), // "Boleto vencido"
+  allowNull: true
+},
+callbackAttempts: {
+  type: DataTypes.INTEGER,
+  defaultValue: 0
+},
+callbackMaxAttempts: {
+  type: DataTypes.INTEGER,
+  defaultValue: 3
+},
+callbackLastAttemptAt: {
+  type: DataTypes.DATE,
+  allowNull: true
+},
+callbackNotifyViaWhatsApp: {
+  type: DataTypes.BOOLEAN,
+  defaultValue: false
+},
+callbackWhatsAppMessageId: {
+  type: DataTypes.STRING(100),  // Para rastrear resposta
+  allowNull: true
+},
+callbackStatus: {
+  type: DataTypes.ENUM(
+    'pending',      // Aguardando atendente ficar disponível
+    'scheduled',    // Agendado para horário específico
+    'notified',     // Atendente foi notificado
+    'in_progress',  // Callback em andamento
+    'completed',    // Callback realizado com sucesso
+    'failed',       // Esgotou tentativas
+    'canceled'      // Cliente cancelou via WhatsApp
+  ),
+  defaultValue: 'pending'
+},
+callbackPriority: {
+  type: DataTypes.ENUM('normal', 'high', 'urgent'),
+  defaultValue: 'high'  // Callbacks são sempre prioridade
+}
+```
+
+#### 6. API Click-to-Call (OmniPlay Backend)
+```typescript
+// backend/src/routes/voiceRoutes.ts
+
+/**
+ * POST /api/voice/callback/initiate
+ * 
+ * Inicia um callback manualmente quando o atendente clica em "Ligar Agora"
+ * 
+ * Body:
+ *   ticketId: number
+ *   userId: number (quem está iniciando)
+ * 
+ * Flow:
+ *   1. Valida ticket é tipo callback
+ *   2. Verifica usuário tem permissão
+ *   3. Chama FreeSWITCH via ESL para originar chamada
+ *   4. Atualiza callbackStatus = 'in_progress'
+ *   5. Retorna call_uuid para tracking
+ */
+router.post("/callback/initiate", authMiddleware, async (req, res) => {
+  // ... implementação
+});
+
+/**
+ * POST /api/voice/callback/result
+ * 
+ * Webhook chamado pelo Voice AI após callback terminar
+ * 
+ * Body:
+ *   ticketId: number
+ *   callUuid: string
+ *   result: 'answered' | 'no_answer' | 'busy' | 'failed'
+ *   duration: number (segundos)
+ * 
+ * Flow:
+ *   - answered: status = 'completed', abrir ticket normal
+ *   - no_answer/busy: incrementar attempts, reagendar ou falhar
+ *   - failed: marcar como failed, notificar WhatsApp se habilitado
+ */
+router.post("/callback/result", serviceAuthMiddleware, async (req, res) => {
+  // ... implementação
+});
+
+/**
+ * GET /api/voice/callback/pending
+ * 
+ * Lista callbacks pendentes para um atendente (para widget)
+ * 
+ * Query:
+ *   userId?: number (se não informado, retorna todos do company)
+ * 
+ * Returns:
+ *   callbacks: Array<{
+ *     ticketId, callbackNumber, callbackReason, 
+ *     scheduledAt, waitingMinutes, priority
+ *   }>
+ */
+router.get("/callback/pending", authMiddleware, async (req, res) => {
+  // ... implementação
+});
+```
+
+#### 7. Worker de Monitoramento de Callbacks
+```typescript
+// backend/src/jobs/CallbackMonitorJob.ts
+
+import Bull from "bull";
+import logger from "../utils/logger";
+import Ticket from "../models/Ticket";
+import User from "../models/User";
+import { Op } from "sequelize";
+import { getIO } from "../libs/socket";
+import FreeSwitchService from "../services/VoiceServices/FreeSwitchService";
+
+/**
+ * CallbackMonitorJob
+ * 
+ * Executa a cada 30 segundos para:
+ * 1. Buscar tickets com callbackStatus = 'pending' ou 'scheduled'
+ * 2. Verificar se atendente destino está disponível (via FreeSWITCH)
+ * 3. Se disponível + horário OK → notificar via Socket.IO
+ * 4. Atualizar callbackStatus = 'notified'
+ */
+
+const CALLBACK_MONITOR_INTERVAL_MS = 30000; // 30 segundos
+
+export default {
+  key: "CallbackMonitor",
+  
+  options: {
+    repeat: {
+      every: CALLBACK_MONITOR_INTERVAL_MS
+    }
+  },
+  
+  async handle({ data }: { data: any }) {
+    const io = getIO();
+    
+    // Buscar callbacks pendentes
+    const pendingCallbacks = await Ticket.findAll({
+      where: {
+        ticketType: "callback",
+        callbackStatus: {
+          [Op.in]: ["pending", "scheduled"]
+        },
+        // Scheduled: só se já passou o horário
+        [Op.or]: [
+          { callbackScheduledAt: null },
+          { callbackScheduledAt: { [Op.lte]: new Date() } }
+        ]
+      },
+      include: [
+        { model: User, as: "callbackUser", required: false }
+      ],
+      limit: 50 // Processar em batches
+    });
+    
+    for (const ticket of pendingCallbacks) {
+      try {
+        // Verificar disponibilidade do atendente via FreeSWITCH
+        const isAvailable = await FreeSwitchService.checkExtensionAvailable(
+          ticket.callbackExtension,
+          ticket.companyId
+        );
+        
+        if (isAvailable) {
+          // Emitir evento para o atendente específico
+          io.of(String(ticket.companyId)).emit(
+            `user-${ticket.callbackIntendedFor}-callback`,
+            {
+              action: "new_callback",
+              ticket: {
+                id: ticket.id,
+                callbackNumber: ticket.callbackNumber,
+                callbackReason: ticket.callbackReason,
+                callbackDepartment: ticket.callbackDepartment,
+                waitingMinutes: Math.floor(
+                  (Date.now() - ticket.createdAt.getTime()) / 60000
+                ),
+                priority: ticket.callbackPriority,
+                hasAudio: !!ticket.voiceRecordingUrl,
+                hasTranscript: !!ticket.voiceTranscript
+              }
+            }
+          );
+          
+          // Atualizar status
+          await ticket.update({ callbackStatus: "notified" });
+          
+          logger.info("📞 Callback notification sent", {
+            ticketId: ticket.id,
+            userId: ticket.callbackIntendedFor,
+            extension: ticket.callbackExtension
+          });
+        }
+      } catch (error) {
+        logger.error("Error processing callback", {
+          ticketId: ticket.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+};
+```
+
+#### 8. Componente Frontend - Callback Alert Widget
+```jsx
+// frontend/src/components/CallbackAlertWidget/index.js
+
+import React, { useState, useEffect, useCallback } from "react";
+import { 
+  Snackbar, 
+  Card, 
+  CardContent, 
+  Typography, 
+  Button, 
+  IconButton,
+  Badge,
+  Fab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  Chip
+} from "@material-ui/core";
+import { 
+  Phone as PhoneIcon, 
+  Schedule as ScheduleIcon,
+  Close as CloseIcon,
+  PlayArrow as PlayIcon,
+  Notifications as NotificationsIcon
+} from "@material-ui/icons";
+import { makeStyles } from "@material-ui/core/styles";
+import { toast } from "react-toastify";
+import api from "../../services/api";
+import useSocket from "../../hooks/useSocket";
+import useAuth from "../../hooks/useAuth";
+
+const useStyles = makeStyles((theme) => ({
+  fab: {
+    position: "fixed",
+    bottom: theme.spacing(10),
+    right: theme.spacing(3),
+    zIndex: 1300,
+    animation: "$pulse 2s infinite"
+  },
+  "@keyframes pulse": {
+    "0%": { boxShadow: "0 0 0 0 rgba(255, 152, 0, 0.7)" },
+    "70%": { boxShadow: "0 0 0 15px rgba(255, 152, 0, 0)" },
+    "100%": { boxShadow: "0 0 0 0 rgba(255, 152, 0, 0)" }
+  },
+  callbackCard: {
+    minWidth: 350,
+    backgroundColor: theme.palette.warning.light,
+    borderLeft: `4px solid ${theme.palette.warning.dark}`
+  },
+  urgentCard: {
+    backgroundColor: theme.palette.error.light,
+    borderLeft: `4px solid ${theme.palette.error.dark}`
+  },
+  waitingChip: {
+    marginLeft: theme.spacing(1)
+  },
+  actionButtons: {
+    display: "flex",
+    gap: theme.spacing(1),
+    marginTop: theme.spacing(2)
+  },
+  audioButton: {
+    marginTop: theme.spacing(1)
+  }
+}));
+
+const CallbackAlertWidget = () => {
+  const classes = useStyles();
+  const { user } = useAuth();
+  const socket = useSocket();
+  
+  const [callbacks, setCallbacks] = useState([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [currentAlert, setCurrentAlert] = useState(null);
+  const [loading, setLoading] = useState(false);
+  
+  // Carregar callbacks pendentes ao iniciar
+  useEffect(() => {
+    const loadPendingCallbacks = async () => {
+      try {
+        const { data } = await api.get("/voice/callback/pending", {
+          params: { userId: user.id }
+        });
+        setCallbacks(data.callbacks || []);
+      } catch (error) {
+        console.error("Error loading callbacks:", error);
+      }
+    };
+    
+    loadPendingCallbacks();
+    
+    // Polling a cada 30s como backup
+    const interval = setInterval(loadPendingCallbacks, 30000);
+    return () => clearInterval(interval);
+  }, [user.id]);
+  
+  // Escutar eventos de socket para novos callbacks
+  useEffect(() => {
+    if (!socket) return;
+    
+    const handleNewCallback = (data) => {
+      if (data.action === "new_callback") {
+        // Tocar som de alerta
+        const audio = new Audio("/notification_callback.mp3");
+        audio.play().catch(() => {});
+        
+        // Adicionar à lista
+        setCallbacks(prev => {
+          if (prev.find(c => c.id === data.ticket.id)) return prev;
+          return [data.ticket, ...prev];
+        });
+        
+        // Mostrar toast
+        toast.warning(
+          `📞 Callback pendente: ${data.ticket.callbackNumber}`,
+          { autoClose: false }
+        );
+        
+        // Mostrar alerta imediato
+        setCurrentAlert(data.ticket);
+      }
+    };
+    
+    socket.on(`user-${user.id}-callback`, handleNewCallback);
+    
+    return () => {
+      socket.off(`user-${user.id}-callback`, handleNewCallback);
+    };
+  }, [socket, user.id]);
+  
+  // Iniciar callback
+  const handleInitiateCallback = async (ticketId) => {
+    setLoading(true);
+    try {
+      await api.post("/voice/callback/initiate", { ticketId });
+      toast.success("📞 Conectando chamada...");
+      setCallbacks(prev => prev.filter(c => c.id !== ticketId));
+      setCurrentAlert(null);
+    } catch (error) {
+      toast.error("Erro ao iniciar callback: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Adiar callback
+  const handleSnooze = async (ticketId, minutes) => {
+    try {
+      await api.post("/voice/callback/snooze", { ticketId, minutes });
+      toast.info(`⏰ Callback adiado por ${minutes} minutos`);
+      setCallbacks(prev => prev.filter(c => c.id !== ticketId));
+      setCurrentAlert(null);
+    } catch (error) {
+      toast.error("Erro ao adiar callback");
+    }
+  };
+  
+  // Dispensar callback
+  const handleDismiss = async (ticketId) => {
+    try {
+      await api.post("/voice/callback/dismiss", { ticketId });
+      setCallbacks(prev => prev.filter(c => c.id !== ticketId));
+      setCurrentAlert(null);
+    } catch (error) {
+      toast.error("Erro ao dispensar callback");
+    }
+  };
+  
+  const formatWaitingTime = (minutes) => {
+    if (minutes < 60) return `${minutes}min`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h${mins > 0 ? mins + 'min' : ''}`;
+  };
+  
+  return (
+    <>
+      {/* FAB com Badge */}
+      {callbacks.length > 0 && (
+        <Fab 
+          color="secondary" 
+          className={classes.fab}
+          onClick={() => setDialogOpen(true)}
+        >
+          <Badge badgeContent={callbacks.length} color="error">
+            <PhoneIcon />
+          </Badge>
+        </Fab>
+      )}
+      
+      {/* Snackbar de Alerta Imediato */}
+      <Snackbar
+        open={!!currentAlert}
+        anchorOrigin={{ vertical: "top", horizontal: "right" }}
+      >
+        <Card 
+          className={`${classes.callbackCard} ${
+            currentAlert?.priority === 'urgent' ? classes.urgentCard : ''
+          }`}
+        >
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              🔔 Callback Pendente!
+              <IconButton 
+                size="small" 
+                onClick={() => setCurrentAlert(null)}
+                style={{ float: "right" }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Typography>
+            
+            <Typography variant="body1">
+              📞 <strong>{currentAlert?.callbackNumber}</strong>
+            </Typography>
+            
+            {currentAlert?.callbackReason && (
+              <Typography variant="body2" color="textSecondary">
+                📝 {currentAlert.callbackReason}
+              </Typography>
+            )}
+            
+            <Chip
+              size="small"
+              icon={<ScheduleIcon />}
+              label={`Aguardando há ${formatWaitingTime(currentAlert?.waitingMinutes || 0)}`}
+              className={classes.waitingChip}
+              color={currentAlert?.waitingMinutes > 10 ? "secondary" : "default"}
+            />
+            
+            {currentAlert?.hasAudio && (
+              <Button
+                size="small"
+                startIcon={<PlayIcon />}
+                className={classes.audioButton}
+                onClick={() => {/* Abrir player de áudio */}}
+              >
+                Ouvir conversa
+              </Button>
+            )}
+            
+            <div className={classes.actionButtons}>
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<PhoneIcon />}
+                onClick={() => handleInitiateCallback(currentAlert?.id)}
+                disabled={loading}
+              >
+                Ligar Agora
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => handleSnooze(currentAlert?.id, 5)}
+              >
+                ⏰ 5min
+              </Button>
+              <Button
+                variant="text"
+                color="secondary"
+                onClick={() => handleDismiss(currentAlert?.id)}
+              >
+                Dispensar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </Snackbar>
+      
+      {/* Dialog com Lista de Callbacks */}
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          📞 Callbacks Pendentes ({callbacks.length})
+        </DialogTitle>
+        <DialogContent>
+          <List>
+            {callbacks.map((callback) => (
+              <ListItem key={callback.id} divider>
+                <ListItemText
+                  primary={
+                    <>
+                      {callback.callbackNumber}
+                      <Chip
+                        size="small"
+                        label={formatWaitingTime(callback.waitingMinutes)}
+                        className={classes.waitingChip}
+                        color={callback.waitingMinutes > 10 ? "secondary" : "default"}
+                      />
+                    </>
+                  }
+                  secondary={callback.callbackReason || "Sem motivo informado"}
+                />
+                <ListItemSecondaryAction>
+                  <IconButton 
+                    color="primary"
+                    onClick={() => handleInitiateCallback(callback.id)}
+                    disabled={loading}
+                  >
+                    <PhoneIcon />
+                  </IconButton>
+                </ListItemSecondaryAction>
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+};
+
+export default CallbackAlertWidget;
+```
+
+#### 9. FreeSWITCH Click-to-Call Service
+```typescript
+// backend/src/services/VoiceServices/FreeSwitchService.ts
+
+import logger from "../../utils/logger";
+
+/**
+ * FreeSwitchService
+ * 
+ * Interage com FreeSWITCH via ESL para:
+ * - Verificar disponibilidade de ramais
+ * - Originar chamadas (click-to-call)
+ * - Monitorar status de chamadas
+ */
+
+const ESL_HOST = process.env.ESL_HOST || "127.0.0.1";
+const ESL_PORT = parseInt(process.env.ESL_PORT || "8021");
+const ESL_PASSWORD = process.env.ESL_PASSWORD || "ClueCon";
+
+class FreeSwitchService {
+  
+  /**
+   * Verifica se um ramal está disponível para receber chamadas
+   */
+  async checkExtensionAvailable(
+    extension: string, 
+    companyId: number
+  ): Promise<boolean> {
+    try {
+      // TODO: Implementar conexão ESL real
+      // Por enquanto, simular com HTTP API se disponível
+      
+      // Comando ESL: sofia status profile internal reg <extension>
+      // ou: show channels like <extension>
+      
+      // Retorna true se:
+      // 1. Ramal registrado
+      // 2. Não em chamada ativa
+      
+      return true; // Placeholder
+    } catch (error) {
+      logger.error("Error checking extension availability", { extension, error });
+      return false;
+    }
+  }
+  
+  /**
+   * Origina uma chamada de callback
+   * 
+   * Flow:
+   * 1. Liga para o ramal do atendente
+   * 2. Quando atender, toca mensagem de contexto
+   * 3. Disca para o cliente
+   * 4. Faz bridge entre os dois
+   */
+  async originateCallback({
+    agentExtension,
+    clientNumber,
+    callbackReason,
+    ticketId,
+    companyId,
+    domainName
+  }: {
+    agentExtension: string;
+    clientNumber: string;
+    callbackReason?: string;
+    ticketId: number;
+    companyId: number;
+    domainName: string;
+  }): Promise<{ success: boolean; callUuid?: string; error?: string }> {
+    try {
+      // Comando ESL originate:
+      // originate {origination_caller_id_name='Callback',
+      //            origination_caller_id_number='Callback',
+      //            ticket_id=123}
+      //   user/${agentExtension}@${domain}
+      //   &bridge(sofia/gateway/trunk/${clientNumber})
+      
+      // Com áudio de contexto:
+      // originate ... &playback(callback_intro.wav)
+      //   &bridge(sofia/gateway/trunk/${clientNumber})
+      
+      const callUuid = `callback-${Date.now()}-${ticketId}`;
+      
+      // TODO: Implementar ESL real
+      logger.info("📞 Callback originated", {
+        agentExtension,
+        clientNumber,
+        callUuid,
+        ticketId
+      });
+      
+      return { success: true, callUuid };
+    } catch (error) {
+      logger.error("Error originating callback", { error });
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error) 
+      };
+    }
+  }
+}
+
+export default new FreeSwitchService();
+```
+
+#### 10. Integração WhatsApp para Confirmação
+```typescript
+// backend/src/services/VoiceServices/CallbackWhatsAppService.ts
+
+import logger from "../../utils/logger";
+import SendWABAMessageService from "../WABA/SendWABAMessageService";
+import Ticket from "../../models/Ticket";
+
+/**
+ * Envia mensagem de confirmação/notificação de callback via WhatsApp
+ */
+
+interface CallbackWhatsAppOptions {
+  ticketId: number;
+  phoneNumber: string;
+  companyId: number;
+  type: 'confirmation' | 'ready' | 'failed';
+  agentName?: string;
+  department?: string;
+  reason?: string;
+  scheduledTime?: string;
+}
+
+class CallbackWhatsAppService {
+  
+  async sendNotification(options: CallbackWhatsAppOptions): Promise<boolean> {
+    const { type, phoneNumber, agentName, department, reason } = options;
+    
+    let message = "";
+    let buttons: Array<{ id: string; title: string }> = [];
+    
+    switch (type) {
+      case 'confirmation':
+        message = `Olá! Aqui é da Internet Play. 📞\n\n` +
+          `Seu pedido de callback foi registrado!\n\n` +
+          `👤 Atendente: ${agentName || department || 'Próximo disponível'}\n` +
+          (reason ? `📝 Assunto: ${reason}\n` : '') +
+          `\nVamos retornar assim que possível. Obrigado!`;
+        break;
+        
+      case 'ready':
+        message = `Olá! Aqui é da Internet Play. 📞\n\n` +
+          `${agentName || 'Nosso atendente'} está pronto para retornar sua ligação` +
+          (reason ? ` sobre "${reason}"` : '') + `.\n\n` +
+          `Podemos ligar agora?`;
+        buttons = [
+          { id: 'callback_yes', title: '✅ Sim, podem ligar' },
+          { id: 'callback_later', title: '⏰ Depois' },
+          { id: 'callback_cancel', title: '❌ Não precisa' }
+        ];
+        break;
+        
+      case 'failed':
+        message = `Olá! Aqui é da Internet Play. 📞\n\n` +
+          `Tentamos retornar sua ligação mas não conseguimos contato.\n\n` +
+          `Por favor, entre em contato conosco quando puder.\n` +
+          `📞 Telefone: 0800 XXX XXXX\n` +
+          `💬 WhatsApp: Este número`;
+        break;
+    }
+    
+    try {
+      // Usar SendWABAMessageService para enviar
+      // await SendWABAMessageService({...})
+      
+      logger.info("📱 Callback WhatsApp sent", {
+        ticketId: options.ticketId,
+        phoneNumber,
+        type
+      });
+      
+      return true;
+    } catch (error) {
+      logger.error("Error sending callback WhatsApp", { error });
+      return false;
+    }
+  }
+  
+  /**
+   * Processa resposta do cliente à notificação de callback
+   */
+  async processResponse(
+    ticketId: number, 
+    response: 'callback_yes' | 'callback_later' | 'callback_cancel'
+  ): Promise<void> {
+    const ticket = await Ticket.findByPk(ticketId);
+    if (!ticket) return;
+    
+    switch (response) {
+      case 'callback_yes':
+        // Iniciar callback imediatamente
+        await ticket.update({ callbackStatus: 'pending' });
+        // O worker vai pegar e notificar o atendente
+        break;
+        
+      case 'callback_later':
+        // Perguntar horário via WhatsApp
+        // ou adiar por 30 minutos
+        await ticket.update({ 
+          callbackScheduledAt: new Date(Date.now() + 30 * 60 * 1000) 
+        });
+        break;
+        
+      case 'callback_cancel':
+        await ticket.update({ 
+          callbackStatus: 'canceled',
+          status: 'closed' 
+        });
+        break;
+    }
+  }
+}
+
+export default new CallbackWhatsAppService();
+```
+
 ## Escopo
 
-### Incluído
-- [x] Tabela de destinos de transferência
+### FASE 1: Transferência Inteligente (MVP)
+- [x] Tabela de destinos de transferência (FusionPBX)
 - [x] Lógica de attended transfer via ESL
 - [x] Detecção de resultado (atendeu/ocupado/timeout)
 - [x] Retorno ao agente IA com status
@@ -211,11 +1250,46 @@ CREATE TABLE v_voice_transfer_destinations (
 - [x] Interface FusionPBX para gerenciamento
 - [x] Gravação de chamada completa
 
-### Excluído (futuro)
+### FASE 2: Sistema de Callback (NOVO)
+- [x] Model Ticket com campos de callback
+- [x] Máquina de estados para fluxo de callback
+- [x] Captura inteligente de número ("este mesmo")
+- [x] Captura de horário preferido
+- [x] Captura de assunto/motivo
+- [x] Worker de monitoramento de callbacks
+- [x] Detecção de disponibilidade via ESL
+- [x] Notificação via Socket.IO para atendente
+
+### FASE 3: UI de Callback no OmniPlay
+- [x] Widget de alertas de callback (FAB + Snackbar)
+- [x] Lista de callbacks pendentes
+- [x] Botão "Ligar Agora" (click-to-call)
+- [x] Botão "Adiar" (snooze 5min)
+- [x] Botão "Dispensar"
+- [x] Som de notificação
+- [x] Badge com contador
+- [x] Exibição do áudio/transcrição
+
+### FASE 4: Click-to-Call
+- [x] API POST /voice/callback/initiate
+- [x] FreeSwitchService.originateCallback()
+- [x] Bridge atendente ↔ cliente
+- [x] Áudio de contexto antes do bridge
+- [x] Webhook de resultado
+
+### FASE 5: Integração WhatsApp (Opcional)
+- [ ] Confirmação de callback agendado
+- [ ] Notificação "pronto para ligar"
+- [ ] Botões interativos (Sim/Depois/Cancelar)
+- [ ] Processamento de respostas
+- [ ] Notificação de falha
+
+### FASE 6: Melhorias Futuras
 - [ ] Integração com sistema de presença BLF
-- [ ] Fila de callback (retornar ligação)
-- [ ] Transcrição em tempo real durante transfer
-- [ ] Dashboard de métricas de transferência
+- [ ] Priorização por SLA/VIP
+- [ ] Dashboard de métricas de callback
+- [ ] Múltiplas tentativas automáticas
+- [ ] Previsão de tempo de espera por ML
 
 ## Riscos e Mitigações
 
@@ -224,6 +1298,9 @@ CREATE TABLE v_voice_transfer_destinations (
 | FreeSWITCH não suportar attended transfer via ESL | Baixa | Alto | Usar bridge com monitoramento de eventos |
 | Latência na detecção de ocupado | Média | Médio | Usar SIP response codes diretamente |
 | Gravação não iniciar antes do handoff | Média | Alto | Iniciar gravação no atendimento da chamada |
+| Socket.IO não entregar notificação | Média | Alto | Polling como fallback + persistência no banco |
+| Cliente não atender callback | Alta | Médio | Múltiplas tentativas + notificação WhatsApp |
+| Atendente ignorar alerta | Média | Médio | Escalação automática + métricas de SLA |
 
 ## Dependências
 
@@ -231,17 +1308,45 @@ CREATE TABLE v_voice_transfer_destinations (
 - ESL (Event Socket Library) configurado
 - MinIO para armazenamento de gravações
 - OmniPlay backend com VoiceHandoffService
+- Socket.IO para notificações real-time
+- BullMQ para jobs de monitoramento
+- (Opcional) WhatsApp Business API para notificações
 
 ## Métricas de Sucesso
 
+### Transferência
 1. **Taxa de transferência bem-sucedida** > 70%
-2. **Tempo médio de espera** < 30 segundos
-3. **Taxa de tickets/recados** < 30% das solicitações de handoff
-4. **Satisfação do cliente** (qualitativo)
+2. **Tempo médio de espera para transfer** < 30 segundos
+3. **Taxa de fallback para ticket/callback** < 30%
+
+### Callback
+4. **Taxa de callback atendido** > 80%
+5. **Tempo médio de retorno** < 15 minutos
+6. **Taxa de abandono (cliente cancela)** < 10%
+7. **NPS de clientes atendidos via callback** > 8
+
+### Operacional
+8. **Tempo médio de resposta do atendente ao alerta** < 60 segundos
+9. **Taxa de callbacks expirados (max tentativas)** < 5%
+
+## Estimativa de Esforço
+
+| Fase | Esforço | Prioridade |
+|------|---------|------------|
+| FASE 1: Transferência Inteligente | 3-4 dias | 🔴 Alta |
+| FASE 2: Sistema de Callback | 2-3 dias | 🔴 Alta |
+| FASE 3: UI de Callback | 2-3 dias | 🟡 Média |
+| FASE 4: Click-to-Call | 1-2 dias | 🟡 Média |
+| FASE 5: WhatsApp Integration | 1-2 dias | 🟢 Baixa |
+| **TOTAL** | **9-14 dias** | |
 
 ## Próximos Passos
 
 1. ✅ Aprovar este proposal
 2. 📝 Criar design.md com detalhes técnicos
 3. 📋 Criar tasks.md com tarefas de implementação
-4. 🚀 Implementar em fases
+4. 🚀 Implementar FASE 1 + 2 (MVP)
+5. 🧪 Testes internos com ramais
+6. 🚀 Implementar FASE 3 + 4
+7. 📊 Coletar métricas por 1 semana
+8. 🚀 Implementar FASE 5 se métricas positivas
