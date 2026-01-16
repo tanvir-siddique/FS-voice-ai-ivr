@@ -142,6 +142,46 @@ class HandoffHandler:
         """Incrementa contador de turns."""
         self._turn_count += 1
     
+    @staticmethod
+    def normalize_brazilian_number(number: str) -> str:
+        """
+        Normaliza número brasileiro para formato E.164 (55 + DDD + número).
+        
+        Exemplos:
+        - 18997751073 → 5518997751073 (celular, 11 dígitos)
+        - 1836215152 → 551836215152 (fixo, 10 dígitos)
+        - 5518997751073 → 5518997751073 (já normalizado)
+        - 1000 → 1000 (ramal, não normaliza)
+        """
+        if not number:
+            return number
+        
+        # Remover caracteres não numéricos
+        clean = "".join(c for c in number if c.isdigit())
+        
+        # Se já começa com 55 e tem 12-13 dígitos, já está normalizado
+        if clean.startswith("55") and len(clean) in (12, 13):
+            return clean
+        
+        # Se tem 10-11 dígitos (DDD + número brasileiro), adicionar 55
+        if len(clean) in (10, 11):
+            return f"55{clean}"
+        
+        # Outros casos (ramal, número estrangeiro, etc.) - retornar como está
+        return clean
+    
+    @staticmethod
+    def is_internal_extension(number: str) -> bool:
+        """
+        Verifica se é ramal interno (não é número de telefone real).
+        Ramais tipicamente têm menos de 8 dígitos.
+        """
+        if not number:
+            return True
+        
+        clean = "".join(c for c in number if c.isdigit())
+        return len(clean) < 8
+    
     def should_check_handoff(self) -> bool:
         """Verifica se deve checar handoff neste turn."""
         if not self.config.enabled or self._handoff_initiated:
@@ -442,6 +482,26 @@ class HandoffHandler:
         
         self._handoff_initiated = True
         
+        # Verificar se é ramal interno (< 8 dígitos)
+        if self.is_internal_extension(caller_number):
+            logger.info(
+                "Handoff skipped: internal extension (no real phone number)",
+                extra={
+                    "call_uuid": self.call_uuid,
+                    "caller_number": caller_number,
+                    "reason": reason,
+                }
+            )
+            return HandoffResult(
+                success=False,
+                action="abandoned",
+                reason=reason,
+                error="Internal extension - handoff not available for internal calls"
+            )
+        
+        # Normalizar número brasileiro (adicionar 55 se necessário)
+        normalized_number = self.normalize_brazilian_number(caller_number)
+        
         logger.info(
             "Initiating handoff",
             extra={
@@ -449,12 +509,17 @@ class HandoffHandler:
                 "call_uuid": self.call_uuid,
                 "reason": reason,
                 "turns": self._turn_count,
+                "caller_number_original": caller_number,
+                "caller_number_normalized": normalized_number,
                 "has_audio": bool(audio_data),
                 "has_recording_url": bool(recording_url),
                 "omniplay_company_id": self.config.omniplay_company_id,
                 "omniplay_api_url": OMNIPLAY_API_URL,
             }
         )
+        
+        # Usar número normalizado daqui em diante
+        caller_number = normalized_number
         
         # 1. Verificar atendentes online
         agents_data = await self.check_online_agents()
