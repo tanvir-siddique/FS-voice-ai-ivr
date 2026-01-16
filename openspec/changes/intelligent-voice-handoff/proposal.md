@@ -1340,13 +1340,466 @@ export default new CallbackWhatsAppService();
 | FASE 5: WhatsApp Integration | 1-2 dias | 🟢 Baixa |
 | **TOTAL** | **9-14 dias** | |
 
+---
+
+## ⚠️ REVISÃO CRÍTICA - PROBLEMAS E ALTERNATIVAS
+
+Esta seção identifica problemas de lógica e funcionalidades que seriam difíceis/impossíveis de implementar com a arquitetura atual, propondo alternativas realistas.
+
+---
+
+### 🔴 PROBLEMA 1: ESL do OmniPlay Backend
+
+**Proposta Original:**
+> Worker de monitoramento (BullMQ no OmniPlay) verifica disponibilidade de ramais via FreeSWITCH ESL
+
+**Por que é IMPOSSÍVEL:**
+- OmniPlay backend (Node.js) roda em container/servidor separado
+- FreeSWITCH/FusionPBX está em outro servidor
+- Não existe biblioteca ESL para Node.js bem mantida e confiável
+- Conexões ESL persistentes de outro container são instáveis
+
+**ALTERNATIVA VIÁVEL:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ARQUITETURA CORRIGIDA: PROXY VIA VOICE AI                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  OmniPlay          Voice AI (Python)        FreeSWITCH                      │
+│  ─────────         ─────────────────        ──────────                      │
+│                                                                             │
+│  [Worker]  ──HTTP──► [/api/extension/status] ──ESL──► sofia status          │
+│            ◄────────  {available: true}      ◄──────  response              │
+│                                                                             │
+│  [Click-to-Call] ──► [/api/callback/originate] ──ESL──► originate           │
+│                 ◄──── {callUuid: "xxx"}       ◄────── call started          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**IMPLEMENTAÇÃO:**
+```python
+# voice-ai-service/api/extension_routes.py
+
+@router.get("/extension/status/{extension}")
+async def check_extension_status(extension: str, domain_uuid: str):
+    """
+    Verifica se ramal está:
+    1. Registrado (sofia status)
+    2. Não em chamada (show channels)
+    """
+    esl = await get_esl_connection()
+    
+    # Verificar registro
+    result = await esl.send(f"sofia status profile internal reg {extension}")
+    is_registered = "Registered" in result
+    
+    # Verificar se em chamada
+    channels = await esl.send(f"show channels like {extension}")
+    in_call = extension in channels
+    
+    return {
+        "extension": extension,
+        "registered": is_registered,
+        "in_call": in_call,
+        "available": is_registered and not in_call
+    }
+```
+
+---
+
+### 🔴 PROBLEMA 2: Attended Transfer com Retorno ao Agente IA
+
+**Proposta Original:**
+> FreeSWITCH faz attended transfer; se falhar, agente IA retoma conversa
+
+**Por que é COMPLEXO:**
+1. Durante attended transfer, a leg original é colocada em **HOLD**
+2. O cliente ouve **música de espera**, não o agente IA
+3. O WebSocket do Voice AI precisa ser **mantido ativo** durante hold
+4. Se transfer falhar, como **reconectar** o áudio de volta ao Voice AI?
+
+**OPÇÕES:**
+
+| Opção | Descrição | Complexidade | Recomendação |
+|-------|-----------|--------------|--------------|
+| A | Attended Transfer Real | 🔴 ALTA | ❌ Não recomendado |
+| B | Blind Transfer com Fallback | 🟡 MÉDIA | ⚠️ Parcial |
+| C | Hold + Polling + Reconnect | 🟡 MÉDIA | ✅ Recomendado |
+| D | **Callback (já proposto)** | 🟢 BAIXA | ✅ **MELHOR** |
+
+**ALTERNATIVA RECOMENDADA - Opção C (Hold + Polling):**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FLUXO CORRIGIDO: HOLD COM RECONEXÃO                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Cliente pede atendente                                                  │
+│     ▼                                                                       │
+│  2. Agente IA: "Um momento..."                                              │
+│     ▼                                                                       │
+│  3. Voice AI envia comando ESL: uuid_hold {uuid} + uuid_transfer            │
+│     ▼                                                                       │
+│  4. Cliente ouve música de espera                                           │
+│     ▼                                                                       │
+│  5. Voice AI MONITORA o resultado via ESL events:                           │
+│     - CHANNEL_BRIDGE: transfer OK → encerrar sessão IA                      │
+│     - CHANNEL_HANGUP: ramal não atendeu → reativar conversa                 │
+│     ▼                                                                       │
+│  6. Se falhou: uuid_unhold + reconectar áudio ao Voice AI                   │
+│     ▼                                                                       │
+│  7. Agente IA: "O ramal não atendeu. Quer deixar recado?"                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**DESAFIO REMANESCENTE:**
+- `uuid_unhold` só funciona se a chamada ainda estiver ativa
+- Se o cliente desligar durante o hold, perdemos a oportunidade
+
+**MITIGAÇÃO:**
+- Timeout de 30 segundos para transfer
+- Informar tempo estimado ao cliente: "Aguarde um momento, em até 30 segundos volto com você"
+
+---
+
+### 🔴 PROBLEMA 3: Mensagem TTS Dinâmica para Atendente
+
+**Proposta Original:**
+> Sistema toca: "Callback para cliente 18 99775-1234. Assunto: boleto vencido."
+
+**Por que é DIFÍCIL:**
+- FreeSWITCH não tem TTS nativo
+- Precisaria de integração com Google TTS/Amazon Polly via mod_shout ou script
+- Latência adicional de 1-2 segundos para gerar áudio
+
+**ALTERNATIVAS:**
+
+| Opção | Descrição | Complexidade |
+|-------|-----------|--------------|
+| A | TTS via Google Cloud (Lua script) | 🟡 Média |
+| B | Popup no softphone (se houver API) | 🔴 Alta |
+| C | **WhatsApp/SMS antes de conectar** | 🟢 Baixa |
+| D | **Tela do OmniPlay (já aberta)** | 🟢 Baixa |
+| E | Áudio genérico + número apenas | 🟢 Muito Baixa |
+
+**ALTERNATIVA RECOMENDADA - Opção D + E:**
+```
+1. Atendente já vê o alerta no OmniPlay com todos os detalhes
+2. Ao clicar "Ligar Agora", apenas um beep ou "Conectando cliente..."
+3. O atendente já sabe quem é e o assunto
+```
+
+**SE QUISER TTS (Opção A):**
+```lua
+-- freeswitch/scripts/callback_tts.lua
+local number = session:getVariable("callback_number")
+local reason = session:getVariable("callback_reason") or ""
+
+-- Google TTS via shout
+local tts_url = "shout://translate.google.com/translate_tts?ie=UTF-8&tl=pt-BR&q=" 
+              .. "Callback%20para%20" .. number
+              
+session:execute("playback", tts_url)
+```
+
+---
+
+### 🔴 PROBLEMA 4: Mapeamento user_id ↔ extension
+
+**Proposta Original:**
+> `callbackIntendedFor = user_id (Jeni)`
+
+**PROBLEMA DE LÓGICA:**
+- OmniPlay conhece `user_id` (atendente)
+- FreeSWITCH conhece `extension` (ramal)
+- Um usuário pode ter múltiplos ramais (celular, desktop, etc.)
+- Um ramal pode ser compartilhado
+
+**PERGUNTA:** Como saber qual ramal ligar?
+
+**ALTERNATIVA - Usar Extension Diretamente:**
+```typescript
+// Ao invés de armazenar user_id, armazenar extension
+callbackExtension: "1004",           // Ramal principal
+callbackExtensionFallback: "1005",   // Ramal alternativo (opcional)
+
+// Se precisar de user_id, fazer JOIN com tabela de mapeamento
+// FusionPBX já tem: v_extensions (extension, user_uuid)
+```
+
+**OU - Tabela de Mapeamento OmniPlay:**
+```sql
+-- Nova tabela: user_extensions
+CREATE TABLE user_extensions (
+    user_id INT REFERENCES Users(id),
+    extension VARCHAR(10),
+    domain_name VARCHAR(100),
+    priority INT DEFAULT 1,  -- 1 = principal, 2 = fallback
+    PRIMARY KEY (user_id, extension)
+);
+```
+
+---
+
+### 🔴 PROBLEMA 5: Definição de "Disponível"
+
+**PERGUNTA CRÍTICA:** O que significa ramal disponível?
+
+| Fonte | Informação | Confiabilidade |
+|-------|------------|----------------|
+| FreeSWITCH sofia status | Ramal registrado | ✅ Alta |
+| FreeSWITCH show channels | Em chamada ativa | ✅ Alta |
+| FusionPBX device status | DND, forwarding | ✅ Média |
+| OmniPlay User.online | Agente logado | ✅ Alta |
+| OmniPlay User.status | available/away/busy | ✅ Alta |
+
+**PROBLEMA:**
+- Ramal pode estar registrado mas agente "Away" no OmniPlay
+- Agente pode estar "Online" mas telefone desligado
+- Precisamos CRUZAR informações
+
+**ALTERNATIVA - Verificação em Camadas:**
+```typescript
+async function isAgentAvailable(userId: number, extension: string): Promise<boolean> {
+    // 1. Verificar status OmniPlay
+    const user = await User.findByPk(userId);
+    if (!user?.online || user.status !== 'available') {
+        return false;
+    }
+    
+    // 2. Verificar FreeSWITCH via Voice AI API
+    const fsStatus = await voiceAiApi.get(`/extension/status/${extension}`);
+    if (!fsStatus.data.registered || fsStatus.data.in_call) {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+---
+
+### 🔴 PROBLEMA 6: WhatsApp Botões Interativos (Janela 24h)
+
+**Proposta Original:**
+> Enviar mensagem com botões: [Sim, podem ligar] [Depois] [Não precisa]
+
+**PROBLEMA:**
+- WABA só permite botões interativos **dentro da janela de 24h**
+- Se cliente ligou há mais de 24h, precisamos de **template aprovado**
+- Templates não suportam botões dinâmicos da mesma forma
+
+**ALTERNATIVA:**
+
+```typescript
+async function sendCallbackNotification(phoneNumber: string, options: any) {
+    // Verificar se há conversa ativa (janela 24h)
+    const ticket = await Ticket.findOne({
+        where: { 
+            contactNumber: phoneNumber, 
+            status: { [Op.in]: ['open', 'pending'] },
+            updatedAt: { [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+        }
+    });
+    
+    if (ticket) {
+        // DENTRO da janela: pode usar botões interativos
+        return await sendInteractiveButtons(phoneNumber, options);
+    } else {
+        // FORA da janela: usar template ou texto simples
+        return await sendTemplateMessage(phoneNumber, "callback_notification", {
+            agent_name: options.agentName,
+            reason: options.reason
+        });
+        // Template: "Olá! {{1}} está pronto para retornar sua ligação sobre {{2}}. 
+        //           Responda SIM para ligarmos agora, DEPOIS para adiar, ou NÃO se não precisar mais."
+    }
+}
+```
+
+---
+
+### 🔴 PROBLEMA 7: Race Condition no Click-to-Call
+
+**CENÁRIO:**
+1. Worker detecta ramal disponível (t=0)
+2. Notifica atendente (t=0.5s)
+3. Atendente vê alerta, pensa... (t=5s)
+4. Outro atendente liga para o ramal (t=6s) → OCUPADO
+5. Atendente clica "Ligar Agora" (t=10s)
+6. Sistema tenta originar → **FALHA** (ramal ocupado)
+
+**ALTERNATIVA - Double-Check + Retry:**
+```typescript
+async function initiateCallback(ticketId: number, userId: number) {
+    const ticket = await Ticket.findByPk(ticketId);
+    
+    // 1. Re-verificar disponibilidade NO MOMENTO DO CLIQUE
+    const isAvailable = await isAgentAvailable(userId, ticket.callbackExtension);
+    
+    if (!isAvailable) {
+        // Ramal ficou ocupado entre notificação e clique
+        return { 
+            success: false, 
+            error: "Ramal ocupado. Tente novamente em alguns segundos.",
+            suggestSnooze: true
+        };
+    }
+    
+    // 2. Tentar originar
+    const result = await originateCallback(ticket);
+    
+    if (!result.success && result.error === "BUSY") {
+        // Race condition: ficou ocupado entre verificação e originate
+        return { 
+            success: false, 
+            error: "Ramal ficou ocupado. Tentando novamente...",
+            retrying: true
+        };
+        // Auto-retry em 30 segundos
+    }
+    
+    return result;
+}
+```
+
+---
+
+### 🔴 PROBLEMA 8: Gravação de Chamada (Acesso ao Storage)
+
+**PROBLEMA:**
+- Gravações ficam no FusionPBX (`/var/lib/freeswitch/recordings/`)
+- OmniPlay precisa acessar para anexar ao ticket
+- Servidores diferentes, filesystems diferentes
+
+**ALTERNATIVA - Upload Imediato:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FLUXO DE GRAVAÇÃO CORRIGIDO                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Chamada encerra                                                         │
+│     ▼                                                                       │
+│  2. FreeSWITCH salva gravação localmente                                    │
+│     ▼                                                                       │
+│  3. Lua script ou hangup_hook envia evento para Voice AI:                   │
+│     {call_uuid: "xxx", recording_path: "/path/to/file.wav"}                 │
+│     ▼                                                                       │
+│  4. Voice AI:                                                               │
+│     a) Lê arquivo via SSH/SCP do FusionPBX                                  │
+│     b) OU acessa storage compartilhado (NFS/S3)                             │
+│     c) Converte para MP3 (ffmpeg)                                           │
+│     d) Upload para MinIO                                                    │
+│     e) Notifica OmniPlay: POST /api/voice/recording/ready                   │
+│     ▼                                                                       │
+│  5. OmniPlay recebe URL do MinIO e anexa ao ticket                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**REQUISITO:** Voice AI precisa acesso ao filesystem do FusionPBX (SSH ou NFS mount)
+
+---
+
+### 🔴 PROBLEMA 9: Multi-tenant Isolamento
+
+**PROBLEMA:**
+- FusionPBX usa `domain_uuid` para multi-tenant
+- OmniPlay usa `companyId`
+- Como garantir que um callback de Company A não apareça para Company B?
+
+**JÁ TEMOS:** `omniplay_company_id` em `v_voice_secretaries`
+
+**MAS FALTA:**
+- Propagar `companyId` em TODAS as operações de callback
+- Validar no frontend que callback pertence ao mesmo company
+- Filtrar no worker por company
+
+**ALTERNATIVA - Validação em Todas as Camadas:**
+```typescript
+// Worker
+const pendingCallbacks = await Ticket.findAll({
+    where: {
+        ticketType: "callback",
+        callbackStatus: "pending",
+        companyId: companyId  // SEMPRE filtrar por company!
+    }
+});
+
+// API
+router.post("/callback/initiate", authMiddleware, async (req, res) => {
+    const { ticketId } = req.body;
+    const { companyId } = req.user;  // Do token JWT
+    
+    const ticket = await Ticket.findOne({
+        where: { id: ticketId, companyId }  // Validar company!
+    });
+    
+    if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+    }
+    // ...
+});
+```
+
+---
+
+## ✅ RESUMO DAS ALTERNATIVAS VIÁVEIS
+
+| Problema | Solução Original | Alternativa Viável |
+|----------|------------------|-------------------|
+| ESL do OmniPlay | Worker ESL direto | Proxy via Voice AI HTTP |
+| Attended Transfer | FreeSWITCH nativo | Hold + Polling + Reconnect |
+| TTS Dinâmico | Google TTS no FreeSWITCH | Info já no alerta OmniPlay |
+| user_id ↔ extension | Mapeamento automático | Armazenar extension diretamente |
+| Disponibilidade | FreeSWITCH só | OmniPlay + FreeSWITCH combinados |
+| WhatsApp botões | Sempre interativo | Template fora da janela 24h |
+| Race condition | Sem tratamento | Double-check + auto-retry |
+| Gravação | Acesso direto | Upload para MinIO via Voice AI |
+| Multi-tenant | Assumido OK | Validação explícita em todas camadas |
+
+---
+
+## 📋 ESCOPO REVISADO (Mais Realista)
+
+### FASE 1: Transferência Básica (MVP Simplificado)
+- [ ] ~~Attended transfer com retorno~~ → **Blind transfer com fallback para ticket**
+- [x] Tabela de destinos de transferência
+- [x] Criação de ticket com áudio quando transfer falha
+- [ ] ~~Retorno ao agente IA~~ → **Informar que vai criar ticket e desligar**
+
+### FASE 2: Sistema de Callback (Ajustado)
+- [x] API no Voice AI para verificar disponibilidade
+- [x] Worker no OmniPlay que chama Voice AI HTTP
+- [x] Captura inteligente de número ("este mesmo")
+- [x] Armazenar **extension** ao invés de user_id
+
+### FASE 3: UI de Callback (Mantido)
+- [x] Widget de alertas
+- [x] Double-check antes de iniciar callback
+- [x] Tratamento de race condition com retry
+
+### FASE 4: Click-to-Call (Via Proxy)
+- [x] API no Voice AI para originar chamadas
+- [x] OmniPlay chama Voice AI, não ESL direto
+- [ ] ~~TTS dinâmico~~ → Info no alerta OmniPlay
+
+### FASE 5: WhatsApp (Ajustado)
+- [x] Verificar janela 24h antes de enviar
+- [x] Template para fora da janela
+- [x] Botões interativos apenas dentro da janela
+
+---
+
 ## Próximos Passos
 
-1. ✅ Aprovar este proposal
-2. 📝 Criar design.md com detalhes técnicos
+1. ✅ Aprovar este proposal REVISADO
+2. 📝 Criar design.md com arquitetura de proxy Voice AI
 3. 📋 Criar tasks.md com tarefas de implementação
-4. 🚀 Implementar FASE 1 + 2 (MVP)
-5. 🧪 Testes internos com ramais
-6. 🚀 Implementar FASE 3 + 4
-7. 📊 Coletar métricas por 1 semana
-8. 🚀 Implementar FASE 5 se métricas positivas
+4. 🚀 Implementar API de disponibilidade no Voice AI primeiro
+5. 🚀 Implementar FASE 1 + 2 (MVP simplificado)
+6. 🧪 Testes internos com ramais
+7. 🚀 Implementar FASE 3 + 4
+8. 📊 Coletar métricas por 1 semana
+9. 🚀 Implementar FASE 5 se métricas positivas
