@@ -647,26 +647,28 @@ class TransferManager:
             
             logger.info(f"B-leg answered, playing announcement: {b_leg_uuid}")
             
-            # 7. Tocar anúncio para o humano
-            # Usar arquivo de áudio genérico (TTS no FreeSWITCH é problemático)
-            # Tocar sequência de arquivos padrão do FreeSWITCH
-            logger.info(f"Playing announcement audio to B-leg: {b_leg_uuid}")
-            
-            # Tocar "One moment please" + beep para indicar que pode falar
-            # Esses arquivos existem em instalações padrão do FreeSWITCH
-            await self._esl.uuid_playback(
-                b_leg_uuid,
-                "/usr/share/freeswitch/sounds/en/us/callie/ivr/ivr-one_moment_please.wav"
+            # 7. Tocar anúncio para o humano via TTS (mod_flite)
+            # Baseado na documentação oficial do FreeSWITCH
+            announcement_with_instructions = (
+                f"{announcement}. "
+                "Press 2 to reject or wait to accept."
             )
             
-            # Pequena pausa para o humano processar
-            await asyncio.sleep(0.5)
-            
-            # Log do anúncio que seria falado (para debug)
             logger.info(
-                f"Announcement (not spoken due to TTS issues): {announcement}",
-                extra={"b_leg_uuid": b_leg_uuid}
+                f"Playing TTS announcement to B-leg: {b_leg_uuid}",
+                extra={"announcement": announcement_with_instructions[:100]}
             )
+            
+            tts_success = await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+            
+            if not tts_success:
+                # Fallback: tocar arquivo de áudio genérico
+                logger.warning("TTS failed, using fallback audio file")
+                await self._esl.uuid_playback(
+                    b_leg_uuid,
+                    "/usr/share/freeswitch/sounds/en/us/callie/ivr/ivr-one_moment_please.wav"
+                )
+                await asyncio.sleep(1.0)
             
             # 8. Aguardar resposta (modelo híbrido)
             response = await self._esl.wait_for_reject_or_timeout(

@@ -961,21 +961,26 @@ class AsyncESLClient:
         voice: str = "kal"
     ) -> bool:
         """
-        Tenta falar texto usando TTS do FreeSWITCH.
+        Fala texto usando mod_flite TTS do FreeSWITCH.
         
-        NOTA: TTS no FreeSWITCH é problemático. Esta função tenta vários
-        métodos mas pode falhar. O código que chama deve ter fallback.
+        Baseado na documentação oficial:
+        https://developer.signalwire.com/freeswitch/FreeSWITCH-Explained/Modules/mod_flite_3965160
+        
+        Passos:
+        1. Setar tts_engine=flite
+        2. Setar tts_voice=kal (ou slt, rms, awb)
+        3. Executar speak com o texto
         
         Args:
             uuid: UUID do canal
-            text: Texto a falar (ignorado se TTS não funcionar)
-            voice: Voz do flite (ignorado se não disponível)
+            text: Texto a falar
+            voice: Voz do flite (kal, slt, rms, awb)
         
         Returns:
-            True se algum método funcionou
+            True se sucesso
         """
         try:
-            # Escapar caracteres especiais
+            # Escapar caracteres especiais que podem quebrar o comando
             text_escaped = (
                 text
                 .replace("'", "")
@@ -983,26 +988,49 @@ class AsyncESLClient:
                 .replace("\n", " ")
                 .replace("|", " ")
                 .replace("\\", "")
+                .replace(":", " ")
             )
             
-            # Tentar uuid_displace com arquivo de beep (teste de conectividade)
-            # Se isso funcionar, o canal está ativo e podemos tentar outros métodos
+            # 1. Setar tts_engine
+            result = await self.execute_api(f"uuid_setvar {uuid} tts_engine flite")
+            if "+OK" not in result:
+                logger.warning(f"Failed to set tts_engine: {result}")
             
-            # Método 1: Tentar executar speak como app via uuid_transfer
-            # Este método usa o dialplan para executar o TTS
-            result = await self.execute_api(
-                f"uuid_setvar {uuid} tts_voice flite|{voice}"
-            )
+            # 2. Setar tts_voice
+            result = await self.execute_api(f"uuid_setvar {uuid} tts_voice {voice}")
+            if "+OK" not in result:
+                logger.warning(f"Failed to set tts_voice: {result}")
             
+            # 3. Executar speak via uuid_broadcast
+            # Formato documentado: speak::<texto> ou speak::flite|voice|texto
             result = await self.execute_api(
-                f"uuid_broadcast {uuid} 'speak:flite|{voice}|{text_escaped}' aleg"
+                f"uuid_broadcast {uuid} 'speak::{text_escaped}' aleg"
             )
             
             if "+OK" in result:
-                logger.info(f"uuid_say success: {uuid}")
+                logger.info(f"uuid_say (speak) success: {uuid}")
+                # Aguardar um tempo estimado para o TTS terminar
+                # (~150 palavras/min = ~0.4s por palavra)
+                word_count = len(text_escaped.split())
+                wait_time = min(max(word_count * 0.4, 1.0), 10.0)
+                await asyncio.sleep(wait_time)
                 return True
             
-            logger.warning(f"uuid_say TTS failed: {result}")
+            logger.warning(f"uuid_say speak failed: {result}")
+            
+            # Fallback: tentar com formato alternativo flite|voice|text
+            result = await self.execute_api(
+                f"uuid_broadcast {uuid} 'speak::flite|{voice}|{text_escaped}' aleg"
+            )
+            
+            if "+OK" in result:
+                logger.info(f"uuid_say (speak flite|voice|text) success: {uuid}")
+                word_count = len(text_escaped.split())
+                wait_time = min(max(word_count * 0.4, 1.0), 10.0)
+                await asyncio.sleep(wait_time)
+                return True
+            
+            logger.warning(f"uuid_say all methods failed: {result}")
             return False
             
         except Exception as e:
