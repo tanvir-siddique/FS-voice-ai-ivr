@@ -93,6 +93,7 @@
 			'system_prompt' => str_replace("\r\n", "\n", trim($_POST['system_prompt'] ?? '')),
 			'greeting_message' => str_replace("\r\n", "\n", trim($_POST['greeting_message'] ?? '')),
 			'farewell_message' => str_replace("\r\n", "\n", trim($_POST['farewell_message'] ?? '')),
+			'farewell_keywords' => str_replace("\r\n", "\n", trim($_POST['farewell_keywords'] ?? '')),
 			'processing_mode' => $_POST['processing_mode'] ?? 'turn_based',
 			'realtime_provider_uuid' => !empty($_POST['realtime_provider_uuid']) ? $_POST['realtime_provider_uuid'] : null,
 			'extension' => $_POST['extension'] ?? '',
@@ -149,6 +150,7 @@
 			$array['voice_secretaries'][0]['personality_prompt'] = $form_data['system_prompt'] ?: null;
 			$array['voice_secretaries'][0]['greeting_message'] = $form_data['greeting_message'] ?: null;
 			$array['voice_secretaries'][0]['farewell_message'] = $form_data['farewell_message'] ?: null;
+			$array['voice_secretaries'][0]['farewell_keywords'] = $form_data['farewell_keywords'] ?: null;
 			$array['voice_secretaries'][0]['stt_provider_uuid'] = $form_data['stt_provider_uuid'] ?: null;
 			$array['voice_secretaries'][0]['tts_provider_uuid'] = $form_data['tts_provider_uuid'] ?: null;
 			$array['voice_secretaries'][0]['llm_provider_uuid'] = $form_data['llm_provider_uuid'] ?: null;
@@ -389,6 +391,18 @@
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-farewell'] ?? 'Farewell')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<textarea class='formfld' name='farewell_message' rows='3' style='width: 100%;'>".escape(trim($farewell_msg))."</textarea>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Farewell Keywords - palavras que encerram a chamada automaticamente
+	$farewell_keywords = $data['farewell_keywords'] ?? "tchau\nadeus\naté logo\naté mais\nfalou\nvaleu\nobrigado, tchau\nera só isso\npode desligar\nbye\ngoodbye";
+	$farewell_keywords = str_replace("\r\n", "\n", str_replace("\r", "", $farewell_keywords));
+	
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-farewell_keywords'] ?? 'Farewell Keywords')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<textarea class='formfld' name='farewell_keywords' rows='6' style='width: 100%;' placeholder='tchau&#10;falou&#10;valeu&#10;até mais'>".escape(trim($farewell_keywords))."</textarea>\n";
+	echo "		<br /><span class='text-muted'>".($text['description-farewell_keywords'] ?? 'Palavras que encerram a chamada automaticamente (uma por linha). Inclua gírias regionais.')."</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 

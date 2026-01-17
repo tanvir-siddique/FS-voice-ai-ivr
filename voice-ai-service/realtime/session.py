@@ -163,6 +163,7 @@ class RealtimeSessionConfig:
     system_prompt: str = ""
     greeting: Optional[str] = None
     farewell: Optional[str] = None
+    farewell_keywords: Optional[List[str]] = None  # Palavras que encerram a chamada (ex: tchau, falou, valeu)
     voice: str = "alloy"
     vad_threshold: float = 0.5
     silence_duration_ms: int = 500
@@ -900,8 +901,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             return True
         return False
     
-    # Keywords de despedida para detecção automática
-    FAREWELL_KEYWORDS = [
+    # Keywords de despedida PADRÃO (usadas se não houver configuração no banco)
+    DEFAULT_FAREWELL_KEYWORDS = [
         # Português
         "tchau", "adeus", "até logo", "até mais", "até breve",
         "até a próxima", "falou", "valeu", "obrigado, tchau",
@@ -912,9 +913,23 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         "bye", "goodbye", "see you", "take care", "thanks bye",
     ]
     
+    @property
+    def farewell_keywords(self) -> List[str]:
+        """
+        Retorna as keywords de despedida configuradas ou as padrão.
+        
+        As keywords podem ser configuradas no frontend por secretária,
+        permitindo gírias regionais (falou, valeu, flw, vlw, etc).
+        """
+        if self.config.farewell_keywords:
+            return self.config.farewell_keywords
+        return self.DEFAULT_FAREWELL_KEYWORDS
+    
     def _check_farewell_keyword(self, text: str, source: str) -> bool:
         """
         Verifica se o texto contém keyword de despedida.
+        
+        As keywords são configuráveis no frontend por secretária.
         
         Args:
             text: Texto para verificar
@@ -928,8 +943,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         text_lower = text.lower()
         
-        # Verificar keywords de despedida
-        for keyword in self.FAREWELL_KEYWORDS:
+        # Verificar keywords de despedida (configuráveis ou padrão)
+        for keyword in self.farewell_keywords:
             if keyword in text_lower:
                 logger.debug(f"Farewell keyword detected: '{keyword}' in {source} text", extra={
                     "call_uuid": self.call_uuid,

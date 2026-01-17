@@ -40,6 +40,11 @@ $text['label-greeting_message']['pt-br'] = "Mensagem de Saudação";
 $text['label-farewell_message']['en-us'] = "Farewell Message";
 $text['label-farewell_message']['pt-br'] = "Mensagem de Despedida";
 
+$text['label-farewell_keywords']['en-us'] = "Farewell Keywords";
+$text['label-farewell_keywords']['pt-br'] = "Palavras de Despedida";
+$text['description-farewell_keywords']['en-us'] = "Words that trigger automatic call end (one per line). Regional slang like 'falou', 'valeu', etc.";
+$text['description-farewell_keywords']['pt-br'] = "Palavras que encerram a chamada automaticamente (uma por linha). Inclua gírias regionais como 'falou', 'valeu', etc.";
+
 $text['label-transfer_extension']['en-us'] = "Transfer Extension";
 $text['label-transfer_extension']['pt-br'] = "Ramal de Transferência";
 

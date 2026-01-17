@@ -298,6 +298,7 @@ class RealtimeServer:
                     s.personality_prompt as system_prompt,
                     s.greeting_message as greeting,
                     s.farewell_message as farewell,
+                    s.farewell_keywords as farewell_keywords,
                     p.provider_name,
                     p.config as provider_config,
                     s.extension,
@@ -563,6 +564,16 @@ class RealtimeServer:
         handoff_keywords_str = row.get("handoff_keywords") or "atendente,humano,pessoa,operador"
         handoff_keywords = [k.strip() for k in handoff_keywords_str.split(",") if k.strip()]
         
+        # Parse farewell keywords from newline-separated string (configurável no frontend)
+        # Cada região pode ter gírias diferentes (falou, valeu, flw, vlw, etc)
+        farewell_keywords_str = row.get("farewell_keywords") or ""
+        if farewell_keywords_str:
+            # Keywords separadas por newline no frontend
+            farewell_keywords = [k.strip().lower() for k in farewell_keywords_str.split("\n") if k.strip()]
+        else:
+            # Fallback para keywords padrão
+            farewell_keywords = None  # Usará as keywords padrão no RealtimeSession
+        
         # Validar configurações de transferência para detectar conflitos
         # Ref: voice-ai-ivr/docs/TRANSFER_SETTINGS_VS_RULES.md
         transfer_extension = row.get("transfer_extension") or "200"
@@ -617,6 +628,7 @@ class RealtimeServer:
             system_prompt=final_system_prompt,
             greeting=row["greeting"],
             farewell=row["farewell"],
+            farewell_keywords=farewell_keywords,
             vad_threshold=vad_threshold,
             silence_duration_ms=silence_duration_ms,
             prefix_padding_ms=prefix_padding_ms,
