@@ -92,7 +92,16 @@ class AnnouncementTTS:
         Returns:
             Caminho do arquivo WAV ou None se falhar
         """
+        start_time = time.time()
         voice = voice_id or self.voice_id
+        
+        # Validar voice_id (ElevenLabs usa IDs de ~20 caracteres)
+        if not voice:
+            logger.warning("No voice_id provided, using default")
+            voice = self.voice_id
+        elif len(voice) < 10:
+            logger.warning(f"voice_id '{voice}' seems invalid, using default")
+            voice = self.voice_id
         
         if not self.api_key:
             logger.error("ElevenLabs API key not configured")
@@ -103,7 +112,16 @@ class AnnouncementTTS:
         cache_path = self._get_cache_path(cache_key)
         
         if self._is_cache_valid(cache_path):
-            logger.info(f"Announcement cache hit: {cache_key}")
+            duration = time.time() - start_time
+            logger.info(
+                f"Announcement cache hit: {cache_key}",
+                extra={
+                    "tts_provider": "elevenlabs",
+                    "text_length": len(text),
+                    "cache_hit": True,
+                    "duration_seconds": duration
+                }
+            )
             return str(cache_path)
         
         logger.info(f"Generating announcement via ElevenLabs: {text[:50]}...")
@@ -124,7 +142,17 @@ class AnnouncementTTS:
                 pass
             
             if wav_path:
-                logger.info(f"Announcement generated: {wav_path}")
+                duration = time.time() - start_time
+                logger.info(
+                    f"Announcement generated: {wav_path}",
+                    extra={
+                        "tts_provider": "elevenlabs",
+                        "text_length": len(text),
+                        "cache_hit": False,
+                        "duration_seconds": duration,
+                        "voice_id": voice
+                    }
+                )
                 return wav_path
             
             return None
@@ -249,6 +277,29 @@ class AnnouncementTTS:
             logger.warning(f"Cache cleanup error: {e}")
         
         return removed
+    
+    async def is_available(self) -> bool:
+        """
+        Verifica se ElevenLabs está disponível.
+        
+        Útil para health checks e fallback decisions.
+        
+        Returns:
+            True se a API está acessível e autenticada
+        """
+        if not self.api_key:
+            return False
+        
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(
+                    f"{self.base_url}/user",
+                    headers={"xi-api-key": self.api_key},
+                )
+                return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"ElevenLabs health check failed: {e}")
+            return False
 
 
 # Singleton para reuso
