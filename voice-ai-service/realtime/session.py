@@ -236,8 +236,8 @@ class RealtimeSession:
         self._ended = False
         self._user_speaking = False
         self._assistant_speaking = False
-        self._audio_bytes_sent = 0  # Track audio sent to FreeSWITCH for delay calculation
-        self._last_audio_sent_time = 0.0  # Track when last audio was sent
+        self._pending_audio_bytes = 0  # Audio bytes da resposta atual (reset a cada nova resposta)
+        self._response_audio_start_time = 0.0  # Quando a resposta atual começou
         
         self._transcript: List[TranscriptEntry] = []
         self._current_assistant_text = ""
@@ -630,8 +630,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         # Durante warmup, resample_output retorna b""
         if audio_bytes and self._on_audio_output:
-            self._audio_bytes_sent += len(audio_bytes)
-            self._last_audio_sent_time = time.time()
+            self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
     
     async def _handle_audio_output_direct(self, audio_bytes: bytes) -> None:
@@ -640,8 +639,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         Usado para flush do buffer restante.
         """
         if audio_bytes and self._on_audio_output:
-            self._audio_bytes_sent += len(audio_bytes)
-            self._last_audio_sent_time = time.time()
+            self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
     
     async def interrupt(self) -> None:
@@ -676,9 +674,11 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         self._last_activity = time.time()
         
         if event.type == ProviderEventType.RESPONSE_STARTED:
-            # Reset buffer para nova resposta (warmup 200ms)
+            # Reset buffer e contador para nova resposta
             if self._resampler:
                 self._resampler.reset_output_buffer()
+            self._pending_audio_bytes = 0
+            self._response_audio_start_time = time.time()
             logger.debug("Response started, buffer reset for warmup")
         
         elif event.type == ProviderEventType.AUDIO_DELTA:
@@ -1026,13 +1026,14 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         no FreeSWITCH baseado nos bytes enviados e no sample rate.
         
         Args:
-            delay: Delay mínimo em segundos
+            delay: Delay mínimo em segundos (usado como fallback)
             reason: Motivo do encerramento
         """
-        # Capturar o momento do farewell para cálculos
+        # Capturar o momento do farewell
         farewell_time = time.time()
         
-        # Esperar o assistente terminar de gerar áudio (máximo 10s)
+        # 1. Esperar o assistente terminar de GERAR áudio (máximo 10s)
+        # _assistant_speaking = False quando recebe TRANSCRIPT_DONE
         max_wait = 10
         waited = 0
         while self._assistant_speaking and waited < max_wait:
@@ -1044,26 +1045,31 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 "call_uuid": self.call_uuid,
             })
         
-        # Calcular tempo de playback baseado nos bytes de áudio enviados
-        # PCM 16-bit mono 16kHz = 32 bytes/ms = 32000 bytes/s
+        # 2. Calcular quanto tempo o áudio da resposta atual leva para tocar
+        # PCM 16-bit mono 16kHz = 32000 bytes/s
         bytes_per_second = self.config.freeswitch_sample_rate * 2  # 16-bit = 2 bytes per sample
-        audio_duration_seconds = self._audio_bytes_sent / bytes_per_second if bytes_per_second > 0 else 0
+        audio_duration = self._pending_audio_bytes / bytes_per_second if bytes_per_second > 0 else 0
         
-        # Calcular quanto tempo já passou desde o farewell
-        elapsed = time.time() - farewell_time
+        # 3. Calcular quanto tempo já passou desde que o áudio começou a ser enviado
+        if self._response_audio_start_time > 0:
+            audio_elapsed = time.time() - self._response_audio_start_time
+        else:
+            audio_elapsed = time.time() - farewell_time
         
-        # Tempo restante de playback = duração total - tempo que já passou
-        # Adiciona buffer de 1.5s para segurança
-        remaining_playback = max(0, audio_duration_seconds - elapsed) + 1.5
+        # 4. Tempo restante = duração do áudio - tempo já decorrido + buffer
+        remaining = max(0, audio_duration - audio_elapsed) + 1.5
         
-        logger.info(f"Calculating playback time: {audio_duration_seconds:.1f}s total audio, "
-                   f"{elapsed:.1f}s elapsed, waiting {remaining_playback:.1f}s more", extra={
+        # 5. Garantir um mínimo baseado no delay original
+        final_wait = max(remaining, delay / 2)
+        
+        logger.info(f"Playback calculation: {audio_duration:.1f}s audio, "
+                   f"{audio_elapsed:.1f}s elapsed, waiting {final_wait:.1f}s", extra={
             "call_uuid": self.call_uuid,
-            "audio_bytes_sent": self._audio_bytes_sent,
+            "pending_audio_bytes": self._pending_audio_bytes,
         })
         
-        # Aguardar o tempo restante (máximo 15s para evitar ficar preso)
-        await asyncio.sleep(min(remaining_playback, 15.0))
+        # 6. Aguardar (máximo 15s para evitar ficar preso)
+        await asyncio.sleep(min(final_wait, 15.0))
         
         await self.stop(reason)
     
