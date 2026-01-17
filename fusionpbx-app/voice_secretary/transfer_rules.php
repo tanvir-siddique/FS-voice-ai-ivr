@@ -82,6 +82,10 @@
 	$document['title'] = $text['title-transfer_rules'] ?? 'Transfer Rules';
 	require_once "resources/header.php";
 
+//include tab navigation
+	$current_page = 'transfer_rules';
+	require_once "resources/nav_tabs.php";
+
 //show the content
 	echo "<form id='form_list' method='post'>\n";
 	echo "<input type='hidden' name='action' id='action' value=''>\n";
