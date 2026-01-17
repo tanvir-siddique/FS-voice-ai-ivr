@@ -295,45 +295,65 @@ class AsyncESLClient:
             Header2: Value2\n
             \n
             [Body se Content-Length presente]
+        
+        IMPORTANTE: Ignora eventos (Content-Type: text/event-plain) que podem
+        ter ficado no buffer e continua lendo até receber uma resposta de comando
+        (Content-Type: api/response ou command/reply).
         """
         if not self._reader:
             raise ESLConnectionError("Not connected")
         
-        try:
-            lines = []
-            content_length = 0
-            
-            # Ler headers
-            while True:
-                line = await asyncio.wait_for(
-                    self._reader.readline(),
-                    timeout=timeout
-                )
-                line_str = line.decode().rstrip("\r\n")
+        max_retries = 10  # Evitar loop infinito
+        
+        for attempt in range(max_retries):
+            try:
+                lines = []
+                content_length = 0
+                content_type = ""
                 
-                if not line_str:
-                    # Linha vazia = fim dos headers
-                    break
+                # Ler headers
+                while True:
+                    line = await asyncio.wait_for(
+                        self._reader.readline(),
+                        timeout=timeout
+                    )
+                    line_str = line.decode().rstrip("\r\n")
+                    
+                    if not line_str:
+                        # Linha vazia = fim dos headers
+                        break
+                    
+                    lines.append(line_str)
+                    
+                    # Verificar Content-Length
+                    if line_str.startswith("Content-Length:"):
+                        content_length = int(line_str.split(":")[1].strip())
+                    
+                    # Verificar Content-Type
+                    if line_str.startswith("Content-Type:"):
+                        content_type = line_str.split(":", 1)[1].strip()
                 
-                lines.append(line_str)
+                # Ler body se houver
+                body = ""
+                if content_length > 0:
+                    body_bytes = await asyncio.wait_for(
+                        self._reader.read(content_length),
+                        timeout=timeout
+                    )
+                    body = body_bytes.decode()
                 
-                # Verificar Content-Length
-                if line_str.startswith("Content-Length:"):
-                    content_length = int(line_str.split(":")[1].strip())
-            
-            # Ler body se houver
-            body = ""
-            if content_length > 0:
-                body_bytes = await asyncio.wait_for(
-                    self._reader.read(content_length),
-                    timeout=timeout
-                )
-                body = body_bytes.decode()
-            
-            return "\n".join(lines) + ("\n\n" + body if body else "")
-            
-        except asyncio.TimeoutError:
-            raise ESLError(f"Read timeout ({timeout}s)")
+                # Verificar se é evento (text/event-plain) - descartar e continuar
+                if content_type == "text/event-plain":
+                    logger.debug(f"Discarding buffered event during command read: {body[:100]}...")
+                    continue  # Ler próximo pacote
+                
+                # É uma resposta de comando
+                return "\n".join(lines) + ("\n\n" + body if body else "")
+                
+            except asyncio.TimeoutError:
+                raise ESLError(f"Read timeout ({timeout}s)")
+        
+        raise ESLError("Max retries reached reading command response")
     
     async def _event_reader_loop(self) -> None:
         """Loop de leitura de eventos em background."""
