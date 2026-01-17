@@ -89,7 +89,11 @@
 			'handoff_enabled' => isset($_POST['handoff_enabled']) ? 'true' : 'false',
 			'handoff_keywords' => trim($_POST['handoff_keywords'] ?? 'atendente,humano,pessoa,operador'),
 			'fallback_ticket_enabled' => isset($_POST['fallback_ticket_enabled']) ? 'true' : 'false',
+			'fallback_action' => $_POST['fallback_action'] ?? 'ticket',
 			'handoff_queue_id' => !empty($_POST['handoff_queue_id']) ? intval($_POST['handoff_queue_id']) : null,
+			'fallback_user_id' => !empty($_POST['fallback_user_id']) ? intval($_POST['fallback_user_id']) : null,
+			'fallback_priority' => $_POST['fallback_priority'] ?? 'medium',
+			'fallback_notify_enabled' => isset($_POST['fallback_notify_enabled']) ? 'true' : 'false',
 			// OmniPlay Integration
 			'omniplay_company_id' => !empty($_POST['omniplay_company_id']) ? intval($_POST['omniplay_company_id']) : null,
 			// Audio Configuration
@@ -139,7 +143,11 @@
 			$array['voice_secretaries'][0]['handoff_enabled'] = $form_data['handoff_enabled'];
 			$array['voice_secretaries'][0]['handoff_keywords'] = $form_data['handoff_keywords'] ?: null;
 			$array['voice_secretaries'][0]['fallback_ticket_enabled'] = $form_data['fallback_ticket_enabled'];
+			$array['voice_secretaries'][0]['fallback_action'] = $form_data['fallback_action'] ?: 'ticket';
 			$array['voice_secretaries'][0]['handoff_queue_id'] = $form_data['handoff_queue_id'] ?: null;
+			$array['voice_secretaries'][0]['fallback_user_id'] = $form_data['fallback_user_id'] ?: null;
+			$array['voice_secretaries'][0]['fallback_priority'] = $form_data['fallback_priority'] ?: 'medium';
+			$array['voice_secretaries'][0]['fallback_notify_enabled'] = $form_data['fallback_notify_enabled'];
 			$array['voice_secretaries'][0]['omniplay_company_id'] = $form_data['omniplay_company_id'] ?: null;
 			// Audio Configuration
 			$array['voice_secretaries'][0]['audio_warmup_chunks'] = $form_data['audio_warmup_chunks'] ?: 15;
@@ -562,25 +570,102 @@
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	// Fallback Ticket
-	echo "<tr class='handoff-option'>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_ticket'] ?? 'Fallback to Ticket')."</td>\n";
-	echo "	<td class='vtable' align='left'>\n";
-	$fallback_enabled = (!isset($data['fallback_ticket_enabled']) || $data['fallback_ticket_enabled'] == 'true' || $data['fallback_ticket_enabled'] === true);
-	echo "		<input type='checkbox' name='fallback_ticket_enabled' id='fallback_ticket_enabled' ".($fallback_enabled ? 'checked' : '').">\n";
-	echo "		<label for='fallback_ticket_enabled'>".($text['label-enabled'] ?? 'Enabled')."</label>\n";
-	echo "		<br />".($text['description-fallback_ticket'] ?? 'Create a pending ticket when no agents are online or transfer fails')."\n";
+	// =============================
+	// Fallback Configuration Section
+	// =============================
+	echo "<tr>\n";
+	echo "	<td colspan='2' style='padding: 12px 10px; background: #fff3cd; border-bottom: 1px solid #ffc107;'>\n";
+	echo "		<b>".($text['header-fallback'] ?? '🔄 Fallback Configuration')."</b>\n";
+	echo "		<span style='font-size: 0.85em; color: #856404; margin-left: 10px;'>"
+		. "O que fazer quando a transferência falha ou ninguém atende"
+		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	// Handoff Queue (for ticket assignment)
+	// Fallback Enabled
 	echo "<tr class='handoff-option'>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-handoff_queue'] ?? 'Ticket Queue')."</td>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_enabled'] ?? 'Enable Fallback')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='number' name='handoff_queue_id' min='1' max='999' value='".escape($data['handoff_queue_id'] ?? '')."' placeholder='Ex: 1' style='width: 80px;'>\n";
+	$fallback_enabled = (!isset($data['fallback_ticket_enabled']) || $data['fallback_ticket_enabled'] == 'true' || $data['fallback_ticket_enabled'] === true);
+	echo "		<input type='checkbox' name='fallback_ticket_enabled' id='fallback_ticket_enabled' ".($fallback_enabled ? 'checked' : '')." onchange='toggleFallbackOptions()'>\n";
+	echo "		<label for='fallback_ticket_enabled'>".($text['label-enabled'] ?? 'Enabled')."</label>\n";
 	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
-		. "ID numérico da fila no OmniPlay onde serão criados os tickets de callback/fallback. "
-		. "Encontre o ID em OmniPlay → Filas."
+		. "Quando ativado, executa uma ação de fallback se a transferência falhar ou ninguém atender."
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback Action
+	echo "<tr class='handoff-option fallback-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_action'] ?? 'Fallback Action')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$fallback_action = $data['fallback_action'] ?? 'ticket';
+	echo "		<select class='formfld' name='fallback_action' style='width: 250px;'>\n";
+	echo "			<option value='ticket' ".($fallback_action === 'ticket' ? 'selected' : '').">📋 Criar Ticket Pendente</option>\n";
+	echo "			<option value='callback' ".($fallback_action === 'callback' ? 'selected' : '').">📞 Agendar Callback</option>\n";
+	echo "			<option value='voicemail' ".($fallback_action === 'voicemail' ? 'selected' : '').">📧 Enviar para Voicemail</option>\n";
+	echo "			<option value='none' ".($fallback_action === 'none' ? 'selected' : '').">❌ Nenhuma Ação (Desligar)</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
+		. "<b>Ticket:</b> Cria ticket no OmniPlay com transcrição da conversa<br/>"
+		. "<b>Callback:</b> Agenda retorno de ligação para o cliente<br/>"
+		. "<b>Voicemail:</b> Permite cliente deixar mensagem de voz"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback Queue (for ticket/callback assignment)
+	echo "<tr class='handoff-option fallback-option'>\n";
+	echo "	<td class='vncellreq' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_queue'] ?? 'Destination Queue')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='handoff_queue_id' min='1' max='999' value='".escape($data['handoff_queue_id'] ?? '')."' placeholder='Ex: 1' style='width: 80px;' required>\n";
+	echo "		<span style='margin-left: 10px; color: #666;'>ID da fila no OmniPlay</span>\n";
+	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
+		. "<b>⚠️ OBRIGATÓRIO:</b> Defina qual fila do OmniPlay receberá os tickets/callbacks criados.<br/>"
+		. "Para encontrar o ID: <b>OmniPlay → Filas → [Nome da Fila] → ver ID na URL</b> (ex: /queues/3 = ID 3)"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback User (optional - for direct assignment)
+	echo "<tr class='handoff-option fallback-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_user'] ?? 'Assigned User')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='fallback_user_id' min='1' max='99999' value='".escape($data['fallback_user_id'] ?? '')."' placeholder='(Opcional)' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 10px; color: #666;'>ID do usuário no OmniPlay</span>\n";
+	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
+		. "<b>Opcional:</b> Atribuir diretamente a um usuário específico em vez de deixar na fila.<br/>"
+		. "Deixe em branco para que qualquer atendente da fila possa pegar o ticket."
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback Priority
+	echo "<tr class='handoff-option fallback-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_priority'] ?? 'Ticket Priority')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$fallback_priority = $data['fallback_priority'] ?? 'medium';
+	echo "		<select class='formfld' name='fallback_priority' style='width: 150px;'>\n";
+	echo "			<option value='low' ".($fallback_priority === 'low' ? 'selected' : '').">🟢 Baixa</option>\n";
+	echo "			<option value='medium' ".($fallback_priority === 'medium' ? 'selected' : '').">🟡 Média</option>\n";
+	echo "			<option value='high' ".($fallback_priority === 'high' ? 'selected' : '').">🟠 Alta</option>\n";
+	echo "			<option value='urgent' ".($fallback_priority === 'urgent' ? 'selected' : '').">🔴 Urgente</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
+		. "Prioridade do ticket criado no OmniPlay."
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Fallback Notification
+	echo "<tr class='handoff-option fallback-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-fallback_notify'] ?? 'Notify Client')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$fallback_notify = (!isset($data['fallback_notify_enabled']) || $data['fallback_notify_enabled'] == 'true' || $data['fallback_notify_enabled'] === true);
+	echo "		<input type='checkbox' name='fallback_notify_enabled' id='fallback_notify_enabled' ".($fallback_notify ? 'checked' : '').">\n";
+	echo "		<label for='fallback_notify_enabled'>Enviar notificação ao cliente</label>\n";
+	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
+		. "Envia WhatsApp ou SMS informando que o ticket foi criado e prazo de retorno."
 		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
@@ -704,12 +789,25 @@ function toggleHandoffOptions() {
 	rows.forEach(function(row) {
 		row.style.display = enabled ? '' : 'none';
 	});
+	// Also update fallback options visibility
+	if (enabled) {
+		toggleFallbackOptions();
+	}
+}
+
+function toggleFallbackOptions() {
+	var enabled = document.getElementById('fallback_ticket_enabled')?.checked;
+	var rows = document.querySelectorAll('.fallback-option');
+	rows.forEach(function(row) {
+		row.style.display = enabled ? '' : 'none';
+	});
 }
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
 	toggleRealtimeProvider();
 	toggleHandoffOptions();
+	toggleFallbackOptions();
 });
 
 async function loadTtsVoices(silent) {
