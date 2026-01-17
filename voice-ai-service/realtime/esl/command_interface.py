@@ -234,12 +234,14 @@ class ESLOutboundAdapter(ESLCommandInterface):
         return relay.uuid_broadcast(path, leg)
     
     async def uuid_exists(self, uuid: str) -> bool:
-        relay = self._get_relay()
-        if not relay:
-            return False
-        # Usar api uuid_exists
-        result = relay.execute_api(f"uuid_exists {uuid}")
-        return result and "true" in result.lower()
+        """
+        Verifica se UUID existe.
+        
+        NOTA: ESL Outbound não suporta api(), então sempre retorna False.
+        Fallback para ESL Inbound será usado pelo HybridAdapter.
+        """
+        # ESL Outbound não pode executar api(), retorna False para fallback
+        return False
 
 
 class ESLInboundAdapter(ESLCommandInterface):
