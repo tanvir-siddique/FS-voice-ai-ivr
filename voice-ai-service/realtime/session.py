@@ -595,59 +595,46 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self._transfer_in_progress:
             return
 
-        # Barge-in local (mais natural): se o caller começou a falar enquanto o
-        # assistente está falando, interromper imediatamente e limpar buffer.
+        # Barge-in local: se o caller começou a falar enquanto o assistente está
+        # falando, interromper e limpar buffer.
         #
-        # Isso reduz a dependência do timing do provider (ex: ElevenLabs "interruption"),
-        # que pode chegar tarde, fazendo o caller ouvir o agente por mais tempo.
-        # Considerar "assistente falando" se ainda estamos recebendo áudio recentemente,
-        # mesmo que o flag tenha sido zerado por eventos de transcript.
-        # Janela curta: serve só para cobrir casos onde transcript chega antes do áudio terminar.
-        assistant_audio_recent = (time.time() - self._last_audio_delta_ts) < 0.6
-        if self.config.barge_in_enabled and (self._assistant_speaking or assistant_audio_recent) and audio_bytes:
+        # CONSERVADOR: Só dispara com fala CLARA e SUSTENTADA (~300ms).
+        # Valores altos evitam falsos positivos de eco/ruído.
+        #
+        # Para ajustar sensibilidade, use variáveis de ambiente:
+        # - REALTIME_LOCAL_BARGE_RMS (default 1200): threshold mínimo de volume
+        # - REALTIME_LOCAL_BARGE_CONSECUTIVE (default 15): frames consecutivos (~300ms)
+        # - REALTIME_LOCAL_BARGE_COOLDOWN (default 1.0): cooldown entre interrupções
+        if self.config.barge_in_enabled and self._assistant_speaking and audio_bytes:
             try:
                 rms = audioop.rms(audio_bytes, 2)  # PCM16 => width=2
-                rms_threshold = int(os.getenv("REALTIME_LOCAL_BARGE_RMS", "450"))
-                cooldown_s = float(os.getenv("REALTIME_LOCAL_BARGE_COOLDOWN", "0.5"))
-                # Evita falsos positivos por ruído: exige N frames consecutivos acima do limiar
-                required_hits = int(os.getenv("REALTIME_LOCAL_BARGE_CONSECUTIVE", "8"))
-                # Noise floor adaptativo (eco/ruído do ambiente): threshold dinâmico = max(fixo, floor * mult)
-                noise_mult = float(os.getenv("REALTIME_LOCAL_BARGE_NOISE_MULTIPLIER", "3.0"))
+                rms_threshold = int(os.getenv("REALTIME_LOCAL_BARGE_RMS", "1200"))
+                cooldown_s = float(os.getenv("REALTIME_LOCAL_BARGE_COOLDOWN", "1.0"))
+                required_hits = int(os.getenv("REALTIME_LOCAL_BARGE_CONSECUTIVE", "15"))
                 now = time.time()
                 
-                # Atualizar floor somente quando estamos "ouvindo" durante fala do assistente,
-                # pois é quando eco/ruído tende a aparecer e causar falsos positivos.
-                if self._assistant_speaking:
-                    if self._barge_noise_floor <= 0:
-                        self._barge_noise_floor = float(rms)
-                    else:
-                        # EMA suave
-                        self._barge_noise_floor = (0.90 * self._barge_noise_floor) + (0.10 * float(rms))
-                
-                dynamic_threshold = max(rms_threshold, int(self._barge_noise_floor * noise_mult))
-
-                if rms >= dynamic_threshold:
+                if rms >= rms_threshold:
                     self._local_barge_hits += 1
                 else:
-                    self._local_barge_hits = 0
+                    # Resetar apenas se cair muito abaixo do threshold (histerese)
+                    if rms < rms_threshold * 0.5:
+                        self._local_barge_hits = 0
+                
                 if (
                     self._local_barge_hits >= required_hits and
                     (now - self._last_barge_in_ts) >= cooldown_s
                 ):
                     self._local_barge_hits = 0
                     self._last_barge_in_ts = now
+                    logger.info(f"Local barge-in triggered: rms={rms}", extra={"call_uuid": self.call_uuid})
                     await self.interrupt()
                     if self._on_barge_in:
                         try:
                             await self._on_barge_in(self.call_uuid)
                             self._metrics.record_barge_in(self.call_uuid)
                         except Exception:
-                            logger.debug(
-                                "Failed to clear playback on local barge-in",
-                                extra={"call_uuid": self.call_uuid}
-                            )
+                            pass
             except Exception:
-                # Nunca deixar barge-in quebrar o fluxo de áudio
                 pass
         
         # IMPORTANTE: Bloquear áudio do usuário após farewell detectado
