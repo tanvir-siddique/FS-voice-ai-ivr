@@ -250,6 +250,7 @@ class RealtimeSession:
         self._user_speaking = False
         self._assistant_speaking = False
         self._last_barge_in_ts = 0.0
+        self._last_audio_delta_ts = 0.0
         self._pending_audio_bytes = 0  # Audio bytes da resposta ATUAL (reset a cada nova resposta)
         self._response_audio_start_time = 0.0  # Quando a resposta atual começou
         self._farewell_response_started = False  # True quando o áudio de despedida começou
@@ -597,7 +598,10 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         #
         # Isso reduz a dependência do timing do provider (ex: ElevenLabs "interruption"),
         # que pode chegar tarde, fazendo o caller ouvir o agente por mais tempo.
-        if self.config.barge_in_enabled and self._assistant_speaking and audio_bytes:
+        # Considerar "assistente falando" se ainda estamos recebendo áudio recentemente,
+        # mesmo que o flag tenha sido zerado por eventos de transcript.
+        assistant_audio_recent = (time.time() - self._last_audio_delta_ts) < 1.0
+        if self.config.barge_in_enabled and (self._assistant_speaking or assistant_audio_recent) and audio_bytes:
             try:
                 rms = audioop.rms(audio_bytes, 2)  # PCM16 => width=2
                 rms_threshold = int(os.getenv("REALTIME_LOCAL_BARGE_RMS", "450"))
@@ -705,9 +709,11 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
     
     async def interrupt(self) -> None:
         """Barge-in: interrompe resposta."""
-        if self._provider and self._assistant_speaking:
+        # Chamar interrupt no provider mesmo que _assistant_speaking esteja fora de sincronia.
+        # (Ex: ElevenLabs pode emitir TRANSCRIPT_DONE antes do áudio terminar.)
+        if self._provider:
             await self._provider.interrupt()
-            self._assistant_speaking = False
+        self._assistant_speaking = False
     
     async def _event_loop(self) -> None:
         """Loop de eventos do provider."""
@@ -744,6 +750,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         elif event.type == ProviderEventType.AUDIO_DELTA:
             self._assistant_speaking = True
+            self._last_audio_delta_ts = time.time()
             
             # Se estamos encerrando e este é o primeiro áudio da resposta de despedida,
             # resetar o contador para medir apenas o áudio de despedida
@@ -777,10 +784,9 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 self._current_assistant_text += event.transcript
         
         elif event.type == ProviderEventType.TRANSCRIPT_DONE:
-            # IMPORTANTE: Marcar que o assistente terminou de falar
-            # ElevenLabs envia agent_response (→ TRANSCRIPT_DONE) ao final de cada resposta
-            self._assistant_speaking = False
-            
+            # IMPORTANTE:
+            # TRANSCRIPT_DONE (ex: ElevenLabs agent_response) não garante que o áudio acabou.
+            # O estado de fala deve ser controlado por AUDIO_DONE/RESPONSE_DONE.
             if self._current_assistant_text:
                 self._transcript.append(TranscriptEntry(role="assistant", text=self._current_assistant_text))
                 if self._on_transcript:
