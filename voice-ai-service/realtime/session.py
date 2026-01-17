@@ -1041,56 +1041,25 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         )
         
         if should_hangup:
-            hangup_sent = False
-            
-            # MODO DUAL: Preferir ESL Outbound (via DualModeEventRelay)
-            # O ESL Outbound já tem conexão ativa, não precisa reconectar
             try:
-                from .esl.event_relay import get_relay
-                relay = get_relay(self.call_uuid)
+                from .esl import get_esl_adapter
+                adapter = get_esl_adapter(self.call_uuid)
                 
-                if relay:
-                    hangup_sent = relay.hangup("NORMAL_CLEARING")
-                    if hangup_sent:
-                        logger.info(f"Call terminated via ESL Outbound: {self.call_uuid}")
-                    else:
-                        logger.warning(f"ESL Outbound hangup returned False: {self.call_uuid}")
-                        
+                # 1. Parar o audio stream primeiro
+                await adapter.execute_api(f"uuid_audio_stream {self.call_uuid} stop")
+                
+                # 2. Encerrar a chamada
+                success = await adapter.uuid_kill(self.call_uuid, "NORMAL_CLEARING")
+                if success:
+                    logger.info(f"Call terminated via ESL: {self.call_uuid}")
+                else:
+                    logger.warning(f"Failed to terminate call via ESL: {self.call_uuid}")
+                    
             except Exception as e:
-                logger.debug(f"ESL Outbound not available, trying Inbound: {e}")
-            
-            # FALLBACK: ESL Inbound (para modo websocket-only ou se Outbound falhou)
-            if not hangup_sent:
-                try:
-                    from .handlers.esl_client import get_esl_client
-                    esl = get_esl_client()
-                    
-                    # Conectar ao ESL se não estiver conectado
-                    if not esl._connected:
-                        await esl.connect()
-                    
-                    if esl._connected:
-                        # 1. Parar o audio stream primeiro
-                        try:
-                            await esl.execute_api(f"uuid_audio_stream {self.call_uuid} stop")
-                            logger.debug(f"Audio stream stopped for {self.call_uuid}")
-                        except Exception as e:
-                            logger.debug(f"Could not stop audio stream (may be already stopped): {e}")
-                        
-                        # 2. Encerrar a chamada
-                        success = await esl.uuid_kill(self.call_uuid, "NORMAL_CLEARING")
-                        if success:
-                            logger.info(f"Call terminated via ESL Inbound: {self.call_uuid}")
-                        else:
-                            logger.warning(f"Failed to terminate call via ESL Inbound: {self.call_uuid}")
-                    else:
-                        logger.warning(f"ESL Inbound not connected, cannot terminate call: {self.call_uuid}")
-                        
-                except Exception as e:
-                    logger.error(f"Error terminating call via ESL: {e}", extra={
-                        "call_uuid": self.call_uuid,
-                        "error": str(e),
-                    })
+                logger.error(f"Error terminating call via ESL: {e}", extra={
+                    "call_uuid": self.call_uuid,
+                    "error": str(e),
+                })
         
         if self._on_session_end:
             await self._on_session_end(reason)
@@ -1255,34 +1224,14 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self._on_hold:
             return True
         
-        success = False
-        
-        # MODO DUAL: Tentar ESL Outbound primeiro
         try:
-            from .esl.event_relay import get_relay
-            relay = get_relay(self.call_uuid)
+            from .esl import get_esl_adapter
+            adapter = get_esl_adapter(self.call_uuid)
             
-            if relay:
-                success = relay.uuid_hold(on=True)
-                if success:
-                    self._on_hold = True
-                    logger.info("Call placed on hold via ESL Outbound", extra={"call_uuid": self.call_uuid})
-                    return True
-        except Exception as e:
-            logger.debug(f"ESL Outbound hold failed, trying Inbound: {e}")
-        
-        # FALLBACK: ESL Inbound
-        try:
-            from .handlers.esl_client import get_esl_client
-            esl = get_esl_client()
-            
-            if not esl._connected:
-                await esl.connect()
-            
-            success = await esl.uuid_hold(self.call_uuid, on=True)
+            success = await adapter.uuid_hold(self.call_uuid, on=True)
             if success:
                 self._on_hold = True
-                logger.info("Call placed on hold via ESL Inbound", extra={"call_uuid": self.call_uuid})
+                logger.info("Call placed on hold", extra={"call_uuid": self.call_uuid})
             return success
             
         except Exception as e:
@@ -1299,34 +1248,14 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if not self._on_hold:
             return True
         
-        success = False
-        
-        # MODO DUAL: Tentar ESL Outbound primeiro
         try:
-            from .esl.event_relay import get_relay
-            relay = get_relay(self.call_uuid)
+            from .esl import get_esl_adapter
+            adapter = get_esl_adapter(self.call_uuid)
             
-            if relay:
-                success = relay.uuid_hold(on=False)
-                if success:
-                    self._on_hold = False
-                    logger.info("Call taken off hold via ESL Outbound", extra={"call_uuid": self.call_uuid})
-                    return True
-        except Exception as e:
-            logger.debug(f"ESL Outbound unhold failed, trying Inbound: {e}")
-        
-        # FALLBACK: ESL Inbound
-        try:
-            from .handlers.esl_client import get_esl_client
-            esl = get_esl_client()
-            
-            if not esl._connected:
-                await esl.connect()
-            
-            success = await esl.uuid_hold(self.call_uuid, on=False)
+            success = await adapter.uuid_hold(self.call_uuid, on=False)
             if success:
                 self._on_hold = False
-                logger.info("Call taken off hold via ESL Inbound", extra={"call_uuid": self.call_uuid})
+                logger.info("Call taken off hold", extra={"call_uuid": self.call_uuid})
             return success
             
         except Exception as e:
@@ -1349,15 +1278,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             }
         """
         try:
-            from .handlers.esl_client import get_esl_client
-            esl = get_esl_client()
-            
-            if not esl._connected:
-                await esl.connect()
+            from .esl import get_esl_adapter
+            adapter = get_esl_adapter(self.call_uuid)
             
             # 1. Verificar registro SIP
-            # CORREÇÃO: Usar @ no padrão para encontrar o ramal correto
-            result = await esl.execute_api(
+            # Usar sofia status para verificar se ramal está registrado
+            result = await adapter.execute_api(
                 f"sofia status profile internal reg {extension}@"
             )
             
@@ -1374,9 +1300,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                     "reason": "Ramal não está registrado"
                 }
             
-            # 2. Verificar se está em chamada usando show calls
-            # CORREÇÃO: Parsear corretamente a saída de show channels
-            channels_output = await esl.show_channels()
+            # 2. Verificar se está em chamada usando show channels
+            channels_output = await adapter.execute_api("show channels")
+            
+            if not channels_output:
+                # Se não conseguiu verificar, assumir disponível
+                return {
+                    "extension": extension,
+                    "available": True,
+                    "reason": None
+                }
             
             # Procurar pelo ramal nos campos de caller/callee
             # Formato: uuid,created,name,...

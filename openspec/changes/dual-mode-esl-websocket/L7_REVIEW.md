@@ -1,11 +1,18 @@
 # Revisão L7: Arquitetura ESL no Modo Dual
 
-**Data:** 2026-01-17
+**Data:** 2026-01-17 (Atualizado)
 **Revisores:** Claude AI + Juliano Targa
 
 ## 📊 Resumo Executivo
 
-O sistema tem um **problema arquitetural crítico**: no modo DUAL, as operações de controle de chamada (transfer, hold, etc.) dependem do ESL Inbound que não está funcionando, enquanto o ESL Outbound está ativo mas subutilizado.
+✅ **RESOLVIDO**: O problema de configuração do FreeSWITCH foi corrigido adicionando 
+`apply-inbound-acl: rfc1918` ao `event_socket.conf.xml`.
+
+Foi implementada uma **arquitetura de adaptadores ESL** que abstrai a comunicação:
+- `ESLCommandInterface` - Interface abstrata para comandos
+- `ESLOutboundAdapter` - Comandos via conexão Outbound existente
+- `ESLInboundAdapter` - Comandos via conexão Inbound
+- `ESLHybridAdapter` - Tenta Outbound primeiro, fallback para Inbound
 
 ---
 
@@ -218,6 +225,118 @@ O problema principal é **configuração**, não código. O ESL Inbound não est
 - `hangup` → funciona via ESL Outbound (já implementado)
 - `hold/unhold` → funciona via ESL Inbound (já implementado, precisa conexão)
 - `transfer` → funciona via ESL Inbound (já implementado, precisa conexão)
+
+---
+
+## ✅ Arquitetura Final Implementada
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Voice AI Realtime                            │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                   RealtimeSession                          │   │
+│  │                                                            │   │
+│  │   stop()    →  get_esl_adapter()  →  ESLHybridAdapter     │   │
+│  │   hold()    →  get_esl_adapter()  →  ESLHybridAdapter     │   │
+│  │   unhold()  →  get_esl_adapter()  →  ESLHybridAdapter     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              ↓                                    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                  ESLHybridAdapter                          │   │
+│  │                                                            │   │
+│  │   ┌──────────────────┐    ┌──────────────────┐           │   │
+│  │   │ ESLOutboundAdapter│ → │ ESLInboundAdapter │           │   │
+│  │   │   (Preferido)    │    │   (Fallback)     │           │   │
+│  │   └────────┬─────────┘    └────────┬─────────┘           │   │
+│  │            ↓                       ↓                      │   │
+│  │   DualModeEventRelay        AsyncESLClient                │   │
+│  │   (porta 8022)              (porta 8021)                  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+                          ↓                    ↓
+                   ┌─────────────────────────────────┐
+                   │        FreeSWITCH               │
+                   │   ESL Outbound    ESL Inbound   │
+                   │     :8022           :8021       │
+                   └─────────────────────────────────┘
+```
+
+### Métodos por Adaptador
+
+| Método | Outbound | Inbound | Híbrido |
+|--------|----------|---------|---------|
+| `execute_api()` | ✅ | ✅ | Outbound → Inbound |
+| `uuid_kill()` | ✅ | ✅ | Outbound → Inbound |
+| `uuid_hold()` | ✅ | ✅ | Outbound → Inbound |
+| `uuid_break()` | ✅ | ✅ | Outbound → Inbound |
+| `uuid_broadcast()` | ✅ | ✅ | Outbound → Inbound |
+| `uuid_exists()` | ✅ | ✅ | Outbound → Inbound |
+| `originate()` | ❌ | ✅ | Inbound only |
+| `uuid_bridge()` | ❌ | ✅ | Inbound only |
+| `subscribe_events()` | ❌ | ✅ | Inbound only |
+| `wait_for_event()` | ❌ | ✅ | Inbound only |
+
+### Fluxo de Operações
+
+**Hangup (simples):**
+```
+session.stop() 
+  → get_esl_adapter(call_uuid) 
+  → ESLHybridAdapter
+  → ESLOutboundAdapter.uuid_kill() [SUCESSO]
+```
+
+**Transfer (complexo):**
+```
+session._execute_intelligent_handoff()
+  → TransferManager.execute_attended_transfer()
+  → AsyncESLClient.originate()           # ESL Inbound
+  → AsyncESLClient.wait_for_event()      # ESL Inbound  
+  → AsyncESLClient.uuid_bridge()         # ESL Inbound
+```
+
+---
+
+## 📁 Arquivos Modificados (Atualizado)
+
+| Arquivo | Alteração | Status |
+|---------|-----------|--------|
+| `esl/command_interface.py` | **NOVO** - Interface abstrata de comandos ESL | ✅ Done |
+| `esl/event_relay.py` | Adicionado `hangup()`, `uuid_hold()`, `uuid_break()`, `uuid_broadcast()`, `execute_api()` | ✅ Done |
+| `esl/__init__.py` | Exportar nova interface | ✅ Done |
+| `session.py` | Refatorado para usar `get_esl_adapter()` | ✅ Done |
+| `handlers/transfer_manager.py` | Continua usando AsyncESLClient (necessário para métodos avançados) | ℹ️ Sem alteração |
+
+---
+
+## 🔧 Correção Aplicada no FreeSWITCH
+
+O problema era que o `event_socket.conf.xml` não tinha ACL configurada, fazendo o FreeSWITCH rejeitar conexões do Docker.
+
+**Antes:**
+```xml
+<configuration name="event_socket.conf" description="Socket Client">
+  <settings>
+    <param name="listen-ip" value="0.0.0.0"/>
+    <param name="listen-port" value="8021"/>
+    <param name="password" value="ClueCon"/>
+  </settings>
+</configuration>
+```
+
+**Depois:**
+```xml
+<configuration name="event_socket.conf" description="Socket Client">
+  <settings>
+    <param name="listen-ip" value="0.0.0.0"/>
+    <param name="listen-port" value="8021"/>
+    <param name="password" value="ClueCon"/>
+    <param name="apply-inbound-acl" value="rfc1918"/>  <!-- ADICIONADO -->
+  </settings>
+</configuration>
+```
 
 ---
 

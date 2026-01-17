@@ -5,6 +5,7 @@
 # - server.py: ESL Outbound Server (receives calls from FS)
 # - application.py: Voice AI Application handler (RTP mode)
 # - event_relay.py: Dual mode event relay (WebSocket + ESL)
+# - command_interface.py: Abstração para comandos ESL (Inbound/Outbound)
 #
 # Referências:
 # - https://github.com/EvoluxBR/greenswitch
@@ -22,6 +23,13 @@ from .event_relay import (
     notify_session_ended,
     get_relay,
 )
+from .command_interface import (
+    ESLCommandInterface,
+    ESLOutboundAdapter,
+    ESLInboundAdapter,
+    ESLHybridAdapter,
+    get_esl_adapter,
+)
 
 __all__ = [
     # Server
@@ -36,4 +44,10 @@ __all__ = [
     "get_main_asyncio_loop",
     "notify_session_ended",
     "get_relay",
+    # Command Interface (abstração Inbound/Outbound)
+    "ESLCommandInterface",
+    "ESLOutboundAdapter",
+    "ESLInboundAdapter",
+    "ESLHybridAdapter",
+    "get_esl_adapter",
 ]
