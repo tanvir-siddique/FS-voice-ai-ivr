@@ -1592,17 +1592,6 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if not self._transfer_manager or self._transfer_in_progress:
             return
         
-        self._transfer_in_progress = True
-
-        # Cancelar qualquer fala pendente do provider antes de entrar em MOH/originate.
-        # Em cenários onde o MOH "vaza" no áudio de entrada, isso reduz bastante a
-        # chance do agente continuar gerando respostas durante a espera.
-        try:
-            if self._provider:
-                await self._provider.interrupt()
-        except Exception as e:
-            logger.debug(f"Provider interrupt failed on handoff start: {e}")
-        
         try:
             # 1. Encontrar destino
             destination, error = await self._transfer_manager.find_and_validate_destination(
@@ -1628,9 +1617,30 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 await self._send_text_to_provider(
                     f"Um momento, vou transferir para {destination.name}..."
                 )
-                # Aguardar TTS terminar (aproximadamente)
-                await asyncio.sleep(2.0)
+                # IMPORTANTE: não mutar o áudio antes do anúncio terminar,
+                # senão o agente é "cortado" e isso soa artificial.
+                #
+                # Espera curta e robusta: aguarda o provider terminar a fala atual,
+                # com timeout para não travar se o provider não sinalizar corretamente.
+                waited = 0.0
+                max_wait = 6.0
+                while self._assistant_speaking and waited < max_wait and not self._ended:
+                    await asyncio.sleep(0.2)
+                    waited += 0.2
+                # Pequeno buffer para garantir que os últimos frames já foram enviados ao FS
+                await asyncio.sleep(0.25)
             
+            # 2.5 Entrar em modo de transferência (silêncio + sem input pro provider)
+            self._transfer_in_progress = True
+
+            # Cancelar qualquer fala pendente do provider antes de entrar em MOH/originate.
+            # Evita que o agente continue gerando durante a espera.
+            try:
+                if self._provider:
+                    await self._provider.interrupt()
+            except Exception as e:
+                logger.debug(f"Provider interrupt failed on handoff start: {e}")
+
             logger.info(
                 "Executing intelligent handoff",
                 extra={
