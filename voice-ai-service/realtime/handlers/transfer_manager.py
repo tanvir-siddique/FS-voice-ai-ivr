@@ -205,6 +205,7 @@ class TransferManager:
         on_resume: Optional[Callable[[], Any]] = None,
         on_transfer_complete: Optional[Callable[[TransferResult], Any]] = None,
         domain_settings: Optional[Dict[str, Any]] = None,
+        voice_id: Optional[str] = None,
     ):
         """
         Args:
@@ -217,11 +218,13 @@ class TransferManager:
             on_resume: Callback quando retomar Voice AI
             on_transfer_complete: Callback quando transferência completar
             domain_settings: Configurações do domínio (lidas de v_voice_secretary_settings)
+            voice_id: ID da voz ElevenLabs para anúncios
         """
         self.domain_uuid = domain_uuid
         self.call_uuid = call_uuid
         self.caller_id = caller_id
         self.secretary_uuid = secretary_uuid
+        self._voice_id = voice_id
         
         self._esl = esl_client or get_esl_client()
         self._loader = destination_loader or get_destination_loader()
@@ -647,28 +650,42 @@ class TransferManager:
             
             logger.info(f"B-leg answered, playing announcement: {b_leg_uuid}")
             
-            # 7. Tocar anúncio para o humano via TTS (mod_flite)
-            # Baseado na documentação oficial do FreeSWITCH
+            # 7. Tocar anúncio para o humano via ElevenLabs TTS (mesma voz da IA)
             announcement_with_instructions = (
                 f"{announcement}. "
-                "Press 2 to reject or wait to accept."
+                "Press 2 to reject, or wait to accept."
             )
             
             logger.info(
-                f"Playing TTS announcement to B-leg: {b_leg_uuid}",
+                f"Generating ElevenLabs announcement for B-leg: {b_leg_uuid}",
                 extra={"announcement": announcement_with_instructions[:100]}
             )
             
-            tts_success = await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+            # Usar ElevenLabs TTS para gerar áudio com mesma voz da IA
+            from .announcement_tts import get_announcement_tts
             
-            if not tts_success:
-                # Fallback: tocar arquivo de áudio genérico
-                logger.warning("TTS failed, using fallback audio file")
-                await self._esl.uuid_playback(
-                    b_leg_uuid,
-                    "/usr/share/freeswitch/sounds/en/us/callie/ivr/ivr-one_moment_please.wav"
-                )
-                await asyncio.sleep(1.0)
+            tts_service = get_announcement_tts()
+            audio_path = await tts_service.generate_announcement(
+                announcement_with_instructions,
+                voice_id=self._voice_id  # Mesma voz configurada na secretária
+            )
+            
+            if audio_path:
+                logger.info(f"Playing ElevenLabs announcement: {audio_path}")
+                await self._esl.uuid_playback(b_leg_uuid, audio_path)
+            else:
+                # Fallback: mod_flite (voz robótica)
+                logger.warning("ElevenLabs TTS failed, falling back to mod_flite")
+                tts_success = await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+                
+                if not tts_success:
+                    # Último fallback: arquivo de áudio genérico
+                    logger.warning("mod_flite also failed, using generic audio file")
+                    await self._esl.uuid_playback(
+                        b_leg_uuid,
+                        "/usr/share/freeswitch/sounds/en/us/callie/ivr/ivr-one_moment_please.wav"
+                    )
+                    await asyncio.sleep(1.0)
             
             # 8. Aguardar resposta (modelo híbrido)
             response = await self._esl.wait_for_reject_or_timeout(
@@ -979,6 +996,7 @@ async def create_transfer_manager(
     on_resume: Optional[Callable[[], Any]] = None,
     on_transfer_complete: Optional[Callable[[TransferResult], Any]] = None,
     domain_settings: Optional[Dict[str, Any]] = None,
+    voice_id: Optional[str] = None,
 ) -> TransferManager:
     """
     Cria e inicializa TransferManager.
@@ -994,6 +1012,7 @@ async def create_transfer_manager(
         on_resume: Callback quando retomar Voice AI
         on_transfer_complete: Callback quando transferência completar
         domain_settings: Configurações do domínio (opcional, carrega do banco se None)
+        voice_id: ID da voz ElevenLabs para anúncios de transferência
     """
     # Carregar configurações do banco se não fornecidas
     if domain_settings is None:
@@ -1013,6 +1032,7 @@ async def create_transfer_manager(
         on_resume=on_resume,
         on_transfer_complete=on_transfer_complete,
         domain_settings=domain_settings,
+        voice_id=voice_id,
     )
     
     # Pré-carregar destinos

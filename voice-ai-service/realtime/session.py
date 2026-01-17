@@ -168,6 +168,7 @@ class RealtimeSessionConfig:
     farewell: Optional[str] = None
     farewell_keywords: Optional[List[str]] = None  # Palavras que encerram a chamada (ex: tchau, falou, valeu)
     voice: str = "alloy"
+    voice_id: Optional[str] = None  # ElevenLabs voice_id para TTS (anúncios de transferência)
     language: str = "pt-BR"  # Idioma da secretária
     vad_threshold: float = 0.5
     silence_duration_ms: int = 500
@@ -398,6 +399,7 @@ class RealtimeSession:
                 secretary_uuid=self.config.secretary_uuid,
                 on_resume=self._on_transfer_resume,
                 on_transfer_complete=self._on_transfer_complete,
+                voice_id=self.config.voice_id,  # Mesma voz da IA para anúncios
             )
             
             logger.info("TransferManager initialized", extra={

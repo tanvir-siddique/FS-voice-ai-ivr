@@ -665,6 +665,7 @@ class RealtimeServer:
             prefix_padding_ms=prefix_padding_ms,
             max_response_output_tokens=max_response_output_tokens,
             voice=voice or "alloy",
+            voice_id=row.get("tts_voice_id"),  # ElevenLabs voice_id para anúncios de transferência
             language=language,
             tools=tools,
             fallback_providers=fallback_providers,
