@@ -1666,8 +1666,21 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             destination_text: Texto do destino (ex: "Jeni", "financeiro")
             reason: Motivo do handoff
         """
-        if not self._transfer_manager or self._transfer_in_progress:
+        logger.info(
+            "Intelligent handoff started",
+            extra={
+                "call_uuid": self.call_uuid,
+                "destination_text": destination_text,
+                "reason": reason,
+            }
+        )
+        
+        if not self._transfer_manager:
+            logger.warning("TransferManager not initialized")
             return
+        
+        # NOTA: _transfer_in_progress já é True (setado em _execute_function)
+        # Isso é intencional para mutar o áudio do agente durante a transferência.
         
         try:
             # 1. Encontrar destino
