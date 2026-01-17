@@ -221,69 +221,53 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         """
         Configura sessão com prompt, voz, VAD, tools.
         
-        Ref: Documentação OpenAI Realtime API (Janeiro 2026)
-        https://platform.openai.com/docs/api-reference/realtime
+        FORMATO BETA (gpt-4o-realtime-preview):
+        - modalities: ["audio", "text"]
+        - voice: "alloy" (nível superior, não aninhado)
+        - input_audio_format: "pcm16"
+        - output_audio_format: "pcm16"
+        - turn_detection: {...} (nível superior)
+        - instructions: "system prompt"
+        - NÃO TEM session.type!
         
-        FORMATO GA (ATUAL - Janeiro 2026):
-        - session.type: "realtime"
-        - session.model: "gpt-realtime"
-        - output_modalities: ["audio"]
-        - audio.input.format: { type: "audio/pcm", rate: 24000 }
-        - audio.input.turn_detection: { type: "server_vad", ... }
-        - audio.output.format: { type: "audio/pcm" }
-        - audio.output.voice: "marin"
-        - instructions: string
+        Ref: https://platform.openai.com/docs/api-reference/realtime
         """
         if not self._ws:
             raise RuntimeError("Not connected")
         
-        # Vozes GA disponíveis: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar
-        voice = self.config.voice or "marin"
+        # Vozes disponíveis: alloy, ash, ballad, coral, echo, sage, shimmer, verse
+        voice = self.config.voice or "alloy"
         
-        # === FORMATO GA (Janeiro 2026) ===
-        # Ref: https://platform.openai.com/docs/api-reference/realtime
+        # === FORMATO BETA (gpt-4o-realtime-preview) ===
+        # IMPORTANTE: Sem session.type, sem audio aninhado!
         session_config = {
             "type": "session.update",
             "session": {
-                # Tipo de sessão
-                "type": "realtime",
+                # Modalities (texto + áudio)
+                "modalities": ["audio", "text"],
                 
-                # Modelo (GA)
-                "model": "gpt-realtime",
+                # Voz (nível superior, não aninhado)
+                "voice": voice,
                 
-                # Modalities de saída
-                "output_modalities": ["audio"],
+                # Formato de áudio (strings simples)
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
                 
                 # System prompt
                 "instructions": self.config.system_prompt or "",
                 
-                # Configuração de áudio (formato aninhado GA)
-                "audio": {
-                    "input": {
-                        "format": {
-                            "type": "audio/pcm",
-                            "rate": 24000
-                        },
-                        # VAD - Turn Detection
-                        "turn_detection": {
-                            "type": "server_vad",
-                            "threshold": self.config.vad_threshold or 0.5,
-                            "prefix_padding_ms": self.config.prefix_padding_ms or 300,
-                            "silence_duration_ms": self.config.silence_duration_ms or 500,
-                            "interrupt_response": True,
-                            "create_response": True,
-                        },
-                        # Transcrição do input
-                        "transcription": {
-                            "model": "whisper-1"
-                        }
-                    },
-                    "output": {
-                        "format": {
-                            "type": "audio/pcm"
-                        },
-                        "voice": voice
-                    }
+                # VAD - Turn Detection (nível superior)
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": self.config.vad_threshold or 0.5,
+                    "prefix_padding_ms": self.config.prefix_padding_ms or 300,
+                    "silence_duration_ms": self.config.silence_duration_ms or 500,
+                    "create_response": True,
+                },
+                
+                # Transcrição do input
+                "input_audio_transcription": {
+                    "model": "whisper-1"
                 },
                 
                 # Tools (function calling)
@@ -295,10 +279,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             }
         }
         
-        # max_response_output_tokens (limitar resposta) - mover para fora de audio
-        # Nota: No formato GA pode não existir este campo no session.update
-        
-        logger.info(f"Sending session.update (GA format) - voice={voice}", extra={
+        logger.info(f"Sending session.update (Beta format) - voice={voice}", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_instructions": bool(self.config.system_prompt),
             "voice": voice,
