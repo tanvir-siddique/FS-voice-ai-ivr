@@ -413,18 +413,15 @@ class TransferManager:
                 
                 logger.info(f"Originating B-leg: {dial_string}")
                 
-                # TESTE: Originate sem variáveis extras para debug
-                # Se funcionar, o problema está nas variáveis
                 b_leg_uuid = await self._esl.originate(
                     dial_string=dial_string,
                     app="&park()",
                     timeout=timeout,
-                    variables=None  # Temporariamente desabilitado para teste
-                    # variables={
-                    #     "ignore_early_media": "true",
-                    #     "origination_caller_id_number": self.caller_id,
-                    #     "origination_caller_id_name": "Secretaria Virtual"
-                    # }
+                    variables={
+                        "ignore_early_media": "true",
+                        "origination_caller_id_number": self.caller_id,
+                        "origination_caller_id_name": "Secretaria Virtual"
+                    }
                 )
                 
                 if not b_leg_uuid:
@@ -655,6 +652,9 @@ class TransferManager:
         """
         Constrói dial string para o destino.
         
+        IMPORTANTE: Via ESL api originate, usar sofia/internal/ ao invés de user/
+        O formato user/ é resolvido pelo dialplan, mas não pelo api originate.
+        
         Args:
             dest: Destino da transferência
         
@@ -664,10 +664,16 @@ class TransferManager:
         number = dest.destination_number
         context = dest.destination_context
         
+        # Obter perfil sofia do ambiente (default: internal)
+        sofia_profile = os.getenv("SOFIA_PROFILE", "internal")
+        
         if dest.destination_type == "extension":
-            return f"user/{number}@{context}"
+            # Via ESL: usar sofia/profile/ ao invés de user/
+            # user/ é resolvido pelo dialplan, não pelo api originate
+            return f"sofia/{sofia_profile}/{number}@{context}"
         
         elif dest.destination_type == "ring_group":
+            # Ring groups precisam ser chamados via dialplan
             return f"group/{number}@{context}"
         
         elif dest.destination_type == "queue":
@@ -682,8 +688,8 @@ class TransferManager:
             return f"sofia/gateway/{gateway}/{number}"
         
         else:
-            # Default: tratar como extensão
-            return f"user/{number}@{context}"
+            # Default: tratar como extensão via sofia
+            return f"sofia/{sofia_profile}/{number}@{context}"
     
     async def cancel_transfer(self) -> bool:
         """
