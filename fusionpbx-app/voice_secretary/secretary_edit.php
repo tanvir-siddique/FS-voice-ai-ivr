@@ -191,6 +191,25 @@
 	$time_conditions = $database->select($sql, $parameters, 'all') ?: [];
 	unset($parameters);
 
+//get extensions, ring groups and call center queues for transfer dropdown
+	// Extensions - com nome para exibição
+	$sql = "SELECT extension, effective_caller_id_name, description FROM v_extensions WHERE domain_uuid = :domain_uuid AND enabled = 'true' ORDER BY CAST(extension AS INTEGER)";
+	$parameters['domain_uuid'] = $domain_uuid;
+	$extensions = $database->select($sql, $parameters, 'all') ?: [];
+	unset($parameters);
+	
+	// Ring Groups - com nome
+	$sql = "SELECT ring_group_extension, ring_group_name, ring_group_description FROM v_ring_groups WHERE domain_uuid = :domain_uuid AND ring_group_enabled = 'true' ORDER BY CAST(ring_group_extension AS INTEGER)";
+	$parameters['domain_uuid'] = $domain_uuid;
+	$ring_groups = $database->select($sql, $parameters, 'all') ?: [];
+	unset($parameters);
+	
+	// Call Center Queues - com nome
+	$sql = "SELECT queue_extension, queue_name, queue_description FROM v_call_center_queues WHERE domain_uuid = :domain_uuid AND queue_enabled = 'true' ORDER BY CAST(queue_extension AS INTEGER)";
+	$parameters['domain_uuid'] = $domain_uuid;
+	$queues = $database->select($sql, $parameters, 'all') ?: [];
+	unset($parameters);
+
 //create token
 	$object = new token;
 	$token = $object->create($_SERVER['PHP_SELF']);
@@ -437,7 +456,50 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_extension'] ?? 'Transfer Extension')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='text' name='transfer_extension' maxlength='20' value='".escape($data['transfer_extension'] ?? '200')."' placeholder='ex: 200 (Recepção)'>\n";
+	$current_transfer_ext = $data['transfer_extension'] ?? '200';
+	echo "		<select class='formfld' name='transfer_extension' id='transfer_extension' style='width: 350px;'>\n";
+	echo "			<option value=''>".($text['option-select'] ?? '-- Selecione --')."</option>\n";
+	
+	// Ramais
+	if (!empty($extensions)) {
+		echo "			<optgroup label='📞 Ramais'>\n";
+		foreach ($extensions as $ext) {
+			$ext_num = $ext['extension'];
+			$ext_name = $ext['effective_caller_id_name'] ?: $ext['description'] ?: '';
+			$display = $ext_name ? $ext_num . ' - ' . $ext_name : $ext_num;
+			$selected = ($current_transfer_ext === $ext_num) ? 'selected' : '';
+			echo "				<option value='".escape($ext_num)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
+	}
+	
+	// Ring Groups
+	if (!empty($ring_groups)) {
+		echo "			<optgroup label='🔔 Ring Groups'>\n";
+		foreach ($ring_groups as $rg) {
+			$rg_ext = $rg['ring_group_extension'];
+			$rg_name = $rg['ring_group_name'] ?: $rg['ring_group_description'] ?: '';
+			$display = $rg_name ? $rg_ext . ' - ' . $rg_name : $rg_ext;
+			$selected = ($current_transfer_ext === $rg_ext) ? 'selected' : '';
+			echo "				<option value='".escape($rg_ext)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
+	}
+	
+	// Call Center Queues
+	if (!empty($queues)) {
+		echo "			<optgroup label='📋 Filas de Call Center'>\n";
+		foreach ($queues as $q) {
+			$q_ext = $q['queue_extension'];
+			$q_name = $q['queue_name'] ?: $q['queue_description'] ?: '';
+			$display = $q_name ? $q_ext . ' - ' . $q_name : $q_ext;
+			$selected = ($current_transfer_ext === $q_ext) ? 'selected' : '';
+			echo "				<option value='".escape($q_ext)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
+	}
+	
+	echo "		</select>\n";
 	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
 		. "<b>⚠️ Use a RECEPÇÃO ou fila GERAL</b> - Este é o ramal para handoff genérico (cliente diz 'quero falar com alguém'). "
 		. "Para departamentos específicos (Vendas, Financeiro), use as <b>Regras de Transferência</b>."

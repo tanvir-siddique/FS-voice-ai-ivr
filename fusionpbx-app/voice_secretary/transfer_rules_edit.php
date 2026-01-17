@@ -140,35 +140,24 @@
 	$secretaries = $database->select($sql, $parameters, 'all') ?: [];
 	unset($parameters);
 
-//get extensions, ring groups and call center queues for validation/autocomplete
-	$valid_destinations = [];
-	
-	// Extensions
-	$sql = "SELECT extension FROM v_extensions WHERE domain_uuid = :domain_uuid AND enabled = 'true' ORDER BY extension";
+//get extensions, ring groups and call center queues for dropdown
+	// Extensions - com nome para exibição
+	$sql = "SELECT extension, effective_caller_id_name, description FROM v_extensions WHERE domain_uuid = :domain_uuid AND enabled = 'true' ORDER BY CAST(extension AS INTEGER)";
 	$parameters['domain_uuid'] = $domain_uuid;
 	$extensions = $database->select($sql, $parameters, 'all') ?: [];
 	unset($parameters);
-	foreach ($extensions as $ext) {
-		$valid_destinations[] = $ext['extension'];
-	}
 	
-	// Ring Groups
-	$sql = "SELECT ring_group_extension FROM v_ring_groups WHERE domain_uuid = :domain_uuid AND ring_group_enabled = 'true' ORDER BY ring_group_extension";
+	// Ring Groups - com nome
+	$sql = "SELECT ring_group_extension, ring_group_name, ring_group_description FROM v_ring_groups WHERE domain_uuid = :domain_uuid AND ring_group_enabled = 'true' ORDER BY CAST(ring_group_extension AS INTEGER)";
 	$parameters['domain_uuid'] = $domain_uuid;
 	$ring_groups = $database->select($sql, $parameters, 'all') ?: [];
 	unset($parameters);
-	foreach ($ring_groups as $rg) {
-		$valid_destinations[] = $rg['ring_group_extension'];
-	}
 	
-	// Call Center Queues
-	$sql = "SELECT queue_extension FROM v_call_center_queues WHERE domain_uuid = :domain_uuid AND queue_enabled = 'true' ORDER BY queue_extension";
+	// Call Center Queues - com nome
+	$sql = "SELECT queue_extension, queue_name, queue_description FROM v_call_center_queues WHERE domain_uuid = :domain_uuid AND queue_enabled = 'true' ORDER BY CAST(queue_extension AS INTEGER)";
 	$parameters['domain_uuid'] = $domain_uuid;
 	$queues = $database->select($sql, $parameters, 'all') ?: [];
 	unset($parameters);
-	foreach ($queues as $q) {
-		$valid_destinations[] = $q['queue_extension'];
-	}
 
 //create token
 	$object = new token;
@@ -228,14 +217,52 @@
 	echo "<tr>\n";
 	echo "	<td class='vncellreq' valign='top' align='left' nowrap='nowrap'>".($text['label-extension'] ?? 'Extension')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<input class='formfld' type='text' name='transfer_extension' maxlength='20' value='".escape($data['transfer_extension'] ?? '')."' required pattern='[0-9*#]{1,20}' title='".($text['description-extension_pattern'] ?? 'Only digits, * or # (max 20 chars)')."' list='extensions_list' autocomplete='off' placeholder='Ex: 1001'>\n";
-	echo "		<datalist id='extensions_list'>\n";
-	foreach ($valid_destinations as $dest) {
-		echo "			<option value='".escape($dest)."'>\n";
+	$current_ext = $data['transfer_extension'] ?? '';
+	echo "		<select class='formfld' name='transfer_extension' id='transfer_extension' required style='width: 350px;'>\n";
+	echo "			<option value=''>".($text['option-select'] ?? '-- Selecione --')."</option>\n";
+	
+	// Ramais
+	if (!empty($extensions)) {
+		echo "			<optgroup label='📞 Ramais'>\n";
+		foreach ($extensions as $ext) {
+			$ext_num = $ext['extension'];
+			$ext_name = $ext['effective_caller_id_name'] ?: $ext['description'] ?: '';
+			$display = $ext_name ? $ext_num . ' - ' . $ext_name : $ext_num;
+			$selected = ($current_ext === $ext_num) ? 'selected' : '';
+			echo "				<option value='".escape($ext_num)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
 	}
-	echo "		</datalist>\n";
+	
+	// Ring Groups
+	if (!empty($ring_groups)) {
+		echo "			<optgroup label='🔔 Ring Groups'>\n";
+		foreach ($ring_groups as $rg) {
+			$rg_ext = $rg['ring_group_extension'];
+			$rg_name = $rg['ring_group_name'] ?: $rg['ring_group_description'] ?: '';
+			$display = $rg_name ? $rg_ext . ' - ' . $rg_name : $rg_ext;
+			$selected = ($current_ext === $rg_ext) ? 'selected' : '';
+			echo "				<option value='".escape($rg_ext)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
+	}
+	
+	// Call Center Queues
+	if (!empty($queues)) {
+		echo "			<optgroup label='📋 Filas de Call Center'>\n";
+		foreach ($queues as $q) {
+			$q_ext = $q['queue_extension'];
+			$q_name = $q['queue_name'] ?: $q['queue_description'] ?: '';
+			$display = $q_name ? $q_ext . ' - ' . $q_name : $q_ext;
+			$selected = ($current_ext === $q_ext) ? 'selected' : '';
+			echo "				<option value='".escape($q_ext)."' ".$selected.">".escape($display)."</option>\n";
+		}
+		echo "			</optgroup>\n";
+	}
+	
+	echo "		</select>\n";
 	echo "		<br /><span class='vtable-hint' style='color: #555;'>"
-		. "<b>Ramal ESPECÍFICO do departamento.</b> Pode ser: Ramal direto, Ring Group ou Fila de Call Center.<br/>"
+		. "<b>Destino da transferência.</b> Selecione um ramal, ring group ou fila de call center.<br/>"
 		. "⚠️ <b>NÃO use o mesmo ramal</b> do Transfer Extension da Secretary (aquele é para handoff genérico)."
 		. "</span>\n";
 	echo "	</td>\n";
