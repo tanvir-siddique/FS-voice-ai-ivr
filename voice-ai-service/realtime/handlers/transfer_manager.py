@@ -895,6 +895,18 @@ class TransferManager:
     async def _start_moh(self) -> None:
         """Inicia música de espera no A-leg."""
         if not self._moh_active:
+            # 1. Primeiro, interromper qualquer áudio em reprodução (uuid_break)
+            # Isso para o playback do agente que pode estar em andamento
+            try:
+                await self._esl.uuid_break(self.call_uuid)
+                logger.debug(f"Cleared playback before MOH for {self.call_uuid}")
+            except Exception as e:
+                logger.warning(f"Failed to clear playback before MOH: {e}")
+            
+            # 2. Pequeno delay para garantir que o break foi processado
+            await asyncio.sleep(0.1)
+            
+            # 3. Iniciar MOH
             success = await self._esl.uuid_broadcast(
                 self.call_uuid,
                 self._transfer_music_on_hold,
