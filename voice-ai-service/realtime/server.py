@@ -305,6 +305,13 @@ class RealtimeServer:
                     s.max_turns,
                     s.transfer_extension,
                     s.language,
+                    s.tts_voice_id,
+                    s.company_name,
+                    -- Fallback Configuration
+                    COALESCE(s.fallback_action, 'ticket') as fallback_action,
+                    s.fallback_user_id,
+                    COALESCE(s.fallback_priority, 'medium') as fallback_priority,
+                    COALESCE(s.fallback_notify_enabled, true) as fallback_notify_enabled,
                     -- Handoff OmniPlay fields
                     COALESCE(s.handoff_enabled, true) as handoff_enabled,
                     COALESCE(s.handoff_timeout, 30) as handoff_timeout,
@@ -412,7 +419,10 @@ class RealtimeServer:
         silence_duration_ms = int(os.getenv("REALTIME_SILENCE_MS", "900"))
         prefix_padding_ms = int(os.getenv("REALTIME_PREFIX_PADDING_MS", "300"))
         max_response_output_tokens = int(os.getenv("REALTIME_MAX_OUTPUT_TOKENS", "4096"))
-        voice = (os.getenv("REALTIME_VOICE", "") or "").strip()
+        # Voice: prioridade 1) banco (tts_voice_id), 2) env, 3) provider_config, 4) default
+        voice = (row.get("tts_voice_id") or os.getenv("REALTIME_VOICE", "") or "").strip()
+        # Language: prioridade 1) banco, 2) default
+        language = row.get("language") or "pt-BR"
         fallback_providers_env = os.getenv("REALTIME_FALLBACK_PROVIDERS", "").strip()
         barge_in_enabled = os.getenv("REALTIME_BARGE_IN", "true").lower() in ("1", "true", "yes")
         tools = None
@@ -473,9 +483,7 @@ class RealtimeServer:
                 )
                 
                 if transfer_rules:
-                    # Detectar idioma da secretária (fallback pt-BR)
-                    language = "pt-BR"  # Pode ser extraído da config futuramente
-                    
+                    # Usar idioma da secretária configurado no banco
                     transfer_context = build_transfer_context(transfer_rules, language)
                     
                     # Adicionar tools de transfer se não existirem
@@ -628,6 +636,7 @@ class RealtimeServer:
             caller_id=caller_id or "unknown",
             secretary_uuid=secretary_uuid,
             secretary_name=row["name"] or "Voice Secretary",
+            company_name=row.get("company_name"),
             provider_name=row["provider_name"] or "elevenlabs_conversational",
             system_prompt=final_system_prompt,
             greeting=row["greeting"],
@@ -638,6 +647,7 @@ class RealtimeServer:
             prefix_padding_ms=prefix_padding_ms,
             max_response_output_tokens=max_response_output_tokens,
             voice=voice or "alloy",
+            language=language,
             tools=tools,
             fallback_providers=fallback_providers,
             barge_in_enabled=barge_in_enabled,
@@ -649,6 +659,11 @@ class RealtimeServer:
             handoff_max_ai_turns=int(row.get("max_turns", 20)),
             handoff_queue_id=row.get("handoff_queue_id"),
             omniplay_company_id=row.get("omniplay_company_id"),
+            # Fallback Configuration (from database)
+            fallback_action=row.get("fallback_action") or "ticket",
+            fallback_user_id=row.get("fallback_user_id"),
+            fallback_priority=row.get("fallback_priority") or "medium",
+            fallback_notify_enabled=bool(row.get("fallback_notify_enabled", True)),
             # Audio Configuration
             audio_warmup_chunks=db_warmup_chunks,
             audio_warmup_ms=db_warmup_ms,

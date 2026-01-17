@@ -159,12 +159,14 @@ class RealtimeSessionConfig:
     caller_id: str
     secretary_uuid: str
     secretary_name: str
+    company_name: Optional[str] = None  # Nome da empresa
     provider_name: str = "openai"
     system_prompt: str = ""
     greeting: Optional[str] = None
     farewell: Optional[str] = None
     farewell_keywords: Optional[List[str]] = None  # Palavras que encerram a chamada (ex: tchau, falou, valeu)
     voice: str = "alloy"
+    language: str = "pt-BR"  # Idioma da secretária
     vad_threshold: float = 0.5
     silence_duration_ms: int = 500
     prefix_padding_ms: int = 300
@@ -183,6 +185,11 @@ class RealtimeSessionConfig:
     handoff_max_ai_turns: int = 20
     handoff_queue_id: Optional[int] = None
     omniplay_company_id: Optional[int] = None  # OmniPlay companyId para API
+    # Fallback Configuration (quando transferência falha)
+    fallback_action: str = "ticket"  # ticket, callback, voicemail, none
+    fallback_user_id: Optional[int] = None  # User ID para atribuir ticket
+    fallback_priority: str = "medium"  # low, medium, high, urgent
+    fallback_notify_enabled: bool = True  # Notificar sobre fallback
     # Audio Configuration (per-secretary)
     audio_warmup_chunks: int = 15  # chunks de 20ms antes do playback
     audio_warmup_ms: int = 400  # buffer de warmup em ms
@@ -978,7 +985,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             reason=reason,
             caller_number=self.config.caller_id,
             provider=self.config.provider_name,
-            language="pt-BR",
+            language=self.config.language,
             duration_seconds=duration,
             avg_latency_ms=avg_latency,
         )
