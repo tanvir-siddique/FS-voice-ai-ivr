@@ -857,84 +857,291 @@ Tenha um ótimo dia!
 <!-- Section 8: Dialplan -->
 <div class="help-section" id="section-dialplan">
 	<div class="help-section-header" onclick="toggleSection(this)">
-		<span>📋 8. Configurar Dialplan no FreeSWITCH</span>
+		<span>📋 8. Configurar Dialplan no FreeSWITCH (PASSO A PASSO)</span>
 		<span class="toggle-icon">▼</span>
 	</div>
 	<div class="help-section-content">
-		<p>O dialplan conecta as chamadas ao Voice AI Service.</p>
+		<p>O dialplan conecta as chamadas ao Voice AI Service. Usamos a <strong>Arquitetura Híbrida</strong>:</p>
+		<ul>
+			<li><strong>ESL (porta 8022)</strong> → Controle da chamada (transfer, hangup, hold)</li>
+			<li><strong>mod_audio_stream (porta 8085)</strong> → Transporte de áudio via WebSocket</li>
+		</ul>
+		
+		<div class="info-box">
+			<h4>🎯 Por que Arquitetura Híbrida?</h4>
+			<p>O <strong>WebSocket resolve o problema de NAT</strong> automaticamente. Clientes atrás de roteadores funcionam sem configuração adicional. O ESL permite controle avançado (transferir, desligar, colocar em espera).</p>
+		</div>
+		
+		<hr style="margin: 25px 0; border: 1px dashed #ddd;">
 		
 		<div class="step-box">
 			<h4><span class="step-number">1</span> Acessar Dialplan Manager</h4>
-			<p>No FusionPBX: <strong>Dialplan → Dialplan Manager → + Add</strong></p>
+			<p>No FusionPBX, vá em: <strong>Dialplan → Dialplan Manager</strong></p>
+			<div style="background: #f0f0f0; padding: 15px; border-radius: 8px; font-family: monospace; margin: 10px 0;">
+				📁 <strong>Dialplan</strong><br>
+				&nbsp;&nbsp;&nbsp;├── 📄 Dialplan Manager 👈 <em>Clique aqui</em><br>
+				&nbsp;&nbsp;&nbsp;├── 📄 Inbound Routes<br>
+				&nbsp;&nbsp;&nbsp;└── 📄 Outbound Routes
+			</div>
 		</div>
 		
 		<div class="step-box">
-			<h4><span class="step-number">2</span> Criar Dialplan para Voice AI</h4>
-			<table class="config-table">
-				<tr><td><strong>Name</strong></td><td>voice_ai_ivr</td></tr>
-				<tr><td><strong>Number</strong></td><td>8000</td></tr>
-				<tr><td><strong>Context</strong></td><td>[seu-domínio]</td></tr>
-				<tr><td><strong>Order</strong></td><td>100</td></tr>
-				<tr><td><strong>Enabled</strong></td><td>true</td></tr>
-			</table>
+			<h4><span class="step-number">2</span> Criar Novo Dialplan</h4>
+			<p>Clique no botão <strong>+ Add</strong> (canto superior direito)</p>
+			<div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+				<p style="margin: 0;"><strong>🔵 Botão [+ Add]</strong> → Abre formulário de novo dialplan</p>
+			</div>
 		</div>
 		
 		<div class="step-box">
-			<h4><span class="step-number">3</span> Adicionar Condições e Ações</h4>
-			<p><strong>Condition:</strong></p>
-			<table class="config-table">
-				<tr><td>Tag</td><td>condition</td></tr>
-				<tr><td>Type</td><td>destination_number</td></tr>
-				<tr><td>Data</td><td>^8000$</td></tr>
-			</table>
-			
-			<p><strong>Actions (em ordem):</strong></p>
+			<h4><span class="step-number">3</span> Preencher Informações Básicas</h4>
+			<p>Preencha os campos conforme a tabela abaixo:</p>
 			<table class="config-table">
 				<tr>
-					<th>#</th>
+					<th>Campo</th>
+					<th>Valor</th>
+					<th>Explicação</th>
+				</tr>
+				<tr>
+					<td><strong>Name</strong></td>
+					<td><code>voice_ai_hybrid_8000</code></td>
+					<td>Nome identificador do dialplan</td>
+				</tr>
+				<tr>
+					<td><strong>Number</strong></td>
+					<td><code>8000</code></td>
+					<td>Ramal que ativará a secretária virtual</td>
+				</tr>
+				<tr>
+					<td><strong>Context</strong></td>
+					<td><code>${domain_name}</code></td>
+					<td>Ou o nome do seu domínio (ex: empresa.com.br)</td>
+				</tr>
+				<tr>
+					<td><strong>Order</strong></td>
+					<td><code>100</code></td>
+					<td>Prioridade (número baixo = executa primeiro)</td>
+				</tr>
+				<tr>
+					<td><strong>Enabled</strong></td>
+					<td><code>true</code></td>
+					<td>Dialplan ativo</td>
+				</tr>
+				<tr>
+					<td><strong>Continue</strong></td>
+					<td><code>false</code></td>
+					<td>⚠️ <strong>CRÍTICO:</strong> Deve ser false!</td>
+				</tr>
+				<tr>
+					<td><strong>Description</strong></td>
+					<td><code>Voice AI - Secretária Virtual</code></td>
+					<td>Descrição para identificação</td>
+				</tr>
+			</table>
+			
+			<div class="warning-box">
+				<h4>⚠️ Continue DEVE ser false</h4>
+				<p>Se <code>Continue</code> for <code>true</code>, o FreeSWITCH continuará processando outros dialplans após o nosso, causando comportamento inesperado. <strong>Sempre defina como false!</strong></p>
+			</div>
+		</div>
+		
+		<div class="step-box">
+			<h4><span class="step-number">4</span> Adicionar Condição (Condition)</h4>
+			<p>Role até a seção <strong>"Dialplan Details"</strong> e clique em <strong>+ Add</strong></p>
+			<table class="config-table">
+				<tr>
+					<th>Campo</th>
+					<th>Valor</th>
+				</tr>
+				<tr>
+					<td><strong>Tag</strong></td>
+					<td><code>condition</code></td>
+				</tr>
+				<tr>
+					<td><strong>Type</strong></td>
+					<td><code>destination_number</code></td>
+				</tr>
+				<tr>
+					<td><strong>Data</strong></td>
+					<td><code>^8000$</code></td>
+				</tr>
+				<tr>
+					<td><strong>Order</strong></td>
+					<td><code>0</code></td>
+				</tr>
+			</table>
+			<p><em>Isso significa: "Execute as ações abaixo quando alguém ligar para 8000"</em></p>
+		</div>
+		
+		<div class="step-box">
+			<h4><span class="step-number">5</span> Adicionar Ações (IMPORTANTE: Ordem correta!)</h4>
+			<p>Adicione as seguintes ações <strong>na ordem exata</strong> listada:</p>
+			
+			<table class="config-table">
+				<tr>
+					<th>Ordem</th>
 					<th>Tag</th>
 					<th>Type</th>
 					<th>Data</th>
+					<th>O que faz</th>
 				</tr>
-				<tr>
-					<td>1</td>
+				<tr style="background: #fff9e6;">
+					<td><strong>1</strong></td>
 					<td>action</td>
-					<td>answer</td>
-					<td></td>
+					<td><code>set</code></td>
+					<td><code style="word-break: break-all;">VOICE_AI_SECRETARY_UUID=<span style="color: red;">SEU-UUID-AQUI</span></code></td>
+					<td>🔑 Identifica qual secretária usar</td>
 				</tr>
-				<tr>
-					<td>2</td>
+				<tr style="background: #fff9e6;">
+					<td><strong>2</strong></td>
 					<td>action</td>
-					<td>set</td>
-					<td>VOICE_AI_SECRETARY_UUID=SEU-UUID-AQUI</td>
+					<td><code>set</code></td>
+					<td><code>VOICE_AI_DOMAIN_UUID=${domain_uuid}</code></td>
+					<td>🏢 Passa o domínio para o Voice AI</td>
 				</tr>
-				<tr>
-					<td>3</td>
+				<tr style="background: #e8f5e9;">
+					<td><strong>3</strong></td>
 					<td>action</td>
-					<td>set</td>
-					<td>VOICE_AI_DOMAIN_UUID=${domain_uuid}</td>
+					<td><code>answer</code></td>
+					<td><em>(deixe vazio)</em></td>
+					<td>📞 Atende a chamada</td>
 				</tr>
-				<tr>
-					<td>4</td>
+				<tr style="background: #e3f2fd;">
+					<td><strong>4</strong></td>
 					<td>action</td>
-					<td>socket</td>
-					<td>127.0.0.1:8022 async full</td>
+					<td><code>socket</code></td>
+					<td><code>127.0.0.1:8022 async full</code></td>
+					<td>🔌 Conecta ESL para controle</td>
+				</tr>
+				<tr style="background: #e3f2fd;">
+					<td><strong>5</strong></td>
+					<td>action</td>
+					<td><code>audio_stream</code></td>
+					<td><code>ws://127.0.0.1:8085/ws start both</code></td>
+					<td>🎙️ Inicia streaming de áudio</td>
+				</tr>
+				<tr style="background: #f5f5f5;">
+					<td><strong>6</strong></td>
+					<td>action</td>
+					<td><code>park</code></td>
+					<td><em>(deixe vazio)</em></td>
+					<td>⏸️ Mantém chamada ativa</td>
 				</tr>
 			</table>
 		</div>
 		
 		<div class="info-box">
 			<h4>💡 Como obter o UUID da Secretária</h4>
-			<p>Na lista de secretárias, clique em uma para editar. O UUID está na URL:</p>
-			<div class="code-block">
-/app/voice_secretary/secretary_edit.php?id=<strong>dc923a2f-b88a-4a2f-8029-d6e0c06893c5</strong>
+			<p>1. Vá em <strong>Voice Secretary → Secretaries</strong></p>
+			<p>2. Clique em uma secretária para editar</p>
+			<p>3. O UUID está na URL do navegador:</p>
+			<div class="code-block" style="word-break: break-all;">
+/app/voice_secretary/secretary_edit.php?id=<span style="color: #aed581; font-weight: bold;">dc923a2f-b88a-4a2f-8029-d6e0c06893c5</span>
+
+<span class="comment"># Copie apenas o UUID (parte após id=)</span>
 			</div>
 		</div>
 		
 		<div class="step-box">
-			<h4><span class="step-number">4</span> Recarregar Dialplan</h4>
+			<h4><span class="step-number">6</span> Salvar e Verificar</h4>
+			<p>Clique no botão <strong>Save</strong>. Seu dialplan deve ficar assim na lista:</p>
+			<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; font-family: monospace; margin: 10px 0; border: 1px solid #ddd;">
+				<table style="width: 100%; border-collapse: collapse;">
+					<tr style="background: #e0e0e0;">
+						<td style="padding: 8px; border-bottom: 1px solid #ccc;">✅</td>
+						<td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>voice_ai_hybrid_8000</strong></td>
+						<td style="padding: 8px; border-bottom: 1px solid #ccc;">8000</td>
+						<td style="padding: 8px; border-bottom: 1px solid #ccc;">empresa.com.br</td>
+						<td style="padding: 8px; border-bottom: 1px solid #ccc;">100</td>
+					</tr>
+				</table>
+			</div>
+		</div>
+		
+		<div class="step-box">
+			<h4><span class="step-number">7</span> Recarregar Dialplan no FreeSWITCH</h4>
+			<p>Execute no terminal do servidor:</p>
 			<div class="code-block">
+<span class="comment"># Opção 1: Via fs_cli</span>
 fs_cli -x "reloadxml"
+
+<span class="comment"># Opção 2: Via SSH direto</span>
+/usr/local/freeswitch/bin/fs_cli -x "reloadxml"
+
+<span class="comment"># Verificar se dialplan foi carregado</span>
+fs_cli -x "show dialplan" | grep voice_ai
+			</div>
+		</div>
+		
+		<div class="success-box">
+			<h4>✅ Dialplan Configurado com Sucesso!</h4>
+			<p>Agora, quando alguém ligar para <strong>8000</strong>, a chamada será:</p>
+			<ol>
+				<li>Atendida automaticamente</li>
+				<li>Conectada ao Voice AI via ESL (controle)</li>
+				<li>Stream de áudio iniciado via WebSocket</li>
+				<li>Mantida ativa até a IA ou handoff encerrar</li>
+			</ol>
+		</div>
+		
+		<hr style="margin: 25px 0; border: 1px dashed #ddd;">
+		
+		<h4>📄 Visualização do XML Gerado</h4>
+		<p>O FusionPBX gera automaticamente este XML (para referência):</p>
+		<div class="code-block" style="font-size: 12px;">
+<span class="comment">&lt;!-- Dialplan gerado pelo FusionPBX --&gt;</span>
+&lt;extension name="voice_ai_hybrid_8000"&gt;
+  &lt;condition field="destination_number" expression="^8000$"&gt;
+    <span class="comment">&lt;!-- 1. Identificação da secretária e domínio --&gt;</span>
+    &lt;action application="set" data="VOICE_AI_SECRETARY_UUID=dc923a2f-b88a-4a2f-8029-d6e0c06893c5"/&gt;
+    &lt;action application="set" data="VOICE_AI_DOMAIN_UUID=${domain_uuid}"/&gt;
+    
+    <span class="comment">&lt;!-- 2. Atender a chamada --&gt;</span>
+    &lt;action application="answer"/&gt;
+    
+    <span class="comment">&lt;!-- 3. Conectar ESL para CONTROLE (transferências, hangup, etc) --&gt;</span>
+    &lt;action application="socket" data="127.0.0.1:8022 async full"/&gt;
+    
+    <span class="comment">&lt;!-- 4. Iniciar mod_audio_stream para ÁUDIO (WebSocket) --&gt;</span>
+    &lt;action application="audio_stream" data="ws://127.0.0.1:8085/ws start both"/&gt;
+    
+    <span class="comment">&lt;!-- 5. Manter chamada ativa --&gt;</span>
+    &lt;action application="park"/&gt;
+  &lt;/condition&gt;
+&lt;/extension&gt;
+		</div>
+		
+		<h4>🔧 Troubleshooting do Dialplan</h4>
+		<div class="warning-box">
+			<h4>❌ "audio_stream" não reconhecido</h4>
+			<p><strong>Causa:</strong> mod_audio_stream não está carregado.</p>
+			<p><strong>Solução:</strong></p>
+			<div class="code-block">
+<span class="comment"># Verificar se módulo existe</span>
+fs_cli -x "module_exists mod_audio_stream"
+
+<span class="comment"># Se retornar false, carregar o módulo</span>
+fs_cli -x "load mod_audio_stream"
+
+<span class="comment"># Para carregar automaticamente, edite modules.conf.xml</span>
+nano /etc/freeswitch/autoload_configs/modules.conf.xml
+<span class="comment"># Adicione: &lt;load module="mod_audio_stream"/&gt;</span>
+			</div>
+		</div>
+		
+		<div class="warning-box">
+			<h4>❌ Chamada não conecta ao Voice AI</h4>
+			<p><strong>Causa:</strong> Container não está rodando ou portas não estão abertas.</p>
+			<p><strong>Solução:</strong></p>
+			<div class="code-block">
+<span class="comment"># Verificar container</span>
+docker ps | grep voice-ai
+
+<span class="comment"># Verificar portas</span>
+netstat -tlnp | grep -E "(8022|8085)"
+
+<span class="comment"># Testar conexão ESL</span>
+telnet 127.0.0.1 8022
 			</div>
 		</div>
 	</div>
@@ -953,12 +1160,23 @@ fs_cli -x "reloadxml"
 <span class="comment"># Container rodando?</span>
 docker ps | grep voice-ai
 
-<span class="comment"># Health check</span>
-curl http://localhost:8765/health
+<span class="comment"># Health check - API HTTP (porta 8100)</span>
+curl http://localhost:8100/health
+<span class="comment"># Deve retornar: {"status":"healthy","service":"voice-ai-service"...}</span>
 
 <span class="comment"># Ver logs em tempo real</span>
 docker compose logs -f voice-ai-realtime
 			</div>
+		</div>
+		
+		<div class="info-box">
+			<h4>📡 Portas do Voice AI</h4>
+			<table class="config-table">
+				<tr><th>Porta</th><th>Protocolo</th><th>Função</th></tr>
+				<tr><td><strong>8100</strong></td><td>HTTP</td><td>API REST (health, métricas, configurações)</td></tr>
+				<tr><td><strong>8085</strong></td><td>WebSocket</td><td>Stream de áudio (mod_audio_stream)</td></tr>
+				<tr><td><strong>8022</strong></td><td>TCP</td><td>ESL Outbound (controle de chamada)</td></tr>
+			</table>
 		</div>
 		
 		<div class="step-box">

@@ -163,29 +163,85 @@ fs_cli -x "module_exists mod_audio_stream"
 fs_cli -x "load mod_audio_stream"
 ```
 
-### 4. Dialplan no FusionPBX
+### 4. Dialplan no FusionPBX (Tutorial Passo a Passo)
 
-Via interface web:
-1. **Dialplan → Dialplan Manager → + Add**
-2. **Name:** `voice_ai_hybrid`
-3. **Number:** `8000`
-4. **Context:** `[seu-domínio]`
-5. **Enabled:** `true`
+#### Passo 1: Acessar Dialplan Manager
 
-**Condition:**
-- Type: `destination_number`
-- Data: `^8000$`
+No menu do FusionPBX, navegue até: **Dialplan → Dialplan Manager → + Add**
 
-**Actions (em ordem):**
+#### Passo 2: Preencher Informações Básicas
 
-| # | Tag | Type | Data |
-|---|-----|------|------|
-| 1 | action | set | `VOICE_AI_SECRETARY_UUID=seu-uuid-aqui` |
-| 2 | action | set | `VOICE_AI_DOMAIN_UUID=${domain_uuid}` |
-| 3 | action | answer | |
-| 4 | action | socket | `127.0.0.1:8022 async full` |
-| 5 | action | audio_stream | `ws://127.0.0.1:8085/ws start both` |
-| 6 | action | park | |
+| Campo | Valor | Observação |
+|-------|-------|------------|
+| **Name** | `voice_ai_hybrid_8000` | Nome identificador |
+| **Number** | `8000` | Ramal que ativará a IA |
+| **Context** | `${domain_name}` | Ou o nome do seu domínio |
+| **Order** | `100` | Prioridade de execução |
+| **Enabled** | `true` | Dialplan ativo |
+| **Continue** | `false` | ⚠️ **CRÍTICO: DEVE SER FALSE!** |
+| **Description** | `Voice AI - Secretária Virtual Híbrida` | Descrição |
+
+> ⚠️ **IMPORTANTE:** O campo `Continue` DEVE ser `false`. Se for `true`, o FreeSWITCH continuará processando outros dialplans, causando comportamento inesperado.
+
+#### Passo 3: Adicionar Condição
+
+Na seção "Dialplan Details", clique em **+ Add** e configure:
+
+| Campo | Valor |
+|-------|-------|
+| **Tag** | `condition` |
+| **Type** | `destination_number` |
+| **Data** | `^8000$` |
+| **Order** | `0` |
+
+#### Passo 4: Adicionar Ações (ORDEM CORRETA!)
+
+Adicione as seguintes ações **na ordem exata**:
+
+| Ordem | Tag | Type | Data | Função |
+|-------|-----|------|------|--------|
+| 1 | action | `set` | `VOICE_AI_SECRETARY_UUID=SEU-UUID-AQUI` | 🔑 Identifica a secretária |
+| 2 | action | `set` | `VOICE_AI_DOMAIN_UUID=${domain_uuid}` | 🏢 Passa o domínio |
+| 3 | action | `answer` | *(vazio)* | 📞 Atende a chamada |
+| 4 | action | `socket` | `127.0.0.1:8022 async full` | 🔌 Conecta ESL (controle) |
+| 5 | action | `audio_stream` | `ws://127.0.0.1:8085/ws start both` | 🎙️ Inicia stream de áudio |
+| 6 | action | `park` | *(vazio)* | ⏸️ Mantém chamada ativa |
+
+> 💡 **Como obter o UUID da Secretária:** Vá em Voice Secretary → Secretaries, clique para editar, e o UUID está na URL: `/secretary_edit.php?id=UUID-AQUI`
+
+#### Passo 5: Salvar e Recarregar
+
+1. Clique em **Save**
+2. No terminal do servidor, execute:
+```bash
+fs_cli -x "reloadxml"
+```
+
+#### XML Gerado (Referência)
+
+O FusionPBX gera automaticamente este XML:
+
+```xml
+<extension name="voice_ai_hybrid_8000">
+  <condition field="destination_number" expression="^8000$">
+    <!-- Identificação -->
+    <action application="set" data="VOICE_AI_SECRETARY_UUID=dc923a2f-..."/>
+    <action application="set" data="VOICE_AI_DOMAIN_UUID=${domain_uuid}"/>
+    
+    <!-- Atender -->
+    <action application="answer"/>
+    
+    <!-- ESL para CONTROLE (transferências, hangup) -->
+    <action application="socket" data="127.0.0.1:8022 async full"/>
+    
+    <!-- WebSocket para ÁUDIO -->
+    <action application="audio_stream" data="ws://127.0.0.1:8085/ws start both"/>
+    
+    <!-- Manter ativa -->
+    <action application="park"/>
+  </condition>
+</extension>
+```
 
 ## Vantagens da Arquitetura Híbrida
 
