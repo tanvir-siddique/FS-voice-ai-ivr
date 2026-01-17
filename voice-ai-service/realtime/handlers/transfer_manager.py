@@ -647,13 +647,23 @@ class TransferManager:
             
             logger.info(f"B-leg answered, playing announcement: {b_leg_uuid}")
             
-            # 7. Tocar anúncio para o humano via mod_say
+            # 7. Tocar anúncio para o humano
+            # Primeiro, tenta TTS. Se falhar, usa arquivo de áudio genérico.
             announcement_with_instructions = (
                 f"{announcement}. "
-                "Pressione 2 para recusar ou aguarde para aceitar."
+                "Press 2 to reject or wait to accept."  # Inglês para mod_flite
             )
             
-            await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+            tts_success = await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+            
+            if not tts_success:
+                # Fallback: tocar arquivo de áudio genérico
+                # O arquivo deve existir em /usr/share/freeswitch/sounds/
+                logger.warning("TTS failed, using generic announcement audio")
+                await self._esl.uuid_playback(
+                    b_leg_uuid,
+                    "ivr/ivr-one_moment_please.wav"  # Arquivo padrão do FreeSWITCH
+                )
             
             # 8. Aguardar resposta (modelo híbrido)
             response = await self._esl.wait_for_reject_or_timeout(
