@@ -138,6 +138,10 @@ class AsyncESLClient:
         # Lock para operações thread-safe
         self._command_lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
+        
+        # Flag para pausar event reader durante comandos
+        # Evita "readuntil() called while another coroutine is already waiting"
+        self._command_in_progress = False
     
     async def connect(self) -> bool:
         """
@@ -254,13 +258,20 @@ class AsyncESLClient:
         events = list(self._subscribed_events)
         self._subscribed_events.clear()
         
-        for event in events:
-            try:
-                await self._send(f"event plain {event}\n\n")
-                await self._read_response()
-                self._subscribed_events.add(event)
-            except Exception as e:
-                logger.warning(f"Failed to resubscribe to {event}: {e}")
+        # Pausar event reader durante resubscribe
+        self._command_in_progress = True
+        try:
+            await asyncio.sleep(0.01)
+            
+            for event in events:
+                try:
+                    await self._send(f"event plain {event}\n\n")
+                    await self._read_response()
+                    self._subscribed_events.add(event)
+                except Exception as e:
+                    logger.warning(f"Failed to resubscribe to {event}: {e}")
+        finally:
+            self._command_in_progress = False
     
     @property
     def is_connected(self) -> bool:
@@ -328,6 +339,12 @@ class AsyncESLClient:
         """Loop de leitura de eventos em background."""
         while self._connected:
             try:
+                # Pausar enquanto um comando está em progresso
+                # Evita "readuntil() called while another coroutine is already waiting"
+                if self._command_in_progress:
+                    await asyncio.sleep(0.05)  # 50ms
+                    continue
+                
                 event = await self._read_event()
                 if event:
                     # Processar handlers registrados
@@ -347,7 +364,7 @@ class AsyncESLClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                if self._connected:
+                if self._connected and not self._command_in_progress:
                     logger.error(f"Event reader error: {e}")
                     # Tentar reconectar
                     await self.reconnect()
@@ -440,16 +457,24 @@ class AsyncESLClient:
                 if not await self.connect():
                     raise ESLConnectionError("Failed to connect to ESL")
             
-            await self._send(f"api {command}\n\n")
-            response = await self._read_response()
-            
-            # Extrair body da resposta
-            if "Content-Length:" in response:
-                parts = response.split("\n\n", 1)
-                if len(parts) > 1:
-                    return parts[1]
-            
-            return response
+            # Pausar event reader loop durante o comando
+            self._command_in_progress = True
+            try:
+                # Pequeno delay para garantir que o event reader pausou
+                await asyncio.sleep(0.01)
+                
+                await self._send(f"api {command}\n\n")
+                response = await self._read_response()
+                
+                # Extrair body da resposta
+                if "Content-Length:" in response:
+                    parts = response.split("\n\n", 1)
+                    if len(parts) > 1:
+                        return parts[1]
+                
+                return response
+            finally:
+                self._command_in_progress = False
     
     async def execute_bgapi(self, command: str) -> str:
         """
@@ -466,15 +491,22 @@ class AsyncESLClient:
                 if not await self.connect():
                     raise ESLConnectionError("Failed to connect to ESL")
             
-            await self._send(f"bgapi {command}\n\n")
-            response = await self._read_response()
-            
-            # Extrair Job-UUID
-            match = re.search(r"Job-UUID:\s*([a-f0-9-]+)", response)
-            if match:
-                return match.group(1)
-            
-            return response
+            # Pausar event reader loop durante o comando
+            self._command_in_progress = True
+            try:
+                await asyncio.sleep(0.01)
+                
+                await self._send(f"bgapi {command}\n\n")
+                response = await self._read_response()
+                
+                # Extrair Job-UUID
+                match = re.search(r"Job-UUID:\s*([a-f0-9-]+)", response)
+                if match:
+                    return match.group(1)
+                
+                return response
+            finally:
+                self._command_in_progress = False
     
     # =========================================================================
     # API de eventos
@@ -492,23 +524,36 @@ class AsyncESLClient:
             events: Lista de eventos (ex: ["CHANNEL_ANSWER", "CHANNEL_HANGUP"])
             uuid: UUID específico para filtrar (opcional)
         """
-        for event in events:
-            if event not in self._subscribed_events:
-                cmd = f"event plain {event}"
-                await self._send(f"{cmd}\n\n")
-                await self._read_response()
-                self._subscribed_events.add(event)
-        
-        # Se uuid específico, filtrar eventos
-        if uuid:
-            await self._send(f"filter Unique-ID {uuid}\n\n")
-            await self._read_response()
+        async with self._command_lock:
+            self._command_in_progress = True
+            try:
+                await asyncio.sleep(0.01)
+                
+                for event in events:
+                    if event not in self._subscribed_events:
+                        cmd = f"event plain {event}"
+                        await self._send(f"{cmd}\n\n")
+                        await self._read_response()
+                        self._subscribed_events.add(event)
+                
+                # Se uuid específico, filtrar eventos
+                if uuid:
+                    await self._send(f"filter Unique-ID {uuid}\n\n")
+                    await self._read_response()
+            finally:
+                self._command_in_progress = False
     
     async def unsubscribe_events(self, uuid: Optional[str] = None) -> None:
         """Remove filtros de eventos."""
         if uuid:
-            await self._send(f"filter delete Unique-ID {uuid}\n\n")
-            await self._read_response()
+            async with self._command_lock:
+                self._command_in_progress = True
+                try:
+                    await asyncio.sleep(0.01)
+                    await self._send(f"filter delete Unique-ID {uuid}\n\n")
+                    await self._read_response()
+                finally:
+                    self._command_in_progress = False
     
     def on_event(
         self,
