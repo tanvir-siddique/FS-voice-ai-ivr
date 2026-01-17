@@ -1050,26 +1050,26 @@ fs_cli -x "module_exists mod_audio_stream"
 					<td><code>VOICE_AI_DOMAIN_UUID=${domain_uuid}</code></td>
 					<td>🏢 Passa o domínio para o Voice AI</td>
 				</tr>
-				<tr style="background: #e8f5e9;">
+				<tr style="background: #e3f2fd;">
 					<td><strong>3</strong></td>
+					<td>action</td>
+					<td><code>set</code></td>
+					<td><code style="font-size: 10px;">api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16k</code></td>
+					<td>🎙️ Configura streaming (executa após answer)</td>
+				</tr>
+				<tr style="background: #e8f5e9;">
+					<td><strong>4</strong></td>
 					<td>action</td>
 					<td><code>answer</code></td>
 					<td><em>(deixe vazio)</em></td>
-					<td>📞 Atende a chamada</td>
-				</tr>
-				<tr style="background: #e3f2fd;">
-					<td><strong>4</strong></td>
-					<td>action</td>
-					<td><code>socket</code></td>
-					<td><code>127.0.0.1:8022 async full</code></td>
-					<td>🔌 Conecta ESL para controle</td>
+					<td>📞 Atende a chamada (dispara api_on_answer)</td>
 				</tr>
 				<tr style="background: #e3f2fd;">
 					<td><strong>5</strong></td>
 					<td>action</td>
-					<td><code>set</code></td>
-					<td><code style="font-size: 11px;">api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16000</code></td>
-					<td>🎙️ Inicia streaming de áudio</td>
+					<td><code>socket</code></td>
+					<td><code>127.0.0.1:8022 async full</code></td>
+					<td>🔌 Conecta ESL para controle</td>
 				</tr>
 				<tr style="background: #f5f5f5;">
 					<td><strong>6</strong></td>
@@ -1141,21 +1141,21 @@ fs_cli -x "show dialplan" | grep voice_ai
 		<p>O FusionPBX gera automaticamente este XML (para referência):</p>
 		<div class="code-block" style="font-size: 12px;">
 <span class="comment">&lt;!-- Dialplan gerado pelo FusionPBX --&gt;</span>
-&lt;extension name="voice_ai_hybrid_8000"&gt;
+&lt;extension name="voice_ai_hybrid_8000" continue="false"&gt;
   &lt;condition field="destination_number" expression="^8000$"&gt;
     <span class="comment">&lt;!-- 1. Identificação da secretária e domínio --&gt;</span>
     &lt;action application="set" data="VOICE_AI_SECRETARY_UUID=dc923a2f-b88a-4a2f-8029-d6e0c06893c5"/&gt;
     &lt;action application="set" data="VOICE_AI_DOMAIN_UUID=${domain_uuid}"/&gt;
     
-    <span class="comment">&lt;!-- 2. Atender a chamada (ANTES do streaming!) --&gt;</span>
+    <span class="comment">&lt;!-- 2. Configurar streaming via api_on_answer (ANTES do answer!) --&gt;</span>
+    <span class="comment">&lt;!-- O comando será executado APÓS o answer, automaticamente --&gt;</span>
+    &lt;action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16k"/&gt;
+    
+    <span class="comment">&lt;!-- 3. Atender a chamada (dispara api_on_answer) --&gt;</span>
     &lt;action application="answer"/&gt;
     
-    <span class="comment">&lt;!-- 3. Conectar ESL para CONTROLE (transferências, hangup, etc) --&gt;</span>
+    <span class="comment">&lt;!-- 4. Conectar ESL para CONTROLE (transferências, hangup, etc) --&gt;</span>
     &lt;action application="socket" data="127.0.0.1:8022 async full"/&gt;
-    
-    <span class="comment">&lt;!-- 4. Iniciar uuid_audio_stream via api_on_answer --&gt;</span>
-    <span class="comment">&lt;!-- Parâmetros: uuid, start, ws-url, mix-type (mono/mixed/stereo), sample-rate --&gt;</span>
-    &lt;action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16000"/&gt;
     
     <span class="comment">&lt;!-- 5. Manter chamada ativa --&gt;</span>
     &lt;action application="park"/&gt;
@@ -1166,13 +1166,19 @@ fs_cli -x "show dialplan" | grep voice_ai
 		<div class="info-box">
 			<h4>📝 Parâmetros do uuid_audio_stream</h4>
 			<table class="config-table">
-				<tr><th>Parâmetro</th><th>Valor</th><th>Descrição</th></tr>
-				<tr><td><code>${uuid}</code></td><td>Variável</td><td>UUID da chamada (automático)</td></tr>
-				<tr><td><code>start</code></td><td>start/stop</td><td>Ação a executar</td></tr>
-				<tr><td><code>ws://...</code></td><td>URL</td><td>Endereço WebSocket do Voice AI</td></tr>
-				<tr><td><code>mixed</code></td><td>mono/mixed/stereo</td><td>Tipo de mix de áudio (NÃO use "both"!)</td></tr>
-				<tr><td><code>16000</code></td><td>8000/16000</td><td>Sample rate em Hz</td></tr>
+				<tr><th>Parâmetro</th><th>Valores</th><th>Descrição</th></tr>
+				<tr><td><code>${uuid}</code></td><td>Variável automática</td><td>UUID da chamada atual</td></tr>
+				<tr><td><code>start</code></td><td>start / stop / pause / resume</td><td>Ação a executar</td></tr>
+				<tr><td><code>ws://...</code></td><td>ws:// ou wss://</td><td>URL do servidor WebSocket</td></tr>
+				<tr><td><code>mixed</code></td><td><strong>mono / mixed / stereo</strong></td><td>⚠️ NÃO use "both"!</td></tr>
+				<tr><td><code>16k</code></td><td><strong>8k / 16k</strong></td><td>⚠️ Use "k" (ex: 16k, NÃO 16000)</td></tr>
 			</table>
+		</div>
+		
+		<div class="warning-box">
+			<h4>⚠️ Ordem Crítica das Ações</h4>
+			<p><code>api_on_answer</code> deve ser definido <strong>ANTES</strong> do <code>answer</code>!</p>
+			<p>Isso porque o <code>api_on_answer</code> é um comando que será <strong>executado automaticamente</strong> quando o <code>answer</code> for chamado.</p>
 		</div>
 		
 		<h4>🔧 Troubleshooting do Dialplan</h4>
