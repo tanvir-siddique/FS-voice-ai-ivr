@@ -109,6 +109,16 @@ O módulo expõe estes comandos via API:
 
 > ⚠️ **IMPORTANTE:** Use `8k` ou `16k` (com 'k'), NÃO `8000` ou `16000`!
 
+### Qual Mix Type usar?
+
+| Mix Type | O que captura | Recomendação |
+|----------|---------------|--------------|
+| **`mono`** | Apenas áudio do CHAMADOR (cliente) | ✅ **RECOMENDADO para IA conversacional** |
+| `mixed` | Ambos os lados mixados | ⚠️ Evitar - IA pode "ouvir" a própria resposta |
+| `stereo` | Canais separados (L=caller, R=callee) | 📝 Útil para gravação com separação |
+
+> 💡 **Por que `mono`?** A resposta da IA (TTS) é reproduzida via ESL (`uuid_broadcast`, `playback`), diretamente no FreeSWITCH. Com `mono`, esse áudio NÃO volta para o WebSocket, evitando que a IA "escute a si mesma" e cause loops ou confusão no STT.
+
 ### Eventos Gerados
 
 O módulo dispara eventos no FreeSWITCH:
@@ -239,7 +249,7 @@ Adicione as seguintes ações **na ordem exata**:
 |-------|-----|------|------|--------|
 | 1 | action | `set` | `VOICE_AI_SECRETARY_UUID=SEU-UUID-AQUI` | 🔑 Identifica a secretária |
 | 2 | action | `set` | `VOICE_AI_DOMAIN_UUID=${domain_uuid}` | 🏢 Passa o domínio |
-| 3 | action | `set` | `api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16k` | 🎙️ Configura streaming (executa após answer) |
+| 3 | action | `set` | `api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mono 16k` | 🎙️ Configura streaming (executa após answer) |
 | 4 | action | `answer` | *(vazio)* | 📞 Atende a chamada (dispara api_on_answer) |
 | 5 | action | `socket` | `127.0.0.1:8022 async full` | 🔌 Conecta ESL (controle) |
 | 6 | action | `park` | *(vazio)* | ⏸️ Mantém chamada ativa |
@@ -267,7 +277,7 @@ O FusionPBX gera automaticamente este XML:
     
     <!-- 2. Configurar streaming via api_on_answer -->
     <!-- Este comando será executado APÓS o answer -->
-    <action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16k"/>
+    <action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mono 16k"/>
     
     <!-- 3. Atender a chamada (dispara api_on_answer automaticamente) -->
     <action application="answer"/>
@@ -297,7 +307,7 @@ Exemplo de uso:
 ```xml
 <action application="set" data="STREAM_BUFFER_SIZE=20"/>
 <action application="set" data="STREAM_PLAYBACK=true"/>
-<action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mixed 16k"/>
+<action application="set" data="api_on_answer=uuid_audio_stream ${uuid} start ws://127.0.0.1:8085/ws mono 16k"/>
 <action application="answer"/>
 ```
 

@@ -98,20 +98,22 @@ uuid_audio_stream <uuid> start <url> <mix_type> <sample_rate>
 ```
 
 Onde `mix_type` deve ser:
-- `mono` - Apenas um canal
-- `mixed` - Ambos os canais mixados (recomendado para AI)
-- `stereo` - Canais separados
+- `mono` - Apenas áudio do chamador **(RECOMENDADO para IA conversacional)**
+- `mixed` - Ambos os canais mixados (cuidado: IA pode "ouvir" a própria resposta)
+- `stereo` - Canais separados (útil para gravação)
+
+> 💡 **Por que `mono`?** A resposta da IA (TTS) é reproduzida via ESL, não pelo WebSocket. Com `mono`, a IA só ouve o cliente, evitando loops de eco.
 
 ### Solução
 ```lua
--- ERRADO
+-- ERRADO (mix type e sample rate inválidos)
 local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " both 8000"
 
--- CORRETO
-local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mixed 16000"
+-- CORRETO (mono para IA, 16k com 'k')
+local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mono 16k"
 ```
 
-**Nota:** Sample rate de 16000 Hz é recomendado para processamento de voz/AI.
+**Nota:** Sample rate deve usar `16k` (com 'k'), NÃO `16000`.
 
 ---
 
@@ -174,8 +176,9 @@ freeswitch.consoleLog("INFO", "[VoiceSecretary] Connecting to WebSocket: " .. ws
 
 -- Iniciar audio stream via API
 -- Sintaxe: uuid_audio_stream <uuid> start <url> <mix_type> <sample_rate>
+-- IMPORTANTE: usar 'mono' para IA conversacional (evita eco) e '16k' (com 'k')
 local api = freeswitch.API()
-local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mixed 16000"
+local cmd = "uuid_audio_stream " .. call_uuid .. " start " .. ws_url .. " mono 16k"
 freeswitch.consoleLog("INFO", "[VoiceSecretary] Executing: " .. cmd .. "\n")
 
 local result = api:executeString(cmd)
