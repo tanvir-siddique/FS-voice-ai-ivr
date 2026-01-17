@@ -841,17 +841,21 @@ class AsyncESLClient:
                 all_vars.update(variables)
             
             # Formatar string de variáveis para ESL
-            # NOTA: Via ESL API, valores NÃO precisam de aspas
-            # Espaços em valores são tratados corretamente dentro das chaves {}
+            # DOCUMENTAÇÃO OFICIAL FreeSWITCH (developer.signalwire.com):
+            # - Valores com espaços DEVEM estar entre aspas simples
+            # - Aspas simples internas devem ser escapadas com \'
+            # - Exemplo: {origination_caller_id_name='fred\'s tire shop'}
             var_parts = []
             for k, v in all_vars.items():
-                # Substituir espaços por underscores no caller_id_name
-                # para evitar problemas de parsing
                 value = str(v)
-                if k == "origination_caller_id_name":
-                    # Remover espaços que podem causar problemas
-                    value = value.replace(" ", "_")
-                var_parts.append(f"{k}={value}")
+                # Verificar se precisa de aspas (espaços ou caracteres especiais)
+                if ' ' in value or ',' in value or "'" in value:
+                    # Escapar aspas simples internas
+                    escaped = value.replace("'", "\\'")
+                    var_parts.append(f"{k}='{escaped}'")
+                else:
+                    # Valores simples não precisam de aspas
+                    var_parts.append(f"{k}={value}")
             
             var_string = "{" + ",".join(var_parts) + "}"
             

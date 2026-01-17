@@ -646,7 +646,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             audio_bytes = self._resampler.resample_output(audio_bytes)
         
         # Durante warmup, resample_output retorna b""
+        # Durante transfer, não enviar áudio (MOH está tocando)
         if audio_bytes and self._on_audio_output:
+            if self._transfer_in_progress:
+                # Áudio mutado durante transferência - MOH está tocando
+                logger.debug("Audio muted - transfer in progress")
+                return
             self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
     
@@ -656,6 +661,9 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         Usado para flush do buffer restante.
         """
         if audio_bytes and self._on_audio_output:
+            if self._transfer_in_progress:
+                # Áudio mutado durante transferência
+                return
             self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
     
