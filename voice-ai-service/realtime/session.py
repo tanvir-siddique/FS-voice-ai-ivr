@@ -582,6 +582,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """Processa áudio do FreeSWITCH."""
         if not self.is_active or not self._provider:
             return
+
+        # Durante transferência, não encaminhar áudio do FreeSWITCH para o provider.
+        # Motivo: o MOH (uuid_broadcast/local_stream://moh) pode "vazar" no stream
+        # e ser interpretado como fala, fazendo o agente gerar respostas sozinho.
+        if self._transfer_in_progress:
+            return
         
         # IMPORTANTE: Bloquear áudio do usuário após farewell detectado
         # para evitar que a IA continue conversando
@@ -1587,6 +1593,15 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             return
         
         self._transfer_in_progress = True
+
+        # Cancelar qualquer fala pendente do provider antes de entrar em MOH/originate.
+        # Em cenários onde o MOH "vaza" no áudio de entrada, isso reduz bastante a
+        # chance do agente continuar gerando respostas durante a espera.
+        try:
+            if self._provider:
+                await self._provider.interrupt()
+        except Exception as e:
+            logger.debug(f"Provider interrupt failed on handoff start: {e}")
         
         try:
             # 1. Encontrar destino
