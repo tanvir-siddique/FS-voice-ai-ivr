@@ -534,6 +534,229 @@ class TransferManager:
             retries=retries
         )
     
+    # =========================================================================
+    # ANNOUNCED TRANSFER: Transferência com anúncio para o humano
+    # Ref: voice-ai-ivr/openspec/changes/announced-transfer/
+    # =========================================================================
+    
+    async def execute_announced_transfer(
+        self,
+        destination: TransferDestination,
+        announcement: str,
+        ring_timeout: int = 30,
+        accept_timeout: float = 5.0,
+    ) -> TransferResult:
+        """
+        Executa transferência COM ANÚNCIO para o humano.
+        
+        Fluxo:
+        1. MOH no A-leg (cliente)
+        2. Originate B-leg (humano)
+        3. Quando humano atende, TTS do anúncio
+        4. Aguardar resposta (modelo híbrido):
+           - Timeout 5s = aceitar (bridge)
+           - DTMF 2 = recusar
+           - Hangup = recusar
+        5. Se aceitar: bridge A↔B
+        6. Se recusar: retornar ao cliente
+        
+        Args:
+            destination: Destino da transferência
+            announcement: Texto do anúncio (ex: "Tenho o João na linha sobre plano")
+            ring_timeout: Timeout de ring em segundos
+            accept_timeout: Tempo para aceitar automaticamente (segundos)
+        
+        Returns:
+            TransferResult com status
+        """
+        start_time = datetime.utcnow()
+        
+        logger.info(
+            f"Starting ANNOUNCED transfer",
+            extra={
+                "call_uuid": self.call_uuid,
+                "destination": destination.name,
+                "destination_number": destination.destination_number,
+                "announcement": announcement[:50] + "..." if len(announcement) > 50 else announcement,
+            }
+        )
+        
+        try:
+            # 1. Garantir conexão ESL
+            if not self._esl.is_connected:
+                connected = await self._esl.connect()
+                if not connected:
+                    logger.error("Failed to connect to ESL for announced transfer")
+                    return TransferResult(
+                        status=TransferStatus.FAILED,
+                        destination=destination,
+                        error="Falha na conexão ESL",
+                    )
+            
+            # 2. Verificar se A-leg ainda existe
+            a_leg_exists = await self._esl.uuid_exists(self.call_uuid)
+            if not a_leg_exists and self._caller_hungup:
+                return TransferResult(
+                    status=TransferStatus.CANCELLED,
+                    destination=destination,
+                    error="Cliente desligou",
+                )
+            
+            # 3. Tocar música de espera no cliente
+            await self._start_moh()
+            
+            # 4. Subscrever eventos DTMF para o B-leg
+            await self._esl.subscribe_events([
+                "CHANNEL_ANSWER",
+                "CHANNEL_HANGUP",
+                "DTMF"
+            ])
+            
+            # 5. Originar B-leg
+            dial_string = self._build_dial_string(destination)
+            
+            logger.info(f"Originating B-leg for announced transfer: {dial_string}")
+            
+            b_leg_uuid = await self._esl.originate(
+                dial_string=dial_string,
+                app="&park()",
+                timeout=ring_timeout,
+                variables={
+                    "ignore_early_media": "true",
+                    "hangup_after_bridge": "true",
+                    "origination_caller_id_number": self.caller_id,
+                    "origination_caller_id_name": "Secretaria_Virtual"
+                }
+            )
+            
+            if not b_leg_uuid:
+                await self._stop_moh()
+                return TransferResult(
+                    status=TransferStatus.NO_ANSWER,
+                    destination=destination,
+                    error="Destino não atendeu",
+                    message=f"{destination.name} não atendeu. Quer deixar um recado?",
+                    should_offer_callback=True,
+                )
+            
+            self._b_leg_uuid = b_leg_uuid
+            
+            # 6. Parar MOH temporariamente para o anúncio
+            # (humano já atendeu - originate síncrono retornou +OK)
+            # NOTA: Mantemos o MOH no cliente, apenas falamos com o humano
+            
+            logger.info(f"B-leg answered, playing announcement: {b_leg_uuid}")
+            
+            # 7. Tocar anúncio para o humano via mod_say
+            announcement_with_instructions = (
+                f"{announcement}. "
+                "Pressione 2 para recusar ou aguarde para aceitar."
+            )
+            
+            await self._esl.uuid_say(b_leg_uuid, announcement_with_instructions)
+            
+            # 8. Aguardar resposta (modelo híbrido)
+            response = await self._esl.wait_for_reject_or_timeout(
+                b_leg_uuid,
+                timeout=accept_timeout
+            )
+            
+            # 9. Processar resposta
+            if response == "accept":
+                # Timeout = aceitar → Bridge
+                logger.info(f"Announced transfer: human accepted (timeout)")
+                
+                await self._stop_moh()
+                
+                # Definir hangup_after_bridge no A-leg
+                await self._esl.execute_api(
+                    f"uuid_setvar {self.call_uuid} hangup_after_bridge true"
+                )
+                
+                # Criar bridge
+                bridge_success = await self._esl.uuid_bridge(
+                    self.call_uuid,
+                    b_leg_uuid
+                )
+                
+                if bridge_success:
+                    duration = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                    
+                    result = TransferResult(
+                        status=TransferStatus.SUCCESS,
+                        destination=destination,
+                        b_leg_uuid=b_leg_uuid,
+                        duration_ms=duration,
+                    )
+                    
+                    logger.info(
+                        f"Announced transfer SUCCESS: bridge established",
+                        extra={
+                            "call_uuid": self.call_uuid,
+                            "b_leg_uuid": b_leg_uuid,
+                            "destination": destination.name,
+                        }
+                    )
+                    
+                    if self._on_transfer_complete:
+                        await self._on_transfer_complete(result)
+                    
+                    return result
+                else:
+                    # Bridge falhou
+                    await self._esl.uuid_kill(b_leg_uuid)
+                    await self._stop_moh()
+                    
+                    return TransferResult(
+                        status=TransferStatus.FAILED,
+                        destination=destination,
+                        error="Falha ao criar bridge",
+                    )
+            
+            elif response == "reject":
+                # DTMF 2 = humano recusou
+                logger.info(f"Announced transfer: human REJECTED (DTMF 2)")
+                
+                await self._esl.uuid_kill(b_leg_uuid)
+                await self._stop_moh()
+                
+                return TransferResult(
+                    status=TransferStatus.REJECTED,
+                    destination=destination,
+                    message=f"{destination.name} não pode atender agora. Quer deixar um recado?",
+                    should_offer_callback=True,
+                )
+            
+            else:  # "hangup"
+                # Humano desligou
+                logger.info(f"Announced transfer: human HANGUP")
+                
+                await self._stop_moh()
+                
+                return TransferResult(
+                    status=TransferStatus.REJECTED,
+                    destination=destination,
+                    message=f"{destination.name} não está disponível. Quer deixar um recado?",
+                    should_offer_callback=True,
+                )
+        
+        except asyncio.CancelledError:
+            # Tarefa cancelada (ex: cliente desligou)
+            if self._b_leg_uuid:
+                await self._esl.uuid_kill(self._b_leg_uuid)
+            await self._stop_moh()
+            raise
+        
+        except Exception as e:
+            logger.exception(f"Announced transfer error: {e}")
+            await self._stop_moh()
+            
+            return TransferResult(
+                status=TransferStatus.FAILED,
+                destination=destination,
+                error=str(e),
+            )
+    
     async def _monitor_transfer_leg(
         self,
         b_leg_uuid: str,

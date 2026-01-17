@@ -948,6 +948,218 @@ class AsyncESLClient:
             return "true" in result.lower()
         except Exception:
             return False
+    
+    # =========================================================================
+    # ANNOUNCED TRANSFER: Métodos para transferência com anúncio
+    # Ref: voice-ai-ivr/openspec/changes/announced-transfer/
+    # =========================================================================
+    
+    async def uuid_say(
+        self,
+        uuid: str,
+        text: str,
+        lang: str = "pt-BR"
+    ) -> bool:
+        """
+        Fala texto para um canal usando mod_say do FreeSWITCH.
+        
+        NOTA: mod_say usa voz robótica. Para voz natural, usar TTS externo
+        e uuid_broadcast com arquivo de áudio.
+        
+        Args:
+            uuid: UUID do canal
+            text: Texto a falar
+            lang: Idioma (pt-BR, en-US, es-MX, etc)
+        
+        Returns:
+            True se comando enviado com sucesso
+        """
+        try:
+            # Escapar caracteres especiais
+            text_escaped = text.replace("'", "").replace('"', "").replace("\n", " ")
+            
+            # Formato: uuid_broadcast <uuid> say:<lang>:<text> aleg
+            # "aleg" significa tocar apenas para o leg A (o canal especificado)
+            result = await self.execute_api(
+                f"uuid_broadcast {uuid} 'say:{lang}:{text_escaped}' aleg"
+            )
+            
+            success = "+OK" in result
+            if success:
+                logger.debug(f"uuid_say success: {uuid} - {text[:50]}...")
+            else:
+                logger.warning(f"uuid_say failed: {result}")
+            
+            return success
+        except Exception as e:
+            logger.error(f"uuid_say error: {e}")
+            return False
+    
+    async def uuid_playback(
+        self,
+        uuid: str,
+        file_path: str,
+        leg: str = "aleg"
+    ) -> bool:
+        """
+        Toca arquivo de áudio para um canal.
+        
+        Args:
+            uuid: UUID do canal
+            file_path: Caminho do arquivo (local ou URL)
+            leg: "aleg" (apenas este canal), "bleg" (outro canal), "both"
+        
+        Returns:
+            True se comando enviado com sucesso
+        """
+        try:
+            result = await self.execute_api(
+                f"uuid_broadcast {uuid} '{file_path}' {leg}"
+            )
+            
+            success = "+OK" in result
+            if success:
+                logger.debug(f"uuid_playback success: {uuid} - {file_path}")
+            else:
+                logger.warning(f"uuid_playback failed: {result}")
+            
+            return success
+        except Exception as e:
+            logger.error(f"uuid_playback error: {e}")
+            return False
+    
+    async def uuid_recv_dtmf(
+        self,
+        uuid: str,
+        timeout: float = 10.0,
+        valid_digits: str = "0123456789*#"
+    ) -> Optional[str]:
+        """
+        Aguarda DTMF de um canal específico.
+        
+        IMPORTANTE: Requer que eventos DTMF estejam subscritos.
+        Use subscribe_events(["DTMF"]) antes.
+        
+        Args:
+            uuid: UUID do canal
+            timeout: Timeout em segundos
+            valid_digits: Dígitos válidos para aceitar
+        
+        Returns:
+            Dígito pressionado ou None se timeout/hangup
+        """
+        try:
+            start = time.time()
+            
+            while time.time() - start < timeout:
+                # Verificar se canal ainda existe
+                if not await self.uuid_exists(uuid):
+                    logger.debug(f"uuid_recv_dtmf: channel {uuid} no longer exists")
+                    return None
+                
+                # Verificar fila de DTMFs para este UUID
+                dtmf = self._get_dtmf_from_queue(uuid)
+                if dtmf and dtmf in valid_digits:
+                    logger.info(f"DTMF received: {dtmf} from {uuid}")
+                    return dtmf
+                
+                await asyncio.sleep(0.1)
+            
+            logger.debug(f"uuid_recv_dtmf: timeout for {uuid}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"uuid_recv_dtmf error: {e}")
+            return None
+    
+    def _get_dtmf_from_queue(self, uuid: str) -> Optional[str]:
+        """
+        Obtém DTMF da fila interna para um UUID específico.
+        
+        A fila é populada pelo handler de eventos DTMF.
+        
+        Args:
+            uuid: UUID do canal
+        
+        Returns:
+            Dígito ou None se fila vazia
+        """
+        # A fila de DTMFs é mantida pelo _handle_dtmf_event
+        if hasattr(self, '_dtmf_queue') and uuid in self._dtmf_queue:
+            queue = self._dtmf_queue[uuid]
+            if queue:
+                return queue.pop(0)
+        return None
+    
+    def _store_dtmf(self, uuid: str, digit: str) -> None:
+        """
+        Armazena DTMF na fila interna.
+        
+        Chamado pelo handler de eventos DTMF.
+        
+        Args:
+            uuid: UUID do canal
+            digit: Dígito DTMF
+        """
+        if not hasattr(self, '_dtmf_queue'):
+            self._dtmf_queue = {}
+        
+        if uuid not in self._dtmf_queue:
+            self._dtmf_queue[uuid] = []
+        
+        # Limitar tamanho da fila para evitar memory leak
+        if len(self._dtmf_queue[uuid]) < 100:
+            self._dtmf_queue[uuid].append(digit)
+            logger.debug(f"DTMF stored: {digit} for {uuid}")
+    
+    async def wait_for_reject_or_timeout(
+        self,
+        uuid: str,
+        timeout: float = 5.0
+    ) -> str:
+        """
+        Aguarda recusa (DTMF 2 ou hangup) ou timeout (aceitar).
+        
+        Modelo híbrido para announced transfer:
+        - Não fazer nada por X segundos = aceitar
+        - Pressionar 2 = recusar
+        - Desligar = recusar
+        
+        Args:
+            uuid: UUID do canal (B-leg)
+            timeout: Tempo para aceitar automaticamente (segundos)
+        
+        Returns:
+            "accept" - Timeout (humano aguardou)
+            "reject" - DTMF 2 pressionado
+            "hangup" - Humano desligou
+        """
+        try:
+            start = time.time()
+            
+            logger.info(f"Waiting for reject or timeout ({timeout}s) on {uuid}")
+            
+            while time.time() - start < timeout:
+                # Verificar se canal ainda existe
+                if not await self.uuid_exists(uuid):
+                    logger.info(f"B-leg hangup detected: {uuid}")
+                    return "hangup"
+                
+                # Verificar se DTMF 2 foi pressionado
+                dtmf = self._get_dtmf_from_queue(uuid)
+                if dtmf == "2":
+                    logger.info(f"DTMF 2 (reject) received from {uuid}")
+                    return "reject"
+                
+                await asyncio.sleep(0.1)
+            
+            # Timeout = aceitar
+            logger.info(f"Timeout reached, accepting transfer for {uuid}")
+            return "accept"
+            
+        except Exception as e:
+            logger.error(f"wait_for_reject_or_timeout error: {e}")
+            return "hangup"
 
 
 # Singleton para uso global

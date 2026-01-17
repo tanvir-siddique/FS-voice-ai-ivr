@@ -206,8 +206,13 @@ class RealtimeSessionConfig:
     # FASE 1: Intelligent Handoff Configuration
     # Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
     intelligent_handoff_enabled: bool = True  # Usar TransferManager ao invés de handoff simples
-    transfer_announce_enabled: bool = True  # Anunciar antes de transferir
+    transfer_announce_enabled: bool = True  # Anunciar antes de transferir (ANNOUNCED TRANSFER)
     transfer_default_timeout: int = 30  # Timeout padrão de ring em segundos
+    
+    # ANNOUNCED TRANSFER: Anúncio para o humano antes de conectar
+    # Ref: voice-ai-ivr/openspec/changes/announced-transfer/
+    transfer_accept_timeout: float = 5.0  # Segundos para aceitar automaticamente (timeout = aceitar)
+    transfer_announcement_lang: str = "pt-BR"  # Idioma para mod_say
     
     # Business Hours (Time Condition)
     # Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/tasks.md
@@ -1672,37 +1677,29 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 self._transfer_in_progress = False
                 return
             
-            # 2. Anunciar transferência (se habilitado)
-            if self.config.transfer_announce_enabled:
-                await self._send_text_to_provider(
-                    f"Um momento, vou transferir para {destination.name}..."
-                )
-                # IMPORTANTE: não mutar o áudio antes do anúncio terminar,
-                # senão o agente é "cortado" e isso soa artificial.
-                #
-                # Espera curta e robusta: aguarda o provider terminar a fala atual,
-                # com timeout para não travar se o provider não sinalizar corretamente.
-                # Primeiro, aguardar o anúncio COMEÇAR (senão podemos entrar em modo transfer
-                # e mutar antes do primeiro áudio chegar).
-                waited_start = 0.0
-                max_wait_start = 1.2
-                while not self._assistant_speaking and waited_start < max_wait_start and not self._ended:
-                    await asyncio.sleep(0.05)
-                    waited_start += 0.05
+            # 2. Anunciar para o CLIENTE que vamos verificar
+            await self._send_text_to_provider(
+                f"Um momento, vou verificar com {destination.name}..."
+            )
+            
+            # Aguardar o anúncio ser falado para o cliente
+            waited_start = 0.0
+            max_wait_start = 1.2
+            while not self._assistant_speaking and waited_start < max_wait_start and not self._ended:
+                await asyncio.sleep(0.05)
+                waited_start += 0.05
 
-                waited = 0.0
-                max_wait = 6.0
-                while self._assistant_speaking and waited < max_wait and not self._ended:
-                    await asyncio.sleep(0.2)
-                    waited += 0.2
-                # Pequeno buffer para garantir que os últimos frames já foram enviados ao FS
-                await asyncio.sleep(0.25)
+            waited = 0.0
+            max_wait = 6.0
+            while self._assistant_speaking and waited < max_wait and not self._ended:
+                await asyncio.sleep(0.2)
+                waited += 0.2
+            await asyncio.sleep(0.25)
             
             # 2.5 Entrar em modo de transferência (silêncio + sem input pro provider)
             self._transfer_in_progress = True
 
             # Cancelar qualquer fala pendente do provider antes de entrar em MOH/originate.
-            # Evita que o agente continue gerando durante a espera.
             try:
                 if self._provider:
                     await self._provider.interrupt()
@@ -1716,14 +1713,28 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                     "destination": destination.name,
                     "destination_number": destination.destination_number,
                     "reason": reason,
+                    "announced_transfer": self.config.transfer_announce_enabled,
                 }
             )
             
-            # 3. Executar attended transfer
-            result = await self._transfer_manager.execute_attended_transfer(
-                destination=destination,
-                timeout=self.config.transfer_default_timeout,
-            )
+            # 3. Executar transferência
+            if self.config.transfer_announce_enabled:
+                # ANNOUNCED TRANSFER: Anunciar para o HUMANO antes de conectar
+                # "Olá, tenho o cliente X na linha sobre Y. Pressione 2 para recusar..."
+                announcement = self._build_announcement_for_human(destination_text, reason)
+                
+                result = await self._transfer_manager.execute_announced_transfer(
+                    destination=destination,
+                    announcement=announcement,
+                    ring_timeout=self.config.transfer_default_timeout,
+                    accept_timeout=self.config.transfer_accept_timeout,
+                )
+            else:
+                # BLIND TRANSFER: Conectar diretamente sem anunciar
+                result = await self._transfer_manager.execute_attended_transfer(
+                    destination=destination,
+                    timeout=self.config.transfer_default_timeout,
+                )
             
             self._current_transfer = result
             
@@ -1876,3 +1887,129 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         await self._execute_intelligent_handoff(user_text, "user_request")
         return self._current_transfer
+    
+    # =========================================================================
+    # ANNOUNCED TRANSFER: Construção do texto de anúncio
+    # Ref: voice-ai-ivr/openspec/changes/announced-transfer/
+    # =========================================================================
+    
+    def _build_announcement_for_human(
+        self,
+        destination_request: str,
+        reason: str
+    ) -> str:
+        """
+        Constrói texto de anúncio para o humano antes de conectar.
+        
+        O texto é falado pelo mod_say do FreeSWITCH quando o humano atende.
+        
+        Formato:
+        "Olá, tenho [identificação] na linha [sobre motivo]."
+        
+        Args:
+            destination_request: O que o cliente pediu (ex: "vendas", "Jeni")
+            reason: Motivo da ligação (do request_handoff)
+        
+        Returns:
+            Texto do anúncio
+        """
+        parts = []
+        
+        # Identificar o cliente
+        caller_name = self._extract_caller_name()
+        if caller_name:
+            parts.append(f"Olá, tenho {caller_name} na linha")
+        else:
+            # Usar caller_id formatado
+            caller_id = self.config.caller_id
+            if caller_id and len(caller_id) >= 10:
+                # Formatar número para ficar mais natural
+                # Ex: 11999887766 → "um um, nove nove nove, oito oito, sete sete, seis seis"
+                parts.append(f"Olá, tenho o número {caller_id} na linha")
+            else:
+                parts.append("Olá, tenho um cliente na linha")
+        
+        # Adicionar motivo se disponível
+        call_reason = self._extract_call_reason(reason)
+        if call_reason:
+            parts.append(f"sobre {call_reason}")
+        
+        return ". ".join(parts)
+    
+    def _extract_caller_name(self) -> Optional[str]:
+        """
+        Extrai nome do cliente do transcript.
+        
+        Procura padrões comuns como:
+        - "meu nome é João"
+        - "aqui é o João"
+        - "sou o João"
+        
+        Returns:
+            Nome extraído ou None
+        """
+        import re
+        
+        for entry in self._transcript:
+            if entry.role == "user":
+                text_lower = entry.text.lower()
+                
+                patterns = [
+                    r"meu nome [ée] (\w+)",
+                    r"aqui [ée] o? ?(\w+)",
+                    r"sou o? ?(\w+)",
+                    r"pode me chamar de (\w+)",
+                    r"me chamo (\w+)",
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text_lower)
+                    if match:
+                        name = match.group(1).capitalize()
+                        # Filtrar palavras comuns que não são nomes
+                        if name.lower() not in ["a", "o", "um", "uma", "eu", "que", "para"]:
+                            return name
+        
+        return None
+    
+    def _extract_call_reason(self, handoff_reason: str) -> Optional[str]:
+        """
+        Extrai motivo da ligação.
+        
+        Usa o motivo do request_handoff ou tenta extrair do transcript.
+        
+        Args:
+            handoff_reason: Motivo passado no request_handoff
+        
+        Returns:
+            Motivo resumido ou None
+        """
+        # Se o handoff_reason tem conteúdo útil, usar
+        if handoff_reason and handoff_reason not in ("llm_intent", "user_request", "solicitação do cliente"):
+            # Limitar tamanho
+            if len(handoff_reason) > 50:
+                return handoff_reason[:50]
+            return handoff_reason
+        
+        # Tentar extrair das últimas mensagens do usuário
+        user_messages = [e.text for e in self._transcript if e.role == "user"][-3:]
+        
+        if user_messages:
+            # Pegar a última mensagem do usuário (provavelmente contém o motivo)
+            last_message = user_messages[-1]
+            
+            # Remover frases comuns de transferência
+            import re
+            cleaned = re.sub(
+                r"(me transfere?|quero falar|pode me passar|me conecta?|liga|ligar|por favor)",
+                "",
+                last_message.lower()
+            ).strip()
+            
+            if cleaned and len(cleaned) > 5:
+                # Limitar tamanho
+                if len(cleaned) > 50:
+                    return cleaned[:50]
+                return cleaned
+        
+        return None
