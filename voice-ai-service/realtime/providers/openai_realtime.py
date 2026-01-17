@@ -459,16 +459,30 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         etype = event.get("type", "")
         
         # Log para debug de eventos desconhecidos
+        # COMPATIBILIDADE: Inclui formatos antigos (response.audio.*) e novos (response.output_audio.*)
         if etype not in (
-            "response.output_audio.delta", "response.output_audio.done",
+            # Áudio (formatos antigo e novo)
+            "response.audio.delta", "response.output_audio.delta",
+            "response.audio.done", "response.output_audio.done",
+            # Transcrição
             "response.audio_transcript.delta", "response.audio_transcript.done",
             "conversation.item.input_audio_transcription.completed",
+            "conversation.item.input_audio_transcription.failed",
+            # VAD
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped",
+            # Response lifecycle
             "response.created", "response.done",
-            "response.function_call_arguments.done",
+            "response.content_part.added", "response.content_part.done",
+            "response.output_item.added", "response.output_item.done",
+            # Function calls
+            "response.function_call_arguments.delta", "response.function_call_arguments.done",
+            # Session
             "session.created", "session.updated",
+            # Buffers
             "input_audio_buffer.committed", "input_audio_buffer.cleared",
-            "conversation.item.created", "error"
+            "conversation.item.created", 
+            # Errors
+            "error"
         ):
             logger.debug(f"OpenAI event received: {etype}", extra={
                 "domain_uuid": self.config.domain_uuid,
@@ -476,14 +490,16 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             })
         
         # ===== ÁUDIO OUTPUT =====
-        # CORRIGIDO: Era response.audio.delta, agora é response.output_audio.delta
-        if etype == "response.output_audio.delta":
+        # COMPATIBILIDADE: API pode retornar response.audio.delta OU response.output_audio.delta
+        # dependendo da versão/modelo. Suportamos ambos.
+        if etype in ("response.audio.delta", "response.output_audio.delta"):
             audio_b64 = event.get("delta", "")
             audio_bytes = base64.b64decode(audio_b64) if audio_b64 else b""
             
-            logger.debug(f"OpenAI audio received: {len(audio_bytes)} bytes", extra={
+            logger.info(f"OpenAI audio received: {len(audio_bytes)} bytes", extra={
                 "domain_uuid": self.config.domain_uuid,
                 "response_id": event.get("response_id"),
+                "event_type": etype,
             })
             
             return ProviderEvent(
@@ -493,10 +509,11 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 item_id=event.get("item_id"),
             )
         
-        # CORRIGIDO: Era response.audio.done
-        if etype == "response.output_audio.done":
-            logger.debug("OpenAI audio output done", extra={
+        # COMPATIBILIDADE: Suporta ambos os formatos de audio.done
+        if etype in ("response.audio.done", "response.output_audio.done"):
+            logger.info("OpenAI audio output done", extra={
                 "domain_uuid": self.config.domain_uuid,
+                "event_type": etype,
             })
             return ProviderEvent(type=ProviderEventType.AUDIO_DONE, data={})
         
