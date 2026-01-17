@@ -652,8 +652,8 @@ class TransferManager:
         """
         Constrói dial string para o destino.
         
-        IMPORTANTE: Via ESL api originate, usar sofia/internal/ ao invés de user/
-        O formato user/ é resolvido pelo dialplan, mas não pelo api originate.
+        IMPORTANTE: Usar user/ para extensões internas!
+        O FreeSWITCH resolve user/ext@domain para o IP real do softphone.
         
         Args:
             dest: Destino da transferência
@@ -664,16 +664,13 @@ class TransferManager:
         number = dest.destination_number
         context = dest.destination_context
         
-        # Obter perfil sofia do ambiente (default: internal)
-        sofia_profile = os.getenv("SOFIA_PROFILE", "internal")
-        
         if dest.destination_type == "extension":
-            # Via ESL: usar sofia/profile/ ao invés de user/
-            # user/ é resolvido pelo dialplan, não pelo api originate
-            return f"sofia/{sofia_profile}/{number}@{context}"
+            # user/ resolve para o IP real do softphone via directory lookup
+            # Exemplo: user/1001@domain → sofia/internal/1001@177.72.9.170:57203
+            return f"user/{number}@{context}"
         
         elif dest.destination_type == "ring_group":
-            # Ring groups precisam ser chamados via dialplan
+            # Ring groups usam group/
             return f"group/{number}@{context}"
         
         elif dest.destination_type == "queue":
