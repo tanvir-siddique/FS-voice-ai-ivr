@@ -511,6 +511,11 @@ class DualModeEventRelay:
     # ========================================
     # Comandos ESL Outbound (para RealtimeSession)
     # ========================================
+    # 
+    # NOTA: O greenswitch OutboundSession NÃO tem método api().
+    # Usamos session.hangup() para encerrar e session.execute() para comandos.
+    # Para comandos API globais (uuid_hold, uuid_break, etc), usar ESL Inbound.
+    # ========================================
     
     def hangup(self, cause: str = "NORMAL_CLEARING") -> bool:
         """
@@ -530,14 +535,7 @@ class DualModeEventRelay:
             return False
         
         try:
-            # Primeiro, parar o audio stream
-            try:
-                self.session.api(f"uuid_audio_stream {self._uuid} stop")
-                logger.debug(f"[{self._uuid}] Audio stream stopped via ESL Outbound")
-            except Exception as e:
-                logger.debug(f"[{self._uuid}] Audio stream stop failed (may be already stopped): {e}")
-            
-            # Encerrar a chamada
+            # Encerrar a chamada usando o método correto do greenswitch
             self.session.hangup(cause)
             logger.info(f"[{self._uuid}] Hangup sent via ESL Outbound: {cause}")
             return True
@@ -548,95 +546,66 @@ class DualModeEventRelay:
     
     def execute_api(self, command: str) -> Optional[str]:
         """
-        Executa comando API via ESL Outbound.
+        Executa comando API.
+        
+        NOTA: ESL Outbound NÃO suporta api() diretamente.
+        Esta função sempre retorna None no modo Outbound.
+        Use ESL Inbound para comandos API.
         
         Args:
-            command: Comando FreeSWITCH (ex: "uuid_hold on <uuid>")
+            command: Comando FreeSWITCH (ignorado no modo Outbound)
             
         Returns:
-            Resultado do comando ou None se falhou
+            None (ESL Outbound não suporta api())
         """
-        if not self._connected or not self.session:
-            logger.warning(f"[{self._uuid}] Cannot execute API: not connected")
-            return None
-        
-        try:
-            result = self.session.api(command)
-            logger.debug(f"[{self._uuid}] ESL API command executed: {command[:50]}")
-            return result
-        except Exception as e:
-            logger.error(f"[{self._uuid}] ESL API command failed: {e}")
-            return None
+        logger.debug(f"[{self._uuid}] execute_api not supported on ESL Outbound, use ESL Inbound")
+        return None
     
     def uuid_hold(self, on: bool = True) -> bool:
         """
         Coloca/retira a chamada em espera.
         
+        NOTA: ESL Outbound não suporta uuid_hold diretamente.
+        Precisa usar ESL Inbound.
+        
         Args:
             on: True para colocar em espera, False para retirar
             
         Returns:
-            True se comando foi enviado com sucesso
+            False (não suportado no modo Outbound, usar Inbound)
         """
-        if not self._connected or not self.session:
-            logger.warning(f"[{self._uuid}] Cannot hold: not connected")
-            return False
-        
-        try:
-            hold_cmd = "on" if on else "off"
-            result = self.session.api(f"uuid_hold {hold_cmd} {self._uuid}")
-            
-            action = "on hold" if on else "off hold"
-            logger.info(f"[{self._uuid}] Call placed {action} via ESL Outbound")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[{self._uuid}] uuid_hold via ESL Outbound failed: {e}")
-            return False
+        logger.debug(f"[{self._uuid}] uuid_hold not supported on ESL Outbound, use ESL Inbound")
+        return False
     
     def uuid_break(self) -> bool:
         """
-        Interrompe qualquer mídia sendo reproduzida (música de espera, etc).
+        Interrompe qualquer mídia sendo reproduzida.
+        
+        NOTA: ESL Outbound não suporta uuid_break diretamente.
+        Precisa usar ESL Inbound.
         
         Returns:
-            True se comando foi enviado com sucesso
+            False (não suportado no modo Outbound, usar Inbound)
         """
-        if not self._connected or not self.session:
-            logger.warning(f"[{self._uuid}] Cannot break: not connected")
-            return False
-        
-        try:
-            self.session.api(f"uuid_break {self._uuid}")
-            logger.info(f"[{self._uuid}] uuid_break sent via ESL Outbound")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[{self._uuid}] uuid_break via ESL Outbound failed: {e}")
-            return False
+        logger.debug(f"[{self._uuid}] uuid_break not supported on ESL Outbound, use ESL Inbound")
+        return False
     
     def uuid_broadcast(self, path: str, leg: str = "aleg") -> bool:
         """
-        Reproduz mídia na chamada (música, anúncios, etc).
+        Reproduz mídia na chamada.
+        
+        NOTA: ESL Outbound não suporta uuid_broadcast diretamente.
+        Precisa usar ESL Inbound.
         
         Args:
-            path: Caminho do arquivo ou stream (ex: "local_stream://moh")
-            leg: Qual perna da chamada ("aleg", "bleg", "both")
+            path: Caminho do arquivo ou stream
+            leg: Qual perna da chamada
             
         Returns:
-            True se comando foi enviado com sucesso
+            False (não suportado no modo Outbound, usar Inbound)
         """
-        if not self._connected or not self.session:
-            logger.warning(f"[{self._uuid}] Cannot broadcast: not connected")
-            return False
-        
-        try:
-            self.session.api(f"uuid_broadcast {self._uuid} {path} {leg}")
-            logger.info(f"[{self._uuid}] Broadcasting {path} to {leg} via ESL Outbound")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[{self._uuid}] uuid_broadcast via ESL Outbound failed: {e}")
-            return False
+        logger.debug(f"[{self._uuid}] uuid_broadcast not supported on ESL Outbound, use ESL Inbound")
+        return False
     
     # ========================================
     # Dispatching para Sessão WebSocket

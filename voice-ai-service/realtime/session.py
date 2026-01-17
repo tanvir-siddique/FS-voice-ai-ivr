@@ -1005,7 +1005,34 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             self._fallback_active = False
     
     async def _delayed_stop(self, delay: float, reason: str) -> None:
+        """
+        Espera antes de encerrar a sessão.
+        
+        IMPORTANTE: Espera o assistente terminar de falar antes de desligar
+        para evitar cortar a resposta no meio.
+        
+        Args:
+            delay: Delay mínimo em segundos
+            reason: Motivo do encerramento
+        """
+        # Espera mínima inicial
         await asyncio.sleep(delay)
+        
+        # Esperar o assistente terminar de falar (máximo 30s adicionais)
+        max_wait = 30
+        waited = 0
+        while self._assistant_speaking and waited < max_wait:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+            
+        # Delay adicional para o áudio terminar de tocar no FreeSWITCH
+        # (o áudio é enviado em chunks e pode estar na fila de playback)
+        if waited > 0:
+            logger.debug(f"Waited {waited}s for assistant to finish speaking", extra={
+                "call_uuid": self.call_uuid,
+            })
+            await asyncio.sleep(1.5)  # Buffer adicional para playback
+        
         await self.stop(reason)
     
     async def stop(self, reason: str = "normal") -> None:
