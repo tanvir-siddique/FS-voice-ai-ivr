@@ -448,7 +448,17 @@ class TransferManager:
                 # 7. Parar MOH antes do bridge
                 await self._stop_moh()
                 
-                # 8. Criar bridge IMEDIATAMENTE (B-leg já está atendida)
+                # 8. IMPORTANTE: Definir hangup_after_bridge no A-leg ANTES do bridge
+                # Isso garante que quando o humano (B) desligar, o cliente (A) também desliga
+                try:
+                    await self._esl.execute_api(
+                        f"uuid_setvar {self.call_uuid} hangup_after_bridge true"
+                    )
+                    logger.debug(f"Set hangup_after_bridge=true on A-leg: {self.call_uuid}")
+                except Exception as e:
+                    logger.warning(f"Failed to set hangup_after_bridge on A-leg: {e}")
+                
+                # 9. Criar bridge IMEDIATAMENTE (B-leg já está atendida)
                 logger.info(
                     f"[DEBUG] About to uuid_bridge: A={self.call_uuid} <-> B={b_leg_uuid}"
                 )
