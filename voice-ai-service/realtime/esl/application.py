@@ -435,11 +435,12 @@ class VoiceAIApplication:
             except Exception as e:
                 logger.error(f"[{self._uuid}] Error sending audio to AI: {e}")
     
-    def _on_audio_from_ai(self, audio: bytes) -> None:
+    async def _on_audio_from_ai(self, audio: bytes) -> None:
         """
         Callback: Áudio recebido do AI provider.
         
         Enfileira para envio via RTP.
+        ✅ FIX: Deve ser async pois RealtimeSession faz await no callback
         """
         try:
             self._audio_out_queue.put_nowait(audio)
@@ -451,11 +452,11 @@ class VoiceAIApplication:
             except Exception:
                 pass
     
-    def _on_transcript(self, role: str, text: str) -> None:
+    async def _on_transcript(self, role: str, text: str) -> None:
         """Callback: Transcrição recebida."""
         logger.info(f"[{self._uuid}] {role}: {text[:100]}...")
     
-    def _on_session_end(self, reason: str) -> None:
+    async def _on_session_end(self, reason: str) -> None:
         """Callback: Sessão AI encerrada."""
         logger.info(f"[{self._uuid}] AI session ended: {reason}")
         self._should_stop = True
