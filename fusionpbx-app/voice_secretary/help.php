@@ -459,7 +459,8 @@ docker ps | grep voice-ai
 docker compose logs -f voice-ai-realtime
 
 <span class="comment"># Testar endpoint de saúde</span>
-curl http://localhost:8765/health
+curl http://localhost:8085/health  <span class="comment"># Realtime (WebSocket)</span>
+curl http://localhost:8100/health  <span class="comment"># API Principal</span>
 		</div>
 	</div>
 </div>
