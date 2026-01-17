@@ -236,6 +236,8 @@ class RealtimeSession:
         self._ended = False
         self._user_speaking = False
         self._assistant_speaking = False
+        self._audio_bytes_sent = 0  # Track audio sent to FreeSWITCH for delay calculation
+        self._last_audio_sent_time = 0.0  # Track when last audio was sent
         
         self._transcript: List[TranscriptEntry] = []
         self._current_assistant_text = ""
@@ -628,6 +630,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         # Durante warmup, resample_output retorna b""
         if audio_bytes and self._on_audio_output:
+            self._audio_bytes_sent += len(audio_bytes)
+            self._last_audio_sent_time = time.time()
             await self._on_audio_output(audio_bytes)
     
     async def _handle_audio_output_direct(self, audio_bytes: bytes) -> None:
@@ -636,6 +640,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         Usado para flush do buffer restante.
         """
         if audio_bytes and self._on_audio_output:
+            self._audio_bytes_sent += len(audio_bytes)
+            self._last_audio_sent_time = time.time()
             await self._on_audio_output(audio_bytes)
     
     async def interrupt(self) -> None:
@@ -1016,32 +1022,48 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """
         Espera antes de encerrar a sessão.
         
-        IMPORTANTE: Espera o assistente terminar de falar antes de desligar
-        para evitar cortar a resposta no meio.
+        IMPORTANTE: Calcula o tempo necessário para o áudio terminar de tocar
+        no FreeSWITCH baseado nos bytes enviados e no sample rate.
         
         Args:
             delay: Delay mínimo em segundos
             reason: Motivo do encerramento
         """
-        # Espera mínima inicial
-        await asyncio.sleep(delay)
+        # Capturar o momento do farewell para cálculos
+        farewell_time = time.time()
         
-        # Esperar o assistente terminar de falar (máximo 10s adicionais)
-        # O evento TRANSCRIPT_DONE (agent_response no ElevenLabs) marca o fim
+        # Esperar o assistente terminar de gerar áudio (máximo 10s)
         max_wait = 10
         waited = 0
         while self._assistant_speaking and waited < max_wait:
             await asyncio.sleep(0.3)
             waited += 0.3
-            
-        # Delay adicional para o áudio terminar de tocar no FreeSWITCH
-        # (o áudio é enviado em chunks e pode estar na fila de playback)
+        
         if waited > 0:
-            logger.debug(f"Waited {waited:.1f}s for assistant to finish speaking", extra={
+            logger.debug(f"Waited {waited:.1f}s for assistant to finish generating audio", extra={
                 "call_uuid": self.call_uuid,
             })
-        # Sempre dar um pequeno delay para o playback finalizar
-        await asyncio.sleep(1.0)
+        
+        # Calcular tempo de playback baseado nos bytes de áudio enviados
+        # PCM 16-bit mono 16kHz = 32 bytes/ms = 32000 bytes/s
+        bytes_per_second = self.config.freeswitch_sample_rate * 2  # 16-bit = 2 bytes per sample
+        audio_duration_seconds = self._audio_bytes_sent / bytes_per_second if bytes_per_second > 0 else 0
+        
+        # Calcular quanto tempo já passou desde o farewell
+        elapsed = time.time() - farewell_time
+        
+        # Tempo restante de playback = duração total - tempo que já passou
+        # Adiciona buffer de 1.5s para segurança
+        remaining_playback = max(0, audio_duration_seconds - elapsed) + 1.5
+        
+        logger.info(f"Calculating playback time: {audio_duration_seconds:.1f}s total audio, "
+                   f"{elapsed:.1f}s elapsed, waiting {remaining_playback:.1f}s more", extra={
+            "call_uuid": self.call_uuid,
+            "audio_bytes_sent": self._audio_bytes_sent,
+        })
+        
+        # Aguardar o tempo restante (máximo 15s para evitar ficar preso)
+        await asyncio.sleep(min(remaining_playback, 15.0))
         
         await self.stop(reason)
     
