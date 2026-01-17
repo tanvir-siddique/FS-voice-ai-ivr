@@ -94,8 +94,16 @@ class RealtimeSessionManager:
                 self._domain_counts[domain_uuid] -= 1
                 if self._domain_counts[domain_uuid] <= 0:
                     del self._domain_counts[domain_uuid]
-            
-            return True
+        
+        # CORREÇÃO: Notificar ESL EventRelay que sessão terminou (modo dual)
+        # Isso permite que o relay pare de tentar correlação
+        try:
+            from .esl.event_relay import notify_session_ended
+            notify_session_ended(call_uuid)
+        except ImportError:
+            pass  # ESL module não disponível
+        
+        return True
     
     async def stop_session(self, call_uuid: str, reason: str = "manager_stop") -> bool:
         session = self.get_session(call_uuid)

@@ -18,6 +18,9 @@ from .event_relay import (
     create_event_relay,
     set_main_asyncio_loop,
     get_main_asyncio_loop,
+    # Correlação reversa (sessão → relay)
+    notify_session_ended,
+    get_relay,
 )
 
 __all__ = [
@@ -31,4 +34,6 @@ __all__ = [
     "create_event_relay",
     "set_main_asyncio_loop",
     "get_main_asyncio_loop",
+    "notify_session_ended",
+    "get_relay",
 ]

@@ -1099,7 +1099,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """
         Processa DTMF recebido via ESL.
         
-        Mapeamento padrão:
+        Mapeamento configurável via config.dtmf_actions ou padrão:
         - 0: Transferir para operador
         - *: Encerrar chamada
         - #: Repetir último menu / informação
@@ -1114,31 +1114,58 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             logger.debug("Ignoring DTMF during transfer")
             return
         
-        # Mapeamento de DTMF para ações
-        if digit == "0":
-            # Transferir para operador/recepção
-            await self._send_text_to_provider(
-                "Você pressionou zero. Vou transferir você para um atendente."
-            )
-            await asyncio.sleep(2.0)
-            await self._execute_intelligent_handoff("operador", "DTMF 0")
+        # Ignorar se chamada já está terminando
+        if self._ended:
+            return
+        
+        # Obter mapeamento configurável ou usar padrão
+        dtmf_actions = getattr(self.config, 'dtmf_actions', None) or {
+            "0": {"action": "handoff", "destination": "operador"},
+            "*": {"action": "hangup"},
+            "#": {"action": "help"},
+        }
+        
+        action_config = dtmf_actions.get(digit)
+        
+        if not action_config:
+            # Dígito não mapeado - pode ser usado para menus futuros
+            logger.debug(f"DTMF {digit} not mapped to action")
+            return
+        
+        action = action_config.get("action", "")
+        
+        if action == "handoff":
+            # Transferir para destino configurado
+            destination = action_config.get("destination", "operador")
+            message = action_config.get("message", f"Você pressionou {digit}. Vou transferir você para um atendente.")
             
-        elif digit == "*":
+            await self._send_text_to_provider(message)
+            await asyncio.sleep(2.0)
+            await self._execute_intelligent_handoff(destination, f"DTMF {digit}")
+            
+        elif action == "hangup":
             # Encerrar chamada
-            await self._send_text_to_provider("Obrigado por ligar. Até logo!")
+            message = action_config.get("message", "Obrigado por ligar. Até logo!")
+            await self._send_text_to_provider(message)
             await asyncio.sleep(2.0)
             await self.stop("dtmf_hangup")
             
-        elif digit == "#":
-            # Repetir / ajuda
-            await self._send_text_to_provider(
+        elif action == "help":
+            # Mensagem de ajuda
+            message = action_config.get("message", 
                 "Pressione zero para falar com um atendente, "
                 "ou continue a conversa normalmente."
             )
+            await self._send_text_to_provider(message)
+        
+        elif action == "custom":
+            # Ação customizada - executar função
+            custom_text = action_config.get("text", "")
+            if custom_text:
+                await self._send_text_to_provider(custom_text)
         
         else:
-            # Outros dígitos - pode ser usado para menus futuros
-            logger.debug(f"DTMF {digit} not mapped to action")
+            logger.warning(f"Unknown DTMF action: {action}")
     
     async def handle_bridge(self, other_uuid: str) -> None:
         """
@@ -1250,13 +1277,18 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
     
     async def check_extension_available(self, extension: str) -> dict:
         """
-        Verifica se um ramal está disponível.
+        Verifica se um ramal está disponível para transferência.
         
         Args:
-            extension: Número do ramal
+            extension: Número do ramal (ex: "1001")
         
         Returns:
-            Dict com status de disponibilidade
+            Dict com status de disponibilidade:
+            {
+                "extension": "1001",
+                "available": True/False,
+                "reason": None ou string de motivo
+            }
         """
         try:
             from .handlers.esl_client import get_esl_client
@@ -1265,23 +1297,42 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             if not esl._connected:
                 await esl.connect()
             
-            # Verificar registro
+            # 1. Verificar registro SIP
+            # CORREÇÃO: Usar @ no padrão para encontrar o ramal correto
             result = await esl.execute_api(
-                f"sofia status profile internal reg {extension}"
+                f"sofia status profile internal reg {extension}@"
             )
             
-            is_registered = result and "REGISTERED" in result.upper()
+            # Resultado esperado contém "Registrations:" se encontrou
+            is_registered = result and (
+                "REGISTERED" in result.upper() or 
+                f"user/{extension}@" in result.lower()
+            )
             
             if not is_registered:
                 return {
                     "extension": extension,
                     "available": False,
-                    "reason": "Ramal não está online"
+                    "reason": "Ramal não está registrado"
                 }
             
-            # Verificar se está em chamada
-            channels = await esl.show_channels()
-            in_call = extension in channels
+            # 2. Verificar se está em chamada usando show calls
+            # CORREÇÃO: Parsear corretamente a saída de show channels
+            channels_output = await esl.show_channels()
+            
+            # Procurar pelo ramal nos campos de caller/callee
+            # Formato: uuid,created,name,...
+            extension_patterns = [
+                f"/{extension}@",        # SIP URI
+                f"/{extension}-",        # Channel name
+                f",{extension},",        # Campo separado
+                f"user/{extension}",     # Dial string
+            ]
+            
+            in_call = any(
+                pattern.lower() in channels_output.lower()
+                for pattern in extension_patterns
+            )
             
             if in_call:
                 return {
@@ -1289,6 +1340,9 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                     "available": False,
                     "reason": "Ramal está em outra ligação"
                 }
+            
+            # 3. Verificar DND (Do Not Disturb) se disponível
+            # TODO: Integrar com sistema de DND do FusionPBX
             
             return {
                 "extension": extension,

@@ -18,7 +18,8 @@ import asyncio
 import logging
 import os
 import threading
-from typing import Optional, Any
+import weakref
+from typing import Optional, Any, Dict
 from datetime import datetime
 
 import gevent
@@ -30,20 +31,62 @@ logger = logging.getLogger(__name__)
 CORRELATION_TIMEOUT_SECONDS = float(os.getenv("DUAL_MODE_CORRELATION_TIMEOUT", "5.0"))
 CORRELATION_RETRY_INTERVAL = float(os.getenv("DUAL_MODE_CORRELATION_RETRY", "0.5"))
 
-# Referência global ao asyncio loop da thread principal
+# ========================================
+# Thread-Safe Global State
+# ========================================
+_loop_lock = threading.Lock()
 _main_asyncio_loop: Optional[asyncio.AbstractEventLoop] = None
+
+# Registry de EventRelays ativos (para correlação reversa)
+# Permite que a sessão WebSocket notifique o ESL quando terminar
+_relay_registry_lock = threading.Lock()
+_relay_registry: Dict[str, weakref.ref] = {}  # call_uuid -> weakref(EventRelay)
 
 
 def set_main_asyncio_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Define o asyncio loop da thread principal."""
+    """Define o asyncio loop da thread principal (thread-safe)."""
     global _main_asyncio_loop
-    _main_asyncio_loop = loop
+    with _loop_lock:
+        _main_asyncio_loop = loop
     logger.info("Main asyncio loop registered for ESL event relay")
 
 
 def get_main_asyncio_loop() -> Optional[asyncio.AbstractEventLoop]:
-    """Obtém o asyncio loop da thread principal."""
-    return _main_asyncio_loop
+    """Obtém o asyncio loop da thread principal (thread-safe)."""
+    with _loop_lock:
+        return _main_asyncio_loop
+
+
+def register_relay(call_uuid: str, relay: 'DualModeEventRelay') -> None:
+    """Registra um EventRelay para correlação reversa."""
+    with _relay_registry_lock:
+        _relay_registry[call_uuid] = weakref.ref(relay)
+
+
+def unregister_relay(call_uuid: str) -> None:
+    """Remove um EventRelay do registry."""
+    with _relay_registry_lock:
+        _relay_registry.pop(call_uuid, None)
+
+
+def get_relay(call_uuid: str) -> Optional['DualModeEventRelay']:
+    """Obtém EventRelay por call_uuid (para correlação reversa)."""
+    with _relay_registry_lock:
+        ref = _relay_registry.get(call_uuid)
+        if ref:
+            return ref()  # Retorna None se objeto foi coletado
+    return None
+
+
+def notify_session_ended(call_uuid: str) -> None:
+    """
+    Notifica o EventRelay que a sessão WebSocket terminou.
+    
+    Chamado pelo session_manager quando uma sessão é removida.
+    """
+    relay = get_relay(call_uuid)
+    if relay:
+        relay.on_websocket_session_ended()
 
 
 class DualModeEventRelay:
@@ -72,12 +115,32 @@ class DualModeEventRelay:
         self._secretary_uuid: Optional[str] = None
         
         # Referência à sessão WebSocket (será correlacionada)
-        self._realtime_session: Optional[Any] = None
+        # CORREÇÃO: Usar weakref para evitar memory leak se session for coletada
+        self._realtime_session_ref: Optional[weakref.ref] = None
         self._correlation_attempted = False
         
         # Estado
         self._should_stop = False
         self._connected = False
+        self._session_lock = threading.Lock()  # Protege acesso à sessão
+    
+    @property
+    def _realtime_session(self) -> Optional[Any]:
+        """Acesso thread-safe à sessão (resolve weakref)."""
+        if self._realtime_session_ref:
+            return self._realtime_session_ref()
+        return None
+    
+    def on_websocket_session_ended(self) -> None:
+        """
+        Chamado quando a sessão WebSocket termina.
+        
+        Permite que o EventRelay saiba que não precisa mais
+        tentar despachar eventos.
+        """
+        with self._session_lock:
+            self._realtime_session_ref = None
+        logger.debug(f"[{self._uuid}] WebSocket session ended, relay notified")
     
     def run(self) -> None:
         """
@@ -161,10 +224,18 @@ class DualModeEventRelay:
         
         O WebSocket pode conectar antes ou depois do ESL socket.
         Fazemos retry com backoff até encontrar a sessão.
+        
+        CORREÇÃO: 
+        - Registrar no relay registry para correlação reversa
+        - Usar weakref para evitar memory leak
+        - Continuar verificando periodicamente mesmo após timeout inicial
         """
         if not self._uuid:
             logger.warning("Cannot correlate: no call_uuid")
             return
+        
+        # Registrar este relay para correlação reversa
+        register_relay(self._uuid, self)
         
         from ..session_manager import get_session_manager
         manager = get_session_manager()
@@ -175,10 +246,13 @@ class DualModeEventRelay:
         max_retries = int(CORRELATION_TIMEOUT_SECONDS / CORRELATION_RETRY_INTERVAL)
         
         while retries < max_retries and not self._should_stop:
-            self._realtime_session = manager.get_session(self._uuid)
+            session = manager.get_session(self._uuid)
             
-            if self._realtime_session:
-                # Sucesso!
+            if session:
+                # Sucesso! Guardar como weakref
+                with self._session_lock:
+                    self._realtime_session_ref = weakref.ref(session)
+                
                 logger.info(
                     f"[{self._uuid}] Session correlated successfully after {retries} retries",
                     extra={
@@ -194,10 +268,11 @@ class DualModeEventRelay:
             gevent.sleep(CORRELATION_RETRY_INTERVAL)
             retries += 1
         
-        # Não encontrou sessão
+        # Não encontrou sessão no timeout inicial, mas continua tentando
+        # em background no event loop
         logger.warning(
-            f"[{self._uuid}] Could not correlate with WebSocket session after {retries} retries. "
-            "Events will not be relayed. Check if mod_audio_stream is configured correctly."
+            f"[{self._uuid}] Could not correlate within {CORRELATION_TIMEOUT_SECONDS}s. "
+            "Will continue trying in background. Check if mod_audio_stream is configured."
         )
         self._correlation_attempted = True
     
@@ -225,6 +300,10 @@ class DualModeEventRelay:
         """Loop principal de eventos."""
         logger.debug(f"[{self._uuid}] Starting event loop")
         
+        # Contador para retry de correlação em background
+        retry_correlation_counter = 0
+        RETRY_CORRELATION_INTERVAL = 10  # A cada 10 iterações (~10s)
+        
         while not self._should_stop and self._connected:
             try:
                 # Aguardar evento com timeout
@@ -233,12 +312,41 @@ class DualModeEventRelay:
                 if event:
                     self._handle_event(event)
                 
+                # CORREÇÃO: Continuar tentando correlação em background
+                # se ainda não conseguiu
+                if not self._realtime_session and self._correlation_attempted:
+                    retry_correlation_counter += 1
+                    if retry_correlation_counter >= RETRY_CORRELATION_INTERVAL:
+                        retry_correlation_counter = 0
+                        self._try_late_correlation()
+                
             except Exception as e:
                 if not self._should_stop:
                     logger.error(f"[{self._uuid}] Error in event loop: {e}")
                 break
         
         logger.debug(f"[{self._uuid}] Event loop ended")
+    
+    def _try_late_correlation(self) -> None:
+        """
+        Tenta correlação tardia (WebSocket conectou depois do timeout).
+        
+        Isso pode acontecer se o mod_audio_stream demorar para conectar.
+        """
+        from ..session_manager import get_session_manager
+        manager = get_session_manager()
+        
+        session = manager.get_session(self._uuid)
+        if session:
+            with self._session_lock:
+                self._realtime_session_ref = weakref.ref(session)
+            
+            logger.info(
+                f"[{self._uuid}] Late correlation successful!",
+                extra={"call_uuid": self._uuid}
+            )
+            
+            self._notify_session_esl_connected()
     
     def _wait_for_event(self, timeout: float = 1.0) -> Optional[dict]:
         """
@@ -400,13 +508,21 @@ class DualModeEventRelay:
         self._should_stop = True
         self._connected = False
         
+        # CORREÇÃO: Desregistrar do relay registry
+        if self._uuid:
+            unregister_relay(self._uuid)
+        
+        # Limpar referência à sessão
+        with self._session_lock:
+            self._realtime_session_ref = None
+        
         elapsed = (datetime.utcnow() - self._start_time).total_seconds()
         
         logger.info(
             f"[{self._uuid}] ESL EventRelay ended",
             extra={
                 "duration_seconds": elapsed,
-                "session_correlated": self._realtime_session is not None,
+                "was_correlated": self._correlation_attempted,
             }
         )
 
