@@ -840,14 +840,18 @@ class AsyncESLClient:
             if variables:
                 all_vars.update(variables)
             
-            # Formatar string de variáveis
-            # IMPORTANTE: Valores devem estar entre aspas simples para suportar espaços
-            # Ex: origination_caller_id_name='Secretaria Virtual'
+            # Formatar string de variáveis para ESL
+            # NOTA: Via ESL API, valores NÃO precisam de aspas
+            # Espaços em valores são tratados corretamente dentro das chaves {}
             var_parts = []
             for k, v in all_vars.items():
-                # Escapar aspas simples dentro do valor
-                escaped_v = str(v).replace("'", "\\'")
-                var_parts.append(f"{k}='{escaped_v}'")
+                # Substituir espaços por underscores no caller_id_name
+                # para evitar problemas de parsing
+                value = str(v)
+                if k == "origination_caller_id_name":
+                    # Remover espaços que podem causar problemas
+                    value = value.replace(" ", "_")
+                var_parts.append(f"{k}={value}")
             
             var_string = "{" + ",".join(var_parts) + "}"
             
