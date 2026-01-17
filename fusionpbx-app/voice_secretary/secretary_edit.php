@@ -94,6 +94,9 @@
 			'greeting_message' => str_replace("\r\n", "\n", trim($_POST['greeting_message'] ?? '')),
 			'farewell_message' => str_replace("\r\n", "\n", trim($_POST['farewell_message'] ?? '')),
 			'farewell_keywords' => str_replace("\r\n", "\n", trim($_POST['farewell_keywords'] ?? '')),
+			'outside_hours_message' => str_replace("\r\n", "\n", trim($_POST['outside_hours_message'] ?? '')),
+			'idle_timeout_seconds' => intval($_POST['idle_timeout_seconds'] ?? 30),
+			'max_duration_seconds' => intval($_POST['max_duration_seconds'] ?? 600),
 			'processing_mode' => $_POST['processing_mode'] ?? 'turn_based',
 			'realtime_provider_uuid' => !empty($_POST['realtime_provider_uuid']) ? $_POST['realtime_provider_uuid'] : null,
 			'extension' => $_POST['extension'] ?? '',
@@ -151,6 +154,9 @@
 			$array['voice_secretaries'][0]['greeting_message'] = $form_data['greeting_message'] ?: null;
 			$array['voice_secretaries'][0]['farewell_message'] = $form_data['farewell_message'] ?: null;
 			$array['voice_secretaries'][0]['farewell_keywords'] = $form_data['farewell_keywords'] ?: null;
+			$array['voice_secretaries'][0]['outside_hours_message'] = $form_data['outside_hours_message'] ?: null;
+			$array['voice_secretaries'][0]['idle_timeout_seconds'] = $form_data['idle_timeout_seconds'] ?: 30;
+			$array['voice_secretaries'][0]['max_duration_seconds'] = $form_data['max_duration_seconds'] ?: 600;
 			$array['voice_secretaries'][0]['stt_provider_uuid'] = $form_data['stt_provider_uuid'] ?: null;
 			$array['voice_secretaries'][0]['tts_provider_uuid'] = $form_data['tts_provider_uuid'] ?: null;
 			$array['voice_secretaries'][0]['llm_provider_uuid'] = $form_data['llm_provider_uuid'] ?: null;
@@ -403,6 +409,49 @@
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<textarea class='formfld' name='farewell_keywords' rows='6' style='width: 100%;' placeholder='tchau&#10;falou&#10;valeu&#10;até mais'>".escape(trim($farewell_keywords))."</textarea>\n";
 	echo "		<br /><span class='text-muted'>".($text['description-farewell_keywords'] ?? 'Palavras que encerram a chamada automaticamente (uma por linha). Inclua gírias regionais.')."</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Outside Hours Message
+	$outside_hours_msg = $data['outside_hours_message'] ?? "Nosso horário de atendimento é de segunda a sexta, das 8h às 18h. Deixe sua mensagem que retornaremos o contato.";
+	$outside_hours_msg = str_replace("\r\n", "\n", str_replace("\r", "", $outside_hours_msg));
+	
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-outside_hours_message'] ?? 'Mensagem Fora do Horário')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<textarea class='formfld' name='outside_hours_message' rows='3' style='width: 100%;' placeholder='Nosso horário de atendimento é de segunda a sexta, das 8h às 18h...'>".escape(trim($outside_hours_msg))."</textarea>\n";
+	echo "		<br /><span class='text-muted'>".($text['description-outside_hours_message'] ?? 'Mensagem reproduzida quando o cliente liga fora do horário configurado.')."</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Call Timeouts Section
+	echo "<tr>\n";
+	echo "	<td colspan='2' style='padding: 12px 10px; background: #e3f2fd; border-bottom: 1px solid #2196F3;'>\n";
+	echo "		<b>⏱️ Timeouts da Chamada</b>\n";
+	echo "		<span style='font-size: 0.85em; color: #1565C0; margin-left: 10px;'>"
+		. "Configure limites de tempo para as chamadas"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Idle Timeout
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-idle_timeout'] ?? 'Timeout de Inatividade')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='idle_timeout_seconds' min='10' max='120' value='".intval($data['idle_timeout_seconds'] ?? 30)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>segundos</span>\n";
+	echo "		<br /><span class='text-muted'>".($text['description-idle_timeout'] ?? 'Tempo sem atividade antes de encerrar a chamada. Padrão: 30 segundos.')."</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Max Duration
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-max_duration'] ?? 'Duração Máxima')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='max_duration_seconds' min='60' max='3600' value='".intval($data['max_duration_seconds'] ?? 600)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>segundos</span>\n";
+	echo "		<span style='margin-left: 10px; color: #666;'>(".floor(intval($data['max_duration_seconds'] ?? 600) / 60)." minutos)</span>\n";
+	echo "		<br /><span class='text-muted'>".($text['description-max_duration'] ?? 'Duração máxima da chamada. Padrão: 600 segundos (10 minutos).')."</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 

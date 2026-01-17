@@ -45,6 +45,21 @@ $text['label-farewell_keywords']['pt-br'] = "Palavras de Despedida";
 $text['description-farewell_keywords']['en-us'] = "Words that trigger automatic call end (one per line). Regional slang like 'falou', 'valeu', etc.";
 $text['description-farewell_keywords']['pt-br'] = "Palavras que encerram a chamada automaticamente (uma por linha). Inclua gírias regionais como 'falou', 'valeu', etc.";
 
+$text['label-outside_hours_message']['en-us'] = "Outside Hours Message";
+$text['label-outside_hours_message']['pt-br'] = "Mensagem Fora do Horário";
+$text['description-outside_hours_message']['en-us'] = "Message played when caller calls outside business hours. The AI will inform the caller and offer alternatives.";
+$text['description-outside_hours_message']['pt-br'] = "Mensagem reproduzida quando o cliente liga fora do horário de atendimento. A IA irá informar e oferecer alternativas.";
+
+$text['label-idle_timeout']['en-us'] = "Idle Timeout (seconds)";
+$text['label-idle_timeout']['pt-br'] = "Timeout de Inatividade (segundos)";
+$text['description-idle_timeout']['en-us'] = "Seconds without activity before ending the call. Default: 30.";
+$text['description-idle_timeout']['pt-br'] = "Segundos sem atividade antes de encerrar a chamada. Padrão: 30.";
+
+$text['label-max_duration']['en-us'] = "Max Duration (seconds)";
+$text['label-max_duration']['pt-br'] = "Duração Máxima (segundos)";
+$text['description-max_duration']['en-us'] = "Maximum call duration in seconds (600 = 10 min). Default: 600.";
+$text['description-max_duration']['pt-br'] = "Duração máxima da chamada em segundos (600 = 10 min). Padrão: 600.";
+
 $text['label-transfer_extension']['en-us'] = "Transfer Extension";
 $text['label-transfer_extension']['pt-br'] = "Ramal de Transferência";
 

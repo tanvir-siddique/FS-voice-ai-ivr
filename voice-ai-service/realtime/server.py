@@ -323,7 +323,11 @@ class RealtimeServer:
                     COALESCE(s.jitter_buffer_step, 40) as jitter_buffer_step,
                     COALESCE(s.stream_buffer_size, 20) as stream_buffer_size,  -- 20ms default (NOT samples!)
                     -- Business Hours (Time Condition)
-                    s.time_condition_uuid
+                    s.time_condition_uuid,
+                    s.outside_hours_message,
+                    -- Call Timeouts
+                    COALESCE(s.idle_timeout_seconds, 30) as idle_timeout_seconds,
+                    COALESCE(s.max_duration_seconds, 600) as max_duration_seconds
                 FROM v_voice_secretaries s
                 LEFT JOIN v_voice_ai_providers p ON p.voice_ai_provider_uuid = s.realtime_provider_uuid
                 WHERE s.voice_secretary_uuid = $1::uuid
@@ -658,9 +662,13 @@ class RealtimeServer:
                 time_result is not None and not time_result.is_open
             ),
             outside_hours_message=(
-                time_result.message if time_result and not time_result.is_open
-                else "Estamos fora do horário de atendimento."
+                row.get("outside_hours_message")
+                or (time_result.message if time_result and not time_result.is_open else None)
+                or "Estamos fora do horário de atendimento."
             ),
+            # Call Timeouts (from database)
+            idle_timeout_seconds=int(row.get("idle_timeout_seconds") or 30),
+            max_duration_seconds=int(row.get("max_duration_seconds") or 600),
         )
         
         logger.debug("Session config created", extra={
