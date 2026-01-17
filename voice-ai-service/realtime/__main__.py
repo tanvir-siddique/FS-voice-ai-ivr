@@ -112,14 +112,12 @@ def run_dual_mode(
         logger.info("Asyncio loop registered for ESL event dispatching")
         
         # Importar e executar servidor
+        # NOTA: serve_forever() já chama start() internamente, não chamar duas vezes!
         from .server import RealtimeServer
         server = RealtimeServer(host=ws_host, port=ws_port)
-        await server.start()
         
-        try:
-            await server.serve_forever()
-        finally:
-            await server.stop()
+        # serve_forever() faz: start() → aguardar forever → stop()
+        await server.serve_forever()
     
     try:
         asyncio.run(run_with_loop_registration())
