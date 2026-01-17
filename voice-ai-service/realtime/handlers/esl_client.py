@@ -829,38 +829,45 @@ class AsyncESLClient:
             # Gerar UUID para a nova chamada
             new_uuid = str(uuid_module.uuid4())
             
-            # Construir variáveis - sempre incluir timeout e uuid
-            all_vars = {
-                "origination_uuid": new_uuid,
-                "originate_timeout": str(timeout),
-                "call_timeout": str(timeout),
-            }
+            # ============================================================
+            # TESTE DEBUG: Originate SEM variáveis para isolar problema
+            # Se funcionar, o problema está nas variáveis
+            # Se falhar, o problema está no dial_string ou ESL
+            # ============================================================
+            DEBUG_NO_VARS = True  # MUDAR PARA False DEPOIS DO TESTE
             
-            # Adicionar variáveis do usuário
-            if variables:
-                all_vars.update(variables)
-            
-            # Formatar string de variáveis para ESL
-            # NOTA: ESL via socket não processa aspas simples corretamente
-            # em todos os casos. A solução mais robusta é substituir espaços
-            # por underscores em valores problemáticos.
-            var_parts = []
-            for k, v in all_vars.items():
-                value = str(v)
-                # Para variáveis de caller_id, substituir espaços por underscores
-                # Isso evita problemas de parsing no FreeSWITCH
-                if k in ("origination_caller_id_name", "effective_caller_id_name", 
-                         "caller_id_name", "origination_callee_id_name"):
-                    value = value.replace(" ", "_").replace("'", "").replace(",", "")
-                # Valores simples sem caracteres especiais
-                var_parts.append(f"{k}={value}")
-            
-            var_string = "{" + ",".join(var_parts) + "}"
-            
-            # Construir comando com espaço entre variáveis e dial_string
-            cmd = f"originate {var_string} {dial_string} {app}"
+            if DEBUG_NO_VARS:
+                # Teste mínimo: sem variáveis
+                cmd = f"originate {dial_string} {app}"
+                logger.warning(f"DEBUG MODE: Originate SEM variáveis")
+            else:
+                # Construir variáveis - sempre incluir timeout e uuid
+                all_vars = {
+                    "origination_uuid": new_uuid,
+                    "originate_timeout": str(timeout),
+                    "call_timeout": str(timeout),
+                }
+                
+                # Adicionar variáveis do usuário
+                if variables:
+                    all_vars.update(variables)
+                
+                # Formatar string de variáveis para ESL
+                var_parts = []
+                for k, v in all_vars.items():
+                    value = str(v)
+                    # Para variáveis de caller_id, substituir espaços por underscores
+                    if k in ("origination_caller_id_name", "effective_caller_id_name", 
+                             "caller_id_name", "origination_callee_id_name"):
+                        value = value.replace(" ", "_").replace("'", "").replace(",", "")
+                    var_parts.append(f"{k}={value}")
+                
+                var_string = "{" + ",".join(var_parts) + "}"
+                cmd = f"originate {var_string} {dial_string} {app}"
             
             logger.info(f"Originate command: {cmd}")
+            logger.debug(f"Originate dial_string: {dial_string}")
+            logger.debug(f"Originate app: {app}")
             result = await self.execute_api(cmd)
             
             if "+OK" in result:

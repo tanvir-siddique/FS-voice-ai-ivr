@@ -413,15 +413,18 @@ class TransferManager:
                 
                 logger.info(f"Originating B-leg: {dial_string}")
                 
+                # TESTE: Originate sem variáveis extras para debug
+                # Se funcionar, o problema está nas variáveis
                 b_leg_uuid = await self._esl.originate(
                     dial_string=dial_string,
                     app="&park()",
                     timeout=timeout,
-                    variables={
-                        "ignore_early_media": "true",
-                        "origination_caller_id_number": self.caller_id,
-                        "origination_caller_id_name": "Secretaria Virtual"
-                    }
+                    variables=None  # Temporariamente desabilitado para teste
+                    # variables={
+                    #     "ignore_early_media": "true",
+                    #     "origination_caller_id_number": self.caller_id,
+                    #     "origination_caller_id_name": "Secretaria Virtual"
+                    # }
                 )
                 
                 if not b_leg_uuid:
