@@ -1255,6 +1255,23 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self._on_hold:
             return True
         
+        success = False
+        
+        # MODO DUAL: Tentar ESL Outbound primeiro
+        try:
+            from .esl.event_relay import get_relay
+            relay = get_relay(self.call_uuid)
+            
+            if relay:
+                success = relay.uuid_hold(on=True)
+                if success:
+                    self._on_hold = True
+                    logger.info("Call placed on hold via ESL Outbound", extra={"call_uuid": self.call_uuid})
+                    return True
+        except Exception as e:
+            logger.debug(f"ESL Outbound hold failed, trying Inbound: {e}")
+        
+        # FALLBACK: ESL Inbound
         try:
             from .handlers.esl_client import get_esl_client
             esl = get_esl_client()
@@ -1265,7 +1282,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             success = await esl.uuid_hold(self.call_uuid, on=True)
             if success:
                 self._on_hold = True
-                logger.info("Call placed on hold", extra={"call_uuid": self.call_uuid})
+                logger.info("Call placed on hold via ESL Inbound", extra={"call_uuid": self.call_uuid})
             return success
             
         except Exception as e:
@@ -1282,6 +1299,23 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if not self._on_hold:
             return True
         
+        success = False
+        
+        # MODO DUAL: Tentar ESL Outbound primeiro
+        try:
+            from .esl.event_relay import get_relay
+            relay = get_relay(self.call_uuid)
+            
+            if relay:
+                success = relay.uuid_hold(on=False)
+                if success:
+                    self._on_hold = False
+                    logger.info("Call taken off hold via ESL Outbound", extra={"call_uuid": self.call_uuid})
+                    return True
+        except Exception as e:
+            logger.debug(f"ESL Outbound unhold failed, trying Inbound: {e}")
+        
+        # FALLBACK: ESL Inbound
         try:
             from .handlers.esl_client import get_esl_client
             esl = get_esl_client()
@@ -1292,7 +1326,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             success = await esl.uuid_hold(self.call_uuid, on=False)
             if success:
                 self._on_hold = False
-                logger.info("Call taken off hold", extra={"call_uuid": self.call_uuid})
+                logger.info("Call taken off hold via ESL Inbound", extra={"call_uuid": self.call_uuid})
             return success
             
         except Exception as e:

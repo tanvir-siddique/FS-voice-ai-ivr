@@ -568,6 +568,76 @@ class DualModeEventRelay:
             logger.error(f"[{self._uuid}] ESL API command failed: {e}")
             return None
     
+    def uuid_hold(self, on: bool = True) -> bool:
+        """
+        Coloca/retira a chamada em espera.
+        
+        Args:
+            on: True para colocar em espera, False para retirar
+            
+        Returns:
+            True se comando foi enviado com sucesso
+        """
+        if not self._connected or not self.session:
+            logger.warning(f"[{self._uuid}] Cannot hold: not connected")
+            return False
+        
+        try:
+            hold_cmd = "on" if on else "off"
+            result = self.session.api(f"uuid_hold {hold_cmd} {self._uuid}")
+            
+            action = "on hold" if on else "off hold"
+            logger.info(f"[{self._uuid}] Call placed {action} via ESL Outbound")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{self._uuid}] uuid_hold via ESL Outbound failed: {e}")
+            return False
+    
+    def uuid_break(self) -> bool:
+        """
+        Interrompe qualquer mídia sendo reproduzida (música de espera, etc).
+        
+        Returns:
+            True se comando foi enviado com sucesso
+        """
+        if not self._connected or not self.session:
+            logger.warning(f"[{self._uuid}] Cannot break: not connected")
+            return False
+        
+        try:
+            self.session.api(f"uuid_break {self._uuid}")
+            logger.info(f"[{self._uuid}] uuid_break sent via ESL Outbound")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{self._uuid}] uuid_break via ESL Outbound failed: {e}")
+            return False
+    
+    def uuid_broadcast(self, path: str, leg: str = "aleg") -> bool:
+        """
+        Reproduz mídia na chamada (música, anúncios, etc).
+        
+        Args:
+            path: Caminho do arquivo ou stream (ex: "local_stream://moh")
+            leg: Qual perna da chamada ("aleg", "bleg", "both")
+            
+        Returns:
+            True se comando foi enviado com sucesso
+        """
+        if not self._connected or not self.session:
+            logger.warning(f"[{self._uuid}] Cannot broadcast: not connected")
+            return False
+        
+        try:
+            self.session.api(f"uuid_broadcast {self._uuid} {path} {leg}")
+            logger.info(f"[{self._uuid}] Broadcasting {path} to {leg} via ESL Outbound")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{self._uuid}] uuid_broadcast via ESL Outbound failed: {e}")
+            return False
+    
     # ========================================
     # Dispatching para Sessão WebSocket
     # ========================================
