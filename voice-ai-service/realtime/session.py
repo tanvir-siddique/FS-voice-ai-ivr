@@ -927,6 +927,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             reason = args.get("reason", "solicitação do cliente")
             
             if self._transfer_manager and self.config.intelligent_handoff_enabled:
+                # CRÍTICO: Interromper o provider IMEDIATAMENTE para parar de gerar áudio
+                # Isso evita que o agente continue falando enquanto o handoff inicia
+                self._transfer_in_progress = True
+                try:
+                    if self._provider:
+                        await self._provider.interrupt()
+                        logger.info("Provider interrupted on handoff request")
+                except Exception as e:
+                    logger.debug(f"Provider interrupt failed: {e}")
+                
                 # Handoff inteligente com attended transfer
                 asyncio.create_task(self._execute_intelligent_handoff(destination, reason))
                 return {"status": "transfer_initiated", "destination": destination}
@@ -1672,41 +1682,17 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 return
             
             if not destination:
+                # Retomar conversa normal se destino não encontrado
+                self._transfer_in_progress = False
                 await self._send_text_to_provider(
                     "Não consegui identificar para quem você quer falar. "
                     "Pode repetir o nome ou departamento?"
                 )
-                self._transfer_in_progress = False
                 return
             
-            # 2. Anunciar para o CLIENTE que vamos verificar
-            await self._send_text_to_provider(
-                f"Um momento, vou verificar com {destination.name}..."
-            )
-            
-            # Aguardar o anúncio ser falado para o cliente
-            waited_start = 0.0
-            max_wait_start = 1.2
-            while not self._assistant_speaking and waited_start < max_wait_start and not self._ended:
-                await asyncio.sleep(0.05)
-                waited_start += 0.05
-
-            waited = 0.0
-            max_wait = 6.0
-            while self._assistant_speaking and waited < max_wait and not self._ended:
-                await asyncio.sleep(0.2)
-                waited += 0.2
-            await asyncio.sleep(0.25)
-            
-            # 2.5 Entrar em modo de transferência (silêncio + sem input pro provider)
-            self._transfer_in_progress = True
-
-            # Cancelar qualquer fala pendente do provider antes de entrar em MOH/originate.
-            try:
-                if self._provider:
-                    await self._provider.interrupt()
-            except Exception as e:
-                logger.debug(f"Provider interrupt failed on handoff start: {e}")
+            # NOTA: O provider já foi interrompido em _execute_function quando request_handoff foi chamado.
+            # _transfer_in_progress já é True. O cliente não ouvirá anúncio - irá direto para o MOH.
+            # Isso é intencional: evita que o agente continue falando enquanto a transferência inicia.
 
             logger.info(
                 "Executing intelligent handoff",
