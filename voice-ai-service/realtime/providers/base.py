@@ -110,6 +110,7 @@ class RealtimeConfig:
     
     # Guardrails
     guardrails_enabled: bool = True
+    guardrails_topics: Optional[List[str]] = None  # Tópicos proibidos customizados
     
     # Tools
     tools: Optional[List[Dict[str, Any]]] = None

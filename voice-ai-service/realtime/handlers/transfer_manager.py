@@ -766,13 +766,10 @@ class TransferManager:
             if audio_path:
                 logger.info(f"Playing ElevenLabs announcement: {audio_path}")
                 
-                # Reconectar ESL para garantir socket limpo (evita race condition)
-                try:
-                    await self._esl.disconnect()
-                    await asyncio.sleep(0.1)
-                    await self._esl.connect()
-                except Exception as e:
-                    logger.warning(f"ESL reconnect failed, continuing: {e}")
+                # NOTA: O ESL client já usa _command_lock para serializar comandos,
+                # então não precisamos fazer reconnect. Apenas aguardar um momento
+                # para garantir que eventos do originate foram processados.
+                await asyncio.sleep(0.2)
                 
                 await self._esl.uuid_playback(b_leg_uuid, audio_path)
                 # Aguardar um pouco para o áudio começar a tocar

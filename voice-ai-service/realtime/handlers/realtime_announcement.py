@@ -219,6 +219,7 @@ class RealtimeAnnouncementSession:
                     "type": "semantic_vad",
                     "eagerness": "high",
                     "create_response": True,
+                    "interrupt_response": True,  # Permite humano interromper
                 },
                 
                 "instructions": self.system_prompt,
@@ -250,47 +251,49 @@ class RealtimeAnnouncementSession:
         """
         Inicia stream de áudio bidirecional entre FreeSWITCH e OpenAI.
         
-        Usa mod_audio_stream para capturar áudio do B-leg e enviar para OpenAI.
+        ⚠️ LIMITAÇÃO ATUAL:
+        A implementação completa de stream bidirecional requer:
+        1. WebSocket server intermediário
+        2. mod_audio_stream conectado a esse server
+        3. Bridge WS <-> OpenAI Realtime
         
-        NOTA: A implementação completa requer um WebSocket server que:
-        1. Recebe áudio do mod_audio_stream (FreeSWITCH -> WS)
-        2. Reenvia para OpenAI Realtime (WS -> OpenAI)
-        3. Recebe áudio do OpenAI (OpenAI -> WS)
-        4. Envia de volta ao FreeSWITCH (WS -> FreeSWITCH)
+        IMPLEMENTAÇÃO ATUAL (Simplificada):
+        - OpenAI → FreeSWITCH: via _play_audio (arquivo temporário + uuid_broadcast)
+        - FreeSWITCH → OpenAI: ⚠️ NÃO IMPLEMENTADO
         
-        Por ora, usamos abordagem baseada em eventos ESL.
+        Por isso, o Realtime Announcement funciona de forma SEMI-DUPLEX:
+        1. Assistente fala o anúncio (gerado via text → OpenAI → TTS)
+        2. Sistema detecta resposta do humano via:
+           - Patterns de texto simples se o humano falar
+           - Timeout para aceitar automaticamente
+        
+        Para implementação FULL-DUPLEX futura:
+        - Usar mod_audio_stream com WebSocket intermediário
+        - Ou usar FreeSWITCH com WebRTC + SRTP
         """
         try:
-            # Iniciar mod_audio_stream no B-leg
-            # Formato: uuid_audio_stream <uuid> start <ws_url> mono 16k
+            # Inicializar buffer de áudio para output
+            self._audio_buffer = bytearray()
+            self._human_transcript = ""
             
-            # O áudio do humano será capturado via mod_audio_stream
-            # e encaminhado para nossa WebSocket, que reenvia ao OpenAI
-            
-            # Por limitação atual, vamos usar approach híbrido:
-            # 1. OpenAI -> FreeSWITCH: via _play_audio (arquivo temporário)
-            # 2. FreeSWITCH -> OpenAI: via ESL events (CUSTOM audio::*) 
-            #    ou simplesmente deixar OpenAI usar VAD no silêncio inicial
-            
-            logger.info(
-                f"Audio stream initialized for B-leg: {self.b_leg_uuid}",
+            logger.warning(
+                f"Audio stream for B-leg: {self.b_leg_uuid} - SEMI-DUPLEX mode",
                 extra={
-                    "approach": "hybrid_events",
-                    "note": "Input from human via ESL events, output via temp files"
+                    "limitation": "Human audio input not streamed to OpenAI",
+                    "workaround": "Using text patterns + timeout for decision",
                 }
             )
             
-            # Inicializar buffer de áudio
-            self._audio_buffer = bytearray()
-            
-            # Em implementação futura completa:
-            # 1. Criar WebSocket server local para mod_audio_stream
-            # 2. Conectar mod_audio_stream do B-leg a esse server
-            # 3. Fazer bridge WS <-> OpenAI Realtime
+            # TODO (Fase 2): Implementar stream bidirecional completo
+            # 1. Criar WebSocket server local na porta dinâmica
+            # 2. Conectar mod_audio_stream do B-leg a esse server:
+            #    await self.esl.execute_api(
+            #        f"uuid_audio_stream {self.b_leg_uuid} start ws://localhost:PORT mono 16k"
+            #    )
+            # 3. Fazer bridge de áudio WS <-> OpenAI Realtime
             
         except Exception as e:
-            logger.error(f"Failed to start audio stream: {e}")
-            # Não é fatal, podemos continuar com approach simplificado
+            logger.error(f"Failed to initialize audio stream: {e}")
     
     async def _send_initial_message(self) -> None:
         """Envia mensagem inicial de anúncio."""
@@ -330,38 +333,104 @@ class RealtimeAnnouncementSession:
         """Processa evento do OpenAI Realtime."""
         etype = event.get("type", "")
         
-        # Áudio de resposta - enviar para FreeSWITCH
+        # Áudio de resposta do assistente - enviar para FreeSWITCH (B-leg/humano)
         if etype in ("response.audio.delta", "response.output_audio.delta"):
             audio_b64 = event.get("delta", "")
             if audio_b64:
                 audio_bytes = base64.b64decode(audio_b64)
                 await self._play_audio(audio_bytes)
         
-        # Transcrição do assistente
+        # Transcrição do HUMANO (input) - IMPORTANTE: é aqui que detectamos aceite/recusa
+        elif etype == "conversation.item.input_audio_transcription.completed":
+            human_transcript = event.get("transcript", "")
+            logger.info(f"Human said: {human_transcript}")
+            
+            # Atualizar transcript do humano
+            if not hasattr(self, '_human_transcript'):
+                self._human_transcript = ""
+            self._human_transcript += human_transcript + " "
+            
+            # Verificar decisão baseada no que o HUMANO disse
+            self._check_human_decision(human_transcript)
+        
+        # Transcrição do assistente (para log)
         elif etype in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
             delta = event.get("delta", "")
             self._transcript += delta
-            
-            # Verificar palavras-chave de decisão
-            self._check_decision()
         
-        # Transcrição completa do assistente
+        # Resposta completa do assistente
         elif etype == "response.done":
-            logger.debug(f"Response complete, transcript: {self._transcript[-100:]}")
+            response = event.get("response", {})
+            status = response.get("status", "completed")
+            logger.debug(f"Response complete (status={status}), transcript: {self._transcript[-100:]}")
+            
+            # Verificar se assistente decidiu
             self._check_decision()
         
         # Erro
         elif etype == "error":
             error = event.get("error", {})
-            logger.error(f"OpenAI error: {error}")
+            error_code = error.get("code", "unknown")
+            # Ignorar erros não-críticos
+            if error_code not in ("response_cancel_not_active",):
+                logger.error(f"OpenAI error: {error}")
+    
+    def _check_human_decision(self, human_text: str) -> None:
+        """
+        Verifica decisão baseada no que o HUMANO disse.
+        
+        Detecta frases de:
+        - Aceite: "pode passar", "pode transferir", "ok", "sim"
+        - Recusa: "não posso", "estou ocupado", "depois", "recuso"
+        
+        Args:
+            human_text: Transcrição do que o humano falou
+        """
+        text_lower = human_text.lower().strip()
+        
+        # Palavras/frases de ACEITE
+        accept_patterns = [
+            "pode passar", "pode transferir", "pode conectar",
+            "ok", "tá bom", "tá bem", "beleza",
+            "sim", "claro", "certo", "pode",
+            "manda", "passa aí", "conecta",
+        ]
+        
+        # Palavras/frases de RECUSA
+        reject_patterns = [
+            "não posso", "não dá", "não",
+            "estou ocupado", "ocupado", "em reunião",
+            "depois", "mais tarde", "agora não",
+            "recuso", "não quero", "não tenho tempo",
+        ]
+        
+        # Verificar aceite
+        for pattern in accept_patterns:
+            if pattern in text_lower:
+                self._accepted = True
+                logger.info(f"Human ACCEPTED: matched '{pattern}' in '{text_lower[:50]}'")
+                return
+        
+        # Verificar recusa
+        for pattern in reject_patterns:
+            if pattern in text_lower:
+                self._rejected = True
+                self._rejection_message = human_text
+                logger.info(f"Human REJECTED: matched '{pattern}' in '{text_lower[:50]}'")
+                return
     
     def _check_decision(self) -> None:
-        """Verifica se a transcrição contém decisão."""
+        """
+        Verifica se a transcrição do ASSISTENTE contém decisão.
+        
+        O assistente deve responder com "ACEITO" ou "RECUSADO: [motivo]"
+        após interpretar a resposta do humano.
+        """
         text = self._transcript.upper()
         
         if "ACEITO" in text:
             self._accepted = True
-            logger.info("Decision detected: ACCEPTED")
+            logger.info("Decision from assistant: ACCEPTED")
         
         elif "RECUSADO" in text:
             self._rejected = True
@@ -393,12 +462,15 @@ class RealtimeAnnouncementSession:
             await self._flush_audio_buffer()
     
     async def _flush_audio_buffer(self) -> None:
-        """Toca áudio acumulado no buffer."""
+        """
+        Toca áudio acumulado no buffer.
+        
+        Usa asyncio subprocess para não bloquear o event loop.
+        """
         if not hasattr(self, '_audio_buffer') or len(self._audio_buffer) == 0:
             return
         
         import tempfile
-        import subprocess
         from pathlib import Path
         
         try:
@@ -411,7 +483,8 @@ class RealtimeAnnouncementSession:
             wav_path = pcm_path.replace(".raw", ".wav")
             
             # ffmpeg: PCM 24kHz mono -> WAV 16kHz mono
-            cmd = [
+            # IMPORTANTE: Usar asyncio subprocess para não bloquear
+            process = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y",
                 "-f", "s16le",           # Input: PCM 16-bit signed
                 "-ar", "24000",          # Input: 24kHz (OpenAI output)
@@ -419,19 +492,28 @@ class RealtimeAnnouncementSession:
                 "-i", pcm_path,
                 "-ar", "16000",          # Output: 16kHz (FreeSWITCH)
                 "-ac", "1",              # Output: mono
-                wav_path
-            ]
+                wav_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
             
-            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            try:
+                _, stderr = await asyncio.wait_for(process.communicate(), timeout=5.0)
+            except asyncio.TimeoutError:
+                process.kill()
+                logger.warning("ffmpeg timeout, killing process")
+                self._audio_buffer = bytearray()
+                return
             
-            if result.returncode == 0 and Path(wav_path).exists():
+            if process.returncode == 0 and Path(wav_path).exists():
                 # Tocar via uuid_broadcast
                 await self.esl.execute_api(
                     f"uuid_broadcast {self.b_leg_uuid} {wav_path} aleg"
                 )
                 logger.debug(f"Played {len(self._audio_buffer)} bytes to B-leg")
             else:
-                logger.warning(f"ffmpeg conversion failed: {result.stderr.decode()[:200]}")
+                error_msg = stderr.decode()[:200] if stderr else "unknown"
+                logger.warning(f"ffmpeg conversion failed: {error_msg}")
             
             # Limpar buffer
             self._audio_buffer = bytearray()

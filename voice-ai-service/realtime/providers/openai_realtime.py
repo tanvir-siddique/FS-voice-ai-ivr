@@ -324,7 +324,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         vad_type = vad_config.get("type") if vad_config else "disabled"
         vad_eagerness = vad_config.get("eagerness") if vad_config else None
         
-        logger.info(f"Sending session.update (Beta format) - voice={voice}, vad={vad_type}", extra={
+        logger.info(f"Sending session.update (GA) - voice={voice}, vad={vad_type}", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_instructions": bool(self.config.system_prompt),
             "voice": voice,
@@ -387,7 +387,8 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 "eagerness": eagerness,
                 "create_response": True,
                 # interrupt_response: permite usuário interromper agente (barge-in)
-                # Importante para experiência natural de conversa
+                # IMPORTANTE: Sem isso, barge-in não funciona com semantic_vad
+                "interrupt_response": True,
             }
         
         elif vad_type == "disabled":
