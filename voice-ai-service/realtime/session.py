@@ -407,6 +407,14 @@ class RealtimeSession:
         else:
             self._set_call_state(CallState.LISTENING, reason or "transfer_end")
 
+    async def _notify_transfer_start(self) -> None:
+        """Notifica camada de transporte para limpar playback antes do MOH."""
+        if self._on_transfer:
+            try:
+                await self._on_transfer(self.call_uuid)
+            except Exception:
+                pass
+
     def _normalize_pcm16(self, frame: bytes) -> bytes:
         """
         Normaliza áudio PCM16 com ganho limitado.
@@ -1139,6 +1147,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 # CRÍTICO: Interromper o provider IMEDIATAMENTE para parar de gerar áudio
                 # Isso evita que o agente continue falando enquanto o handoff inicia
                 self._set_transfer_in_progress(True, "request_handoff")
+                await self._notify_transfer_start()
                 try:
                     if self._provider:
                         await self._provider.interrupt()

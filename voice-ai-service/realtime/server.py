@@ -1112,6 +1112,7 @@ class RealtimeServer:
             config=config,
             on_audio_output=send_audio,
             on_barge_in=clear_playback,
+            on_transfer=clear_playback,
         )
         
         return session
