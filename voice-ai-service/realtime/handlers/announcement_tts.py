@@ -108,10 +108,68 @@ class AnnouncementTTS:
         age = time.time() - cache_path.stat().st_mtime
         return age < CACHE_TTL
     
+    def _sanitize_text(self, text: str) -> str:
+        """
+        Sanitiza texto para TTS.
+        
+        Remove/substitui caracteres que podem causar problemas:
+        - Emojis
+        - Caracteres de controle
+        - HTML/XML tags
+        - Caracteres especiais que quebram SSML
+        
+        Args:
+            text: Texto original
+        
+        Returns:
+            Texto sanitizado
+        """
+        import re
+        
+        if not text:
+            return ""
+        
+        # Remover HTML/XML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Remover caracteres de controle (exceto newline, tab)
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+        
+        # Remover emojis (Unicode emoji ranges)
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U00002702-\U000027B0"  # dingbats
+            "\U000024C2-\U0001F251" 
+            "]+",
+            flags=re.UNICODE
+        )
+        text = emoji_pattern.sub('', text)
+        
+        # Escapar caracteres SSML (para providers que usam SSML)
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        # Normalizar espaços múltiplos
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Limitar tamanho (prevenir abuse)
+        MAX_TEXT_LENGTH = 1000
+        if len(text) > MAX_TEXT_LENGTH:
+            text = text[:MAX_TEXT_LENGTH] + "..."
+            logger.warning(f"TTS text truncated to {MAX_TEXT_LENGTH} chars")
+        
+        return text
+    
     async def generate_announcement(
         self,
         text: str,
-        voice_id: Optional[str] = None
+        voice_id: Optional[str] = None,
+        timeout: float = 30.0
     ) -> Optional[str]:
         """
         Gera áudio de anúncio.
@@ -119,11 +177,19 @@ class AnnouncementTTS:
         Args:
             text: Texto do anúncio
             voice_id: ID da voz (opcional, usa padrão do provider)
+            timeout: Timeout em segundos para geração (padrão: 30s)
         
         Returns:
             Caminho do arquivo WAV ou None se falhar
         """
         start_time = time.time()
+        
+        # Sanitizar texto de entrada
+        text = self._sanitize_text(text)
+        if not text:
+            logger.error("TTS text is empty after sanitization")
+            return None
+        
         voice = voice_id or self.voice_id
         
         # Validar voice_id baseado no provider
@@ -165,11 +231,17 @@ class AnnouncementTTS:
         logger.info(f"Generating announcement via {self.provider.value}: {text[:50]}...")
         
         try:
-            # 1. Gerar MP3 via provider selecionado
+            # 1. Gerar MP3 via provider selecionado (com timeout)
             if self.provider == TTSProvider.OPENAI:
-                mp3_path = await self._generate_mp3_openai(text, voice)
+                mp3_path = await asyncio.wait_for(
+                    self._generate_mp3_openai(text, voice),
+                    timeout=timeout
+                )
             else:
-                mp3_path = await self._generate_mp3_elevenlabs(text, voice)
+                mp3_path = await asyncio.wait_for(
+                    self._generate_mp3_elevenlabs(text, voice),
+                    timeout=timeout
+                )
             
             if not mp3_path:
                 return None
@@ -197,6 +269,10 @@ class AnnouncementTTS:
                 )
                 return wav_path
             
+            return None
+        
+        except asyncio.TimeoutError:
+            logger.error(f"TTS generation timeout after {timeout}s")
             return None
             
         except Exception as e:

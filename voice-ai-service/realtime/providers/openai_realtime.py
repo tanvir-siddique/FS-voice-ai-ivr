@@ -69,6 +69,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import websockets
@@ -164,6 +165,10 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         self._receive_task: Optional[asyncio.Task] = None
         self._event_queue: asyncio.Queue[ProviderEvent] = asyncio.Queue()
         self._session_id: Optional[str] = None
+        
+        # Tracking de tempo de sessão (limite OpenAI: 60 minutos)
+        self._session_start_time: Optional[float] = None
+        self._max_session_duration_seconds: int = 55 * 60  # 55 min (5 min de margem)
     
     @property
     def name(self) -> str:
@@ -209,12 +214,14 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         
         self._session_id = event.get("session", {}).get("id")
         self._connected = True
+        self._session_start_time = time.time()  # Registrar início da sessão
         self._receive_task = asyncio.create_task(self._receive_loop())
         
         logger.info("Connected to OpenAI Realtime", extra={
             "domain_uuid": self.config.domain_uuid,
             "model": self.model,
             "session_id": self._session_id,
+            "max_duration_minutes": self._max_session_duration_seconds // 60,
         })
     
     async def configure(self) -> None:
@@ -397,10 +404,65 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "call_id": call_id,
         })
     
+    def get_session_remaining_seconds(self) -> Optional[int]:
+        """
+        Retorna segundos restantes antes do limite de sessão OpenAI.
+        
+        OpenAI Realtime tem limite de 60 minutos por sessão.
+        Retornamos tempo restante para permitir reconexão preventiva.
+        
+        Returns:
+            Segundos restantes ou None se não conectado
+        """
+        if not self._session_start_time:
+            return None
+        
+        elapsed = time.time() - self._session_start_time
+        remaining = self._max_session_duration_seconds - elapsed
+        return max(0, int(remaining))
+    
+    def is_session_expiring_soon(self, threshold_seconds: int = 300) -> bool:
+        """
+        Verifica se sessão está perto de expirar.
+        
+        Args:
+            threshold_seconds: Segundos de threshold (default: 5 min)
+        
+        Returns:
+            True se sessão expira em menos de threshold_seconds
+        """
+        remaining = self.get_session_remaining_seconds()
+        if remaining is None:
+            return False
+        return remaining < threshold_seconds
+    
     async def receive_events(self) -> AsyncIterator[ProviderEvent]:
         """Generator de eventos."""
         while self._connected:
             try:
+                # Verificar limite de tempo de sessão a cada iteração
+                if self.is_session_expiring_soon(threshold_seconds=60):
+                    remaining = self.get_session_remaining_seconds()
+                    logger.warning(
+                        f"OpenAI session expiring in {remaining}s (limit: 60min)",
+                        extra={
+                            "domain_uuid": self.config.domain_uuid,
+                            "session_id": self._session_id,
+                            "remaining_seconds": remaining,
+                        }
+                    )
+                    # Emitir evento de warning para permitir ação preventiva
+                    yield ProviderEvent(
+                        type=ProviderEventType.ERROR,
+                        data={
+                            "error": {
+                                "code": "session_expiring",
+                                "message": f"Session expiring in {remaining}s",
+                            }
+                        }
+                    )
+                    break
+                
                 event = await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
                 yield event
                 if event.type in (ProviderEventType.SESSION_ENDED, ProviderEventType.ERROR):
@@ -452,30 +514,38 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         
         # Log para debug de eventos desconhecidos
         # COMPATIBILIDADE: Inclui formatos antigos (response.audio.*) e novos (response.output_audio.*)
-        if etype not in (
+        KNOWN_EVENTS = {
             # Áudio (formatos antigo e novo)
             "response.audio.delta", "response.output_audio.delta",
             "response.audio.done", "response.output_audio.done",
-            # Transcrição
+            # Transcrição do assistente
             "response.audio_transcript.delta", "response.audio_transcript.done",
+            # Transcrição do usuário (STT)
             "conversation.item.input_audio_transcription.completed",
             "conversation.item.input_audio_transcription.failed",
+            "conversation.item.input_audio_transcription.delta",  # Novo em 2026
             # VAD
             "input_audio_buffer.speech_started", "input_audio_buffer.speech_stopped",
             # Response lifecycle
             "response.created", "response.done",
             "response.content_part.added", "response.content_part.done",
             "response.output_item.added", "response.output_item.done",
+            # Text output (se modality text habilitada)
+            "response.text.delta", "response.text.done",
             # Function calls
             "response.function_call_arguments.delta", "response.function_call_arguments.done",
             # Session
             "session.created", "session.updated",
             # Buffers
             "input_audio_buffer.committed", "input_audio_buffer.cleared",
-            "conversation.item.created", 
+            "conversation.item.created", "conversation.item.truncated",
+            # Rate limits (info, não erro)
+            "rate_limits.updated",
             # Errors
-            "error"
-        ):
+            "error",
+        }
+        
+        if etype not in KNOWN_EVENTS:
             logger.debug(f"OpenAI event received: {etype}", extra={
                 "domain_uuid": self.config.domain_uuid,
                 "event_data_preview": str(event)[:200],
@@ -621,9 +691,15 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             
             return ProviderEvent(type=ProviderEventType.ERROR, data={"error": error})
         
-        # ===== SESSION EVENTS (confirmações, ignorar) =====
-        if etype in ("session.updated", "input_audio_buffer.committed", 
-                     "input_audio_buffer.cleared", "conversation.item.created"):
+        # ===== SESSION/META EVENTS (confirmações, ignorar) =====
+        if etype in (
+            "session.updated", "session.created",
+            "input_audio_buffer.committed", "input_audio_buffer.cleared",
+            "conversation.item.created",
+            "response.content_part.added", "response.content_part.done",
+            "response.output_item.added", "response.output_item.done",
+            "rate_limits.updated",  # Info de rate limits (não é erro)
+        ):
             return None  # Eventos de confirmação, não precisam de handling
         
         return None

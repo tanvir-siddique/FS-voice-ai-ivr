@@ -188,45 +188,96 @@ class RealtimeAnnouncementSession:
         logger.info("Connected to OpenAI Realtime for announcement")
     
     async def _configure_session(self) -> None:
-        """Configura a sessão OpenAI Realtime."""
+        """
+        Configura a sessão OpenAI Realtime.
+        
+        IMPORTANTE: API Beta (gpt-4o-realtime-preview) usa formato diferente!
+        - Campos no nível superior, NÃO aninhados em "session"
+        - Ref: https://platform.openai.com/docs/api-reference/realtime
+        """
+        # === FORMATO BETA (correto para gpt-4o-realtime-preview) ===
         config = {
             "type": "session.update",
-            "session": {
-                "modalities": ["audio", "text"],
-                "voice": self.voice,
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500,
-                    "create_response": True,
-                },
-                "instructions": self.system_prompt,
-                "temperature": 0.7,
-            }
+            # Campos DIRETAMENTE no nível superior, sem "session" wrapper
+            "modalities": ["audio", "text"],
+            "voice": self.voice,
+            "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 500,
+                "create_response": True,
+            },
+            "instructions": self.system_prompt,
+            "temperature": 0.7,
+            # Transcrição do input do humano
+            "input_audio_transcription": {
+                "model": "whisper-1"
+            },
         }
         
         await self._ws.send(json.dumps(config))
-        logger.debug("Session configured for announcement")
+        
+        # Aguardar confirmação session.updated
+        try:
+            msg = await asyncio.wait_for(self._ws.recv(), timeout=3.0)
+            event = json.loads(msg)
+            if event.get("type") == "session.updated":
+                logger.info("Session configured for announcement")
+            elif event.get("type") == "error":
+                error = event.get("error", {})
+                logger.error(f"Session config error: {error}")
+                raise RuntimeError(f"Session config failed: {error.get('message', 'unknown')}")
+        except asyncio.TimeoutError:
+            logger.warning("No session.updated confirmation received, continuing...")
     
     async def _start_audio_stream(self) -> None:
         """
         Inicia stream de áudio bidirecional entre FreeSWITCH e OpenAI.
         
         Usa mod_audio_stream para capturar áudio do B-leg e enviar para OpenAI.
+        
+        NOTA: A implementação completa requer um WebSocket server que:
+        1. Recebe áudio do mod_audio_stream (FreeSWITCH -> WS)
+        2. Reenvia para OpenAI Realtime (WS -> OpenAI)
+        3. Recebe áudio do OpenAI (OpenAI -> WS)
+        4. Envia de volta ao FreeSWITCH (WS -> FreeSWITCH)
+        
+        Por ora, usamos abordagem baseada em eventos ESL.
         """
-        # Por simplicidade, vamos usar uma abordagem baseada em polling
-        # Em produção, seria ideal ter um WebSocket server dedicado
-        
-        # Iniciar captura de áudio do B-leg
-        # O áudio será enviado via events do ESL
-        
-        logger.info(f"Audio stream started for B-leg: {self.b_leg_uuid}")
-        
-        # Nota: A implementação completa requer integração com mod_audio_stream
-        # Por ora, vamos usar uma abordagem simplificada
+        try:
+            # Iniciar mod_audio_stream no B-leg
+            # Formato: uuid_audio_stream <uuid> start <ws_url> mono 16k
+            
+            # O áudio do humano será capturado via mod_audio_stream
+            # e encaminhado para nossa WebSocket, que reenvia ao OpenAI
+            
+            # Por limitação atual, vamos usar approach híbrido:
+            # 1. OpenAI -> FreeSWITCH: via _play_audio (arquivo temporário)
+            # 2. FreeSWITCH -> OpenAI: via ESL events (CUSTOM audio::*) 
+            #    ou simplesmente deixar OpenAI usar VAD no silêncio inicial
+            
+            logger.info(
+                f"Audio stream initialized for B-leg: {self.b_leg_uuid}",
+                extra={
+                    "approach": "hybrid_events",
+                    "note": "Input from human via ESL events, output via temp files"
+                }
+            )
+            
+            # Inicializar buffer de áudio
+            self._audio_buffer = bytearray()
+            
+            # Em implementação futura completa:
+            # 1. Criar WebSocket server local para mod_audio_stream
+            # 2. Conectar mod_audio_stream do B-leg a esse server
+            # 3. Fazer bridge WS <-> OpenAI Realtime
+            
+        except Exception as e:
+            logger.error(f"Failed to start audio stream: {e}")
+            # Não é fatal, podemos continuar com approach simplificado
     
     async def _send_initial_message(self) -> None:
         """Envia mensagem inicial de anúncio."""
@@ -311,12 +362,74 @@ class RealtimeAnnouncementSession:
         """
         Envia áudio para o B-leg via FreeSWITCH.
         
-        Nota: Em produção, usar mod_audio_stream WebSocket.
-        Por ora, salva em arquivo e usa uuid_playback.
+        OpenAI Realtime retorna PCM16 @ 24kHz.
+        FreeSWITCH precisa de WAV com header ou conversão.
+        
+        Estratégia: Acumular chunks e tocar via uuid_broadcast.
         """
-        # Implementação simplificada - salvar em arquivo e tocar
-        # Em produção, usar stream direto via WebSocket
-        pass
+        # Acumular áudio no buffer
+        if not hasattr(self, '_audio_buffer'):
+            self._audio_buffer = bytearray()
+        
+        self._audio_buffer.extend(audio_bytes)
+        
+        # Tocar quando tiver áudio suficiente (~500ms = 24000 samples @ 24kHz)
+        MIN_BUFFER_SIZE = 24000  # 0.5s de áudio @ 24kHz PCM16
+        
+        if len(self._audio_buffer) >= MIN_BUFFER_SIZE:
+            await self._flush_audio_buffer()
+    
+    async def _flush_audio_buffer(self) -> None:
+        """Toca áudio acumulado no buffer."""
+        if not hasattr(self, '_audio_buffer') or len(self._audio_buffer) == 0:
+            return
+        
+        import tempfile
+        import subprocess
+        from pathlib import Path
+        
+        try:
+            # Salvar PCM raw em arquivo temporário
+            fd, pcm_path = tempfile.mkstemp(suffix=".raw")
+            with os.fdopen(fd, "wb") as f:
+                f.write(self._audio_buffer)
+            
+            # Converter PCM 24kHz para WAV 16kHz (FreeSWITCH padrão)
+            wav_path = pcm_path.replace(".raw", ".wav")
+            
+            # ffmpeg: PCM 24kHz mono -> WAV 16kHz mono
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "s16le",           # Input: PCM 16-bit signed
+                "-ar", "24000",          # Input: 24kHz (OpenAI output)
+                "-ac", "1",              # Input: mono
+                "-i", pcm_path,
+                "-ar", "16000",          # Output: 16kHz (FreeSWITCH)
+                "-ac", "1",              # Output: mono
+                wav_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            
+            if result.returncode == 0 and Path(wav_path).exists():
+                # Tocar via uuid_broadcast
+                await self.esl.execute_api(
+                    f"uuid_broadcast {self.b_leg_uuid} {wav_path} aleg"
+                )
+                logger.debug(f"Played {len(self._audio_buffer)} bytes to B-leg")
+            else:
+                logger.warning(f"ffmpeg conversion failed: {result.stderr.decode()[:200]}")
+            
+            # Limpar buffer
+            self._audio_buffer = bytearray()
+            
+            # Cleanup temp files
+            Path(pcm_path).unlink(missing_ok=True)
+            # Não deletar wav_path imediatamente, FreeSWITCH precisa acessar
+            
+        except Exception as e:
+            logger.error(f"Error flushing audio buffer: {e}")
+            self._audio_buffer = bytearray()
     
     async def _cleanup(self) -> None:
         """Limpa recursos."""
