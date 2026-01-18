@@ -321,11 +321,15 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "domain_uuid": self.config.domain_uuid,
         })
     
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, request_response: bool = True) -> None:
         """
-        Envia mensagem de texto.
+        Envia mensagem de texto e solicita resposta.
         
-        Ref: conversation.item.create event (SDK oficial)
+        Ref: conversation.item.create + response.create events (SDK oficial)
+        
+        Args:
+            text: Texto a enviar (será interpretado como input do usuário)
+            request_response: Se True, solicita resposta do modelo após enviar
         """
         if not self._ws:
             raise RuntimeError("Not connected")
@@ -342,6 +346,13 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         logger.debug(f"Text sent to OpenAI: {text[:50]}...", extra={
             "domain_uuid": self.config.domain_uuid,
         })
+        
+        # Solicitar resposta do modelo (gera áudio TTS)
+        if request_response:
+            await self._ws.send(json.dumps({"type": "response.create"}))
+            logger.debug("Response requested from OpenAI", extra={
+                "domain_uuid": self.config.domain_uuid,
+            })
     
     async def interrupt(self) -> None:
         """
@@ -588,6 +599,18 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             error = event.get("error", {})
             error_code = error.get("code", "unknown")
             error_message = error.get("message", "Unknown error")
+            
+            # Erros não-críticos (esperados em alguns fluxos)
+            non_critical_errors = [
+                "response_cancel_not_active",  # Tentar cancelar quando não há resposta
+                "conversation_already_has_active_response",  # Já tem resposta ativa
+            ]
+            
+            if error_code in non_critical_errors:
+                logger.warning(f"OpenAI non-critical: {error_code} - {error_message}", extra={
+                    "domain_uuid": self.config.domain_uuid,
+                })
+                return None  # Ignorar, não é erro crítico
             
             logger.error(f"OpenAI error: {error_code} - {error_message}", extra={
                 "domain_uuid": self.config.domain_uuid,
