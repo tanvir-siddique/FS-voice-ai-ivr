@@ -95,6 +95,60 @@ class EventHandler:
     once: bool = False
 
 
+@dataclass
+class OriginateResult:
+    """
+    Resultado de uma operação de originate.
+    
+    Permite diferenciar entre sucesso, falha e os diferentes motivos de falha.
+    """
+    success: bool
+    uuid: Optional[str] = None
+    hangup_cause: Optional[str] = None
+    error_message: Optional[str] = None
+    
+    @property
+    def is_offline(self) -> bool:
+        """Retorna True se o destino não está registrado/online."""
+        return self.hangup_cause in (
+            "USER_NOT_REGISTERED",
+            "SUBSCRIBER_ABSENT",
+            "UNALLOCATED_NUMBER",
+            "NO_ROUTE_DESTINATION",
+        )
+    
+    @property
+    def is_busy(self) -> bool:
+        """Retorna True se o destino está ocupado."""
+        return self.hangup_cause in (
+            "USER_BUSY",
+            "NORMAL_CIRCUIT_CONGESTION",
+        )
+    
+    @property
+    def is_no_answer(self) -> bool:
+        """Retorna True se tocou mas ninguém atendeu."""
+        return self.hangup_cause in (
+            "NO_ANSWER",
+            "NO_USER_RESPONSE",
+            "ORIGINATOR_CANCEL",
+            "ALLOTTED_TIMEOUT",
+        )
+    
+    @property
+    def is_rejected(self) -> bool:
+        """Retorna True se a chamada foi rejeitada."""
+        return self.hangup_cause in (
+            "CALL_REJECTED",
+            "USER_CHALLENGE",
+        )
+    
+    @property
+    def is_dnd(self) -> bool:
+        """Retorna True se o destino está em Do Not Disturb."""
+        return self.hangup_cause == "DO_NOT_DISTURB"
+
+
 class AsyncESLClient:
     """
     Cliente ESL assíncrono com suporte a eventos.
@@ -839,7 +893,7 @@ class AsyncESLClient:
         app: str = "&park()",
         timeout: int = 30,
         variables: Optional[Dict[str, str]] = None
-    ) -> Optional[str]:
+    ) -> OriginateResult:
         """
         Origina nova chamada.
         
@@ -850,7 +904,7 @@ class AsyncESLClient:
             variables: Variáveis de canal a setar
         
         Returns:
-            UUID da nova chamada ou None se falhou
+            OriginateResult com sucesso/falha e detalhes (hangup_cause, error_message)
         """
         try:
             # Gerar UUID para a nova chamada
@@ -892,14 +946,101 @@ class AsyncESLClient:
             
             if "+OK" in result:
                 logger.info(f"Originate success, UUID: {new_uuid}")
-                return new_uuid
+                return OriginateResult(success=True, uuid=new_uuid)
             else:
-                logger.warning(f"Originate failed: {result}")
-                return None
+                # Extrair hangup cause do erro
+                # Formato: -ERR HANGUP_CAUSE ou -ERR [CAUSE] message
+                hangup_cause = self._extract_hangup_cause(result)
+                
+                logger.warning(
+                    f"Originate failed: {result}",
+                    extra={"hangup_cause": hangup_cause}
+                )
+                
+                return OriginateResult(
+                    success=False,
+                    hangup_cause=hangup_cause,
+                    error_message=result.strip()
+                )
                 
         except Exception as e:
             logger.error(f"Originate error: {e}")
+            return OriginateResult(
+                success=False,
+                error_message=str(e)
+            )
+    
+    def _extract_hangup_cause(self, error_result: str) -> Optional[str]:
+        """
+        Extrai hangup cause de uma resposta de erro do FreeSWITCH.
+        
+        Formatos conhecidos:
+        - "-ERR USER_NOT_REGISTERED"
+        - "-ERR NO_ANSWER"
+        - "-ERR USER_BUSY"
+        - "-ERR [cause] more details"
+        
+        Args:
+            error_result: String de erro do FreeSWITCH
+            
+        Returns:
+            Hangup cause ou None se não identificado
+        """
+        if not error_result:
             return None
+        
+        # Remover prefixo -ERR
+        clean = error_result.replace("-ERR", "").strip()
+        
+        # Lista de hangup causes conhecidos do FreeSWITCH
+        # Ref: https://freeswitch.org/confluence/display/FREESWITCH/Hangup+Cause+Code+Table
+        known_causes = [
+            "USER_NOT_REGISTERED",
+            "SUBSCRIBER_ABSENT",
+            "UNALLOCATED_NUMBER",
+            "NO_ROUTE_DESTINATION",
+            "USER_BUSY",
+            "NORMAL_CIRCUIT_CONGESTION",
+            "NO_ANSWER",
+            "NO_USER_RESPONSE",
+            "ORIGINATOR_CANCEL",
+            "ALLOTTED_TIMEOUT",
+            "CALL_REJECTED",
+            "USER_CHALLENGE",
+            "DO_NOT_DISTURB",
+            "DESTINATION_OUT_OF_ORDER",
+            "NETWORK_OUT_OF_ORDER",
+            "TEMPORARY_FAILURE",
+            "SWITCH_CONGESTION",
+            "MEDIA_TIMEOUT",
+            "GATEWAY_DOWN",
+            "INVALID_GATEWAY",
+            "NORMAL_CLEARING",
+            "NORMAL_UNSPECIFIED",
+            "RECOVERY_ON_TIMER_EXPIRE",
+            "INCOMPATIBLE_DESTINATION",
+            "INVALID_NUMBER_FORMAT",
+            "FACILITY_REJECTED",
+            "FACILITY_NOT_SUBSCRIBED",
+            "INCOMING_CALL_BARRED",
+            "OUTGOING_CALL_BARRED",
+        ]
+        
+        # Verificar se algum cause conhecido está no erro
+        for cause in known_causes:
+            if cause in clean.upper():
+                return cause
+        
+        # Se não encontrou, retornar a primeira palavra (provável cause)
+        parts = clean.split()
+        if parts:
+            first_word = parts[0].upper()
+            # Remover caracteres não alfanuméricos
+            first_word = re.sub(r'[^A-Z_]', '', first_word)
+            if first_word and len(first_word) > 3:
+                return first_word
+        
+        return None
     
     async def uuid_getvar(self, uuid: str, variable: str) -> Optional[str]:
         """

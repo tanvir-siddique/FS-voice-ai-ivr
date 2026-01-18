@@ -18,6 +18,7 @@ from .esl_client import (
     ESLError,
     ESLConnectionError,
     ESLCommandError,
+    OriginateResult,
     get_esl_client,
 )
 from .transfer_manager import (
@@ -59,6 +60,7 @@ __all__ = [
     "ESLError",
     "ESLConnectionError",
     "ESLCommandError",
+    "OriginateResult",
     "get_esl_client",
     # Transfer Manager
     "TransferManager",

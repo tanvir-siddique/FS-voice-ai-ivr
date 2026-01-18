@@ -30,7 +30,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-from .esl_client import AsyncESLClient, ESLEvent, get_esl_client
+from .esl_client import AsyncESLClient, ESLEvent, OriginateResult, get_esl_client
 from .transfer_destination_loader import (
     TransferDestination,
     TransferDestinationLoader,
@@ -113,16 +113,26 @@ HANGUP_CAUSE_MAP: Dict[str, TransferStatus] = {
 
 
 # Mensagens contextuais por status
+# Cada mensagem deve ser clara e oferecer uma ação (deixar recado)
 STATUS_MESSAGES: Dict[TransferStatus, str] = {
     TransferStatus.SUCCESS: "Conectando você agora.",
-    TransferStatus.BUSY: "O ramal está ocupado no momento.",
-    TransferStatus.NO_ANSWER: "Não está atendendo no momento.",
-    TransferStatus.DND: "O ramal está em modo não perturbe.",
-    TransferStatus.OFFLINE: "O ramal não está disponível no momento.",
-    TransferStatus.REJECTED: "A chamada foi recusada.",
-    TransferStatus.UNAVAILABLE: "O destino não está disponível no momento.",
-    TransferStatus.FAILED: "Não foi possível completar a transferência.",
+    TransferStatus.BUSY: "O ramal está ocupado em outra ligação. Quer deixar um recado?",
+    TransferStatus.NO_ANSWER: "O ramal tocou mas ninguém atendeu. Quer deixar um recado?",
+    TransferStatus.DND: "O ramal está em modo não perturbe. Quer deixar um recado?",
+    TransferStatus.OFFLINE: "O ramal não está conectado no momento. Quer deixar um recado?",
+    TransferStatus.REJECTED: "A chamada não foi aceita. Quer deixar um recado?",
+    TransferStatus.UNAVAILABLE: "O destino não está disponível. Quer deixar um recado?",
+    TransferStatus.FAILED: "Não foi possível completar a transferência. Posso ajudar de outra forma?",
     TransferStatus.CANCELLED: "A chamada foi cancelada.",
+}
+
+# Mensagens detalhadas por status (para logs e debugging)
+STATUS_DETAILED_MESSAGES: Dict[TransferStatus, str] = {
+    TransferStatus.OFFLINE: "Ramal não registrado/desconectado - provavelmente desligado ou sem internet",
+    TransferStatus.NO_ANSWER: "Tocou até timeout - ninguém atendeu ou ausente da sala",
+    TransferStatus.BUSY: "Ramal em outra chamada - ocupado",
+    TransferStatus.DND: "Do Not Disturb ativo - não aceita chamadas",
+    TransferStatus.REJECTED: "Chamada rejeitada ativamente pelo destino",
 }
 
 
@@ -145,21 +155,42 @@ class TransferResult:
     
     @property
     def message(self) -> str:
-        """Retorna mensagem contextual para o status."""
-        base_msg = STATUS_MESSAGES.get(self.status, "Não foi possível completar a transferência.")
+        """
+        Retorna mensagem contextual para o status.
         
-        if self.destination:
-            name = self.destination.name
-            if self.status == TransferStatus.BUSY:
-                return f"O ramal de {name} está ocupado no momento."
-            elif self.status == TransferStatus.NO_ANSWER:
-                return f"{name} não está atendendo no momento."
-            elif self.status == TransferStatus.DND:
-                return f"O ramal de {name} está em modo não perturbe."
-            elif self.status == TransferStatus.OFFLINE:
-                return f"O ramal de {name} não está disponível no momento."
+        A mensagem é personalizada com o nome do destino quando disponível,
+        e inclui uma oferta de deixar recado quando apropriado.
+        """
+        name = self.destination.name if self.destination else "o atendente"
         
-        return base_msg
+        # Mensagens personalizadas por status
+        if self.status == TransferStatus.BUSY:
+            return f"{name} está em outra ligação no momento. Quer deixar um recado para retornarem?"
+        
+        elif self.status == TransferStatus.NO_ANSWER:
+            return f"O telefone de {name} tocou mas ninguém atendeu. Quer deixar um recado?"
+        
+        elif self.status == TransferStatus.DND:
+            return f"{name} está com o ramal em modo não perturbe. Quer deixar um recado?"
+        
+        elif self.status == TransferStatus.OFFLINE:
+            # Este é o caso de USER_NOT_REGISTERED - ramal desconectado
+            return f"O ramal de {name} não está conectado no momento. Provavelmente está desligado ou fora do alcance. Quer deixar um recado?"
+        
+        elif self.status == TransferStatus.REJECTED:
+            return f"A ligação para {name} não foi aceita. Quer deixar um recado?"
+        
+        elif self.status == TransferStatus.UNAVAILABLE:
+            return f"{name} não está disponível no momento. Quer deixar um recado?"
+        
+        elif self.status == TransferStatus.SUCCESS:
+            return f"Conectando você com {name} agora."
+        
+        elif self.status == TransferStatus.CANCELLED:
+            return "A chamada foi cancelada."
+        
+        # Fallback para outros status
+        return STATUS_MESSAGES.get(self.status, "Não foi possível completar a transferência. Posso ajudar de outra forma?")
     
     @property
     def should_offer_callback(self) -> bool:
@@ -416,7 +447,7 @@ class TransferManager:
                 
                 logger.info(f"Originating B-leg: {dial_string}")
                 
-                b_leg_uuid = await self._esl.originate(
+                originate_result = await self._esl.originate(
                     dial_string=dial_string,
                     app="&park()",
                     timeout=timeout,
@@ -428,15 +459,30 @@ class TransferManager:
                     }
                 )
                 
-                if not b_leg_uuid:
+                if not originate_result.success:
                     await self._stop_moh()
+                    
+                    # Determinar status baseado no hangup_cause
+                    status = self._hangup_cause_to_status(originate_result.hangup_cause)
+                    
+                    logger.info(
+                        f"Originate failed with cause: {originate_result.hangup_cause}",
+                        extra={
+                            "destination": destination.name,
+                            "hangup_cause": originate_result.hangup_cause,
+                            "status": status.value,
+                        }
+                    )
+                    
                     return TransferResult(
-                        status=TransferStatus.FAILED,
+                        status=status,
                         destination=destination,
-                        error="Falha ao originar B-leg",
+                        hangup_cause=originate_result.hangup_cause,
+                        error=originate_result.error_message,
                         retries=retries
                     )
                 
+                b_leg_uuid = originate_result.uuid
                 self._b_leg_uuid = b_leg_uuid
                 
                 # 6. IMPORTANTE: api originate é SÍNCRONO!
@@ -620,7 +666,7 @@ class TransferManager:
             
             logger.info(f"Originating B-leg for announced transfer: {dial_string}")
             
-            b_leg_uuid = await self._esl.originate(
+            originate_result = await self._esl.originate(
                 dial_string=dial_string,
                 app="&park()",
                 timeout=ring_timeout,
@@ -632,14 +678,32 @@ class TransferManager:
                 }
             )
             
-            if not b_leg_uuid:
+            if not originate_result.success:
                 await self._stop_moh()
+                
+                # Determinar status baseado no hangup_cause
+                status = self._hangup_cause_to_status(originate_result.hangup_cause)
+                
+                logger.info(
+                    f"Announced transfer originate failed",
+                    extra={
+                        "destination": destination.name,
+                        "hangup_cause": originate_result.hangup_cause,
+                        "status": status.value,
+                        "is_offline": originate_result.is_offline,
+                        "is_busy": originate_result.is_busy,
+                        "is_no_answer": originate_result.is_no_answer,
+                    }
+                )
+                
                 return TransferResult(
-                    status=TransferStatus.NO_ANSWER,
+                    status=status,
                     destination=destination,
-                    error=f"Destino não atendeu: {destination.name}",
+                    hangup_cause=originate_result.hangup_cause,
+                    error=originate_result.error_message,
                 )
             
+            b_leg_uuid = originate_result.uuid
             self._b_leg_uuid = b_leg_uuid
             
             # 6. Parar MOH temporariamente para o anúncio
@@ -971,6 +1035,46 @@ class TransferManager:
         else:
             # Default: tratar como extensão via user/
             return f"user/{number}@{context}"
+    
+    def _hangup_cause_to_status(self, hangup_cause: Optional[str]) -> TransferStatus:
+        """
+        Converte hangup cause do FreeSWITCH para TransferStatus.
+        
+        Args:
+            hangup_cause: Hangup cause do FreeSWITCH (ex: "USER_NOT_REGISTERED")
+        
+        Returns:
+            TransferStatus correspondente
+        """
+        if not hangup_cause:
+            return TransferStatus.FAILED
+        
+        # Usar mapeamento global
+        status = HANGUP_CAUSE_MAP.get(hangup_cause.upper())
+        if status:
+            return status
+        
+        # Fallback para causas não mapeadas
+        cause_upper = hangup_cause.upper()
+        
+        # Padrões de offline
+        if any(x in cause_upper for x in ("NOT_REGISTERED", "ABSENT", "UNALLOCATED", "NO_ROUTE")):
+            return TransferStatus.OFFLINE
+        
+        # Padrões de busy
+        if any(x in cause_upper for x in ("BUSY", "CONGESTION")):
+            return TransferStatus.BUSY
+        
+        # Padrões de no_answer
+        if any(x in cause_upper for x in ("NO_ANSWER", "NO_USER", "TIMEOUT", "CANCEL")):
+            return TransferStatus.NO_ANSWER
+        
+        # Padrões de rejected
+        if any(x in cause_upper for x in ("REJECTED", "CHALLENGE", "BARRED")):
+            return TransferStatus.REJECTED
+        
+        # Default
+        return TransferStatus.FAILED
     
     async def cancel_transfer(self) -> bool:
         """
