@@ -58,8 +58,8 @@
 			'name' => 'OpenAI Realtime API',
 			'description' => 'GPT-4o Realtime with voice',
 			'fields' => ['api_key', 'model', 'voice'],
-			'voices' => ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
-			'models' => ['gpt-4o-realtime-preview'],
+			'voices' => ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'],
+			'models' => ['gpt-4o-realtime-preview', 'gpt-4o-realtime-preview-2024-12-17'],
 		],
 		'elevenlabs' => [
 			'name' => 'ElevenLabs Conversational AI',
@@ -228,7 +228,7 @@
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>Voice</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<select class='formfld' name='voice'>\n";
-	foreach (['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as $v) {
+	foreach (['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'] as $v) {
 		$selected = (($config['voice'] ?? '') === $v) ? 'selected' : '';
 		echo "			<option value='".escape($v)."' ".$selected.">".ucfirst($v)."</option>\n";
 	}
