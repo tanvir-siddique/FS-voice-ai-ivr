@@ -1,7 +1,11 @@
 """
-Announcement TTS Service - Gera áudio de anúncio usando ElevenLabs.
+Announcement TTS Service - Gera áudio de anúncio usando ElevenLabs ou OpenAI.
 
 Usado para anunciar clientes ao atendente humano durante transferência.
+
+Suporta:
+- ElevenLabs TTS (eleven_multilingual_v2)
+- OpenAI TTS (tts-1, tts-1-hd)
 
 Ref: voice-ai-ivr/openspec/changes/announced-transfer/
 """
@@ -13,6 +17,7 @@ import os
 import subprocess
 import tempfile
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -27,38 +32,64 @@ AUDIO_CACHE_DIR = Path(os.getenv("ANNOUNCEMENT_CACHE_DIR", "/tmp/voice-ai-announ
 # TTL do cache em segundos (1 hora)
 CACHE_TTL = int(os.getenv("ANNOUNCEMENT_CACHE_TTL", "3600"))
 
+# Provider padrão para TTS (elevenlabs ou openai)
+DEFAULT_TTS_PROVIDER = os.getenv("ANNOUNCEMENT_TTS_PROVIDER", "elevenlabs")
+
+
+class TTSProvider(str, Enum):
+    """Providers de TTS suportados."""
+    ELEVENLABS = "elevenlabs"
+    OPENAI = "openai"
+
 
 class AnnouncementTTS:
     """
-    Serviço para gerar áudio de anúncio usando ElevenLabs.
+    Serviço para gerar áudio de anúncio usando ElevenLabs ou OpenAI.
     
     Fluxo:
     1. Verificar cache (mesmo texto = mesmo áudio)
-    2. Se não tem cache, gerar via ElevenLabs
+    2. Se não tem cache, gerar via ElevenLabs ou OpenAI
     3. Converter MP3 para WAV (PCM 16kHz mono)
     4. Salvar em diretório acessível pelo FreeSWITCH
     5. Retornar caminho do arquivo
     """
     
+    # Mapeamento de vozes OpenAI
+    OPENAI_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+    
     def __init__(
         self,
+        provider: Optional[str] = None,
         api_key: Optional[str] = None,
         voice_id: Optional[str] = None,
-        model_id: str = "eleven_multilingual_v2"
+        model_id: Optional[str] = None
     ):
         """
         Args:
-            api_key: ElevenLabs API key (ou usar env ELEVENLABS_API_KEY)
-            voice_id: ID da voz (ou usar env ELEVENLABS_VOICE_ID)
-            model_id: Modelo do ElevenLabs
+            provider: "elevenlabs" ou "openai" (ou usar env ANNOUNCEMENT_TTS_PROVIDER)
+            api_key: API key (ou usar env ELEVENLABS_API_KEY / OPENAI_API_KEY)
+            voice_id: ID da voz (depende do provider)
+            model_id: Modelo (eleven_multilingual_v2 ou tts-1/tts-1-hd)
         """
-        self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
-        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-        self.model_id = model_id
-        self.base_url = "https://api.elevenlabs.io/v1"
+        # Determinar provider
+        self.provider = TTSProvider(provider or DEFAULT_TTS_PROVIDER)
+        
+        # Configurar baseado no provider
+        if self.provider == TTSProvider.OPENAI:
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+            self.voice_id = voice_id or os.getenv("OPENAI_TTS_VOICE", "nova")
+            self.model_id = model_id or os.getenv("OPENAI_TTS_MODEL", "tts-1")
+            self.base_url = "https://api.openai.com/v1"
+        else:  # ElevenLabs
+            self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY", "")
+            self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+            self.model_id = model_id or "eleven_multilingual_v2"
+            self.base_url = "https://api.elevenlabs.io/v1"
         
         # Criar diretório de cache
         AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"AnnouncementTTS initialized with provider={self.provider.value}")
     
     def _get_cache_key(self, text: str, voice_id: str) -> str:
         """Gera chave de cache baseada no texto e voz."""
@@ -87,7 +118,7 @@ class AnnouncementTTS:
         
         Args:
             text: Texto do anúncio
-            voice_id: ID da voz (opcional, usa padrão)
+            voice_id: ID da voz (opcional, usa padrão do provider)
         
         Returns:
             Caminho do arquivo WAV ou None se falhar
@@ -95,20 +126,27 @@ class AnnouncementTTS:
         start_time = time.time()
         voice = voice_id or self.voice_id
         
-        # Validar voice_id (ElevenLabs usa IDs de ~20 caracteres)
-        if not voice:
-            logger.warning("No voice_id provided, using default")
-            voice = self.voice_id
-        elif len(voice) < 10:
-            logger.warning(f"voice_id '{voice}' seems invalid, using default")
-            voice = self.voice_id
+        # Validar voice_id baseado no provider
+        if self.provider == TTSProvider.OPENAI:
+            # OpenAI usa nomes de voz: alloy, echo, fable, onyx, nova, shimmer
+            if voice not in self.OPENAI_VOICES:
+                logger.warning(f"OpenAI voice '{voice}' invalid, using 'nova'")
+                voice = "nova"
+        else:
+            # ElevenLabs usa IDs de ~20 caracteres
+            if not voice:
+                logger.warning("No voice_id provided, using default")
+                voice = self.voice_id
+            elif len(voice) < 10:
+                logger.warning(f"ElevenLabs voice_id '{voice}' seems invalid, using default")
+                voice = self.voice_id
         
         if not self.api_key:
-            logger.error("ElevenLabs API key not configured")
+            logger.error(f"{self.provider.value} API key not configured")
             return None
         
-        # Verificar cache
-        cache_key = self._get_cache_key(text, voice)
+        # Verificar cache (inclui provider na chave para evitar conflitos)
+        cache_key = self._get_cache_key(f"{self.provider.value}:{text}", voice)
         cache_path = self._get_cache_path(cache_key)
         
         if self._is_cache_valid(cache_path):
@@ -116,7 +154,7 @@ class AnnouncementTTS:
             logger.info(
                 f"Announcement cache hit: {cache_key}",
                 extra={
-                    "tts_provider": "elevenlabs",
+                    "tts_provider": self.provider.value,
                     "text_length": len(text),
                     "cache_hit": True,
                     "duration_seconds": duration
@@ -124,11 +162,15 @@ class AnnouncementTTS:
             )
             return str(cache_path)
         
-        logger.info(f"Generating announcement via ElevenLabs: {text[:50]}...")
+        logger.info(f"Generating announcement via {self.provider.value}: {text[:50]}...")
         
         try:
-            # 1. Gerar MP3 via ElevenLabs
-            mp3_path = await self._generate_mp3(text, voice)
+            # 1. Gerar MP3 via provider selecionado
+            if self.provider == TTSProvider.OPENAI:
+                mp3_path = await self._generate_mp3_openai(text, voice)
+            else:
+                mp3_path = await self._generate_mp3_elevenlabs(text, voice)
+            
             if not mp3_path:
                 return None
             
@@ -146,7 +188,7 @@ class AnnouncementTTS:
                 logger.info(
                     f"Announcement generated: {wav_path}",
                     extra={
-                        "tts_provider": "elevenlabs",
+                        "tts_provider": self.provider.value,
                         "text_length": len(text),
                         "cache_hit": False,
                         "duration_seconds": duration,
@@ -161,7 +203,7 @@ class AnnouncementTTS:
             logger.exception(f"Error generating announcement: {e}")
             return None
     
-    async def _generate_mp3(self, text: str, voice_id: str) -> Optional[str]:
+    async def _generate_mp3_elevenlabs(self, text: str, voice_id: str) -> Optional[str]:
         """Gera MP3 via ElevenLabs API."""
         try:
             headers = {
@@ -201,6 +243,51 @@ class AnnouncementTTS:
             return None
         except Exception as e:
             logger.error(f"Error calling ElevenLabs: {e}")
+            return None
+    
+    async def _generate_mp3_openai(self, text: str, voice: str) -> Optional[str]:
+        """
+        Gera MP3 via OpenAI TTS API.
+        
+        Ref: https://platform.openai.com/docs/guides/text-to-speech
+        
+        Vozes disponíveis: alloy, echo, fable, onyx, nova, shimmer
+        Modelos: tts-1 (rápido), tts-1-hd (alta qualidade)
+        """
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            payload = {
+                "model": self.model_id,  # tts-1 ou tts-1-hd
+                "voice": voice,
+                "input": text,
+                "response_format": "mp3",
+            }
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{self.base_url}/audio/speech",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                
+                # Salvar MP3 temporário
+                fd, mp3_path = tempfile.mkstemp(suffix=".mp3")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(response.content)
+                
+                logger.debug(f"OpenAI TTS generated: {len(response.content)} bytes")
+                return mp3_path
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"OpenAI TTS API error: {e.response.status_code} - {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling OpenAI TTS: {e}")
             return None
     
     async def _convert_to_wav(self, mp3_path: str, wav_path: Path) -> Optional[str]:
@@ -280,7 +367,7 @@ class AnnouncementTTS:
     
     async def is_available(self) -> bool:
         """
-        Verifica se ElevenLabs está disponível.
+        Verifica se o provider de TTS está disponível.
         
         Útil para health checks e fallback decisions.
         
@@ -292,23 +379,49 @@ class AnnouncementTTS:
         
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                response = await client.get(
-                    f"{self.base_url}/user",
-                    headers={"xi-api-key": self.api_key},
-                )
+                if self.provider == TTSProvider.OPENAI:
+                    # OpenAI: verificar endpoint de modelos
+                    response = await client.get(
+                        f"{self.base_url}/models",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                    )
+                else:
+                    # ElevenLabs: verificar endpoint de usuário
+                    response = await client.get(
+                        f"{self.base_url}/user",
+                        headers={"xi-api-key": self.api_key},
+                    )
                 return response.status_code == 200
         except Exception as e:
-            logger.warning(f"ElevenLabs health check failed: {e}")
+            logger.warning(f"{self.provider.value} health check failed: {e}")
             return False
 
 
-# Singleton para reuso
-_announcement_tts: Optional[AnnouncementTTS] = None
+# Singletons para reuso (um por provider)
+_announcement_tts_elevenlabs: Optional[AnnouncementTTS] = None
+_announcement_tts_openai: Optional[AnnouncementTTS] = None
 
 
-def get_announcement_tts() -> AnnouncementTTS:
-    """Retorna instância singleton do AnnouncementTTS."""
-    global _announcement_tts
-    if _announcement_tts is None:
-        _announcement_tts = AnnouncementTTS()
-    return _announcement_tts
+def get_announcement_tts(provider: Optional[str] = None) -> AnnouncementTTS:
+    """
+    Retorna instância singleton do AnnouncementTTS.
+    
+    Args:
+        provider: "elevenlabs" ou "openai" (usa env ANNOUNCEMENT_TTS_PROVIDER se None)
+    
+    Returns:
+        Instância do AnnouncementTTS para o provider especificado
+    """
+    global _announcement_tts_elevenlabs, _announcement_tts_openai
+    
+    # Determinar provider
+    prov = TTSProvider(provider or DEFAULT_TTS_PROVIDER)
+    
+    if prov == TTSProvider.OPENAI:
+        if _announcement_tts_openai is None:
+            _announcement_tts_openai = AnnouncementTTS(provider="openai")
+        return _announcement_tts_openai
+    else:
+        if _announcement_tts_elevenlabs is None:
+            _announcement_tts_elevenlabs = AnnouncementTTS(provider="elevenlabs")
+        return _announcement_tts_elevenlabs
