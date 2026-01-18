@@ -113,6 +113,17 @@
 			'time_condition_uuid' => !empty($_POST['time_condition_uuid']) ? $_POST['time_condition_uuid'] : null,
 			'enabled' => $_POST['enabled'] ?? 'true',
 			'webhook_url' => $_POST['webhook_url'] ?? '',
+			// VAD Configuration
+			'vad_type' => $_POST['vad_type'] ?? 'semantic_vad',
+			'vad_eagerness' => $_POST['vad_eagerness'] ?? 'medium',
+			// Guardrails Configuration
+			'guardrails_enabled' => isset($_POST['guardrails_enabled']) ? 'true' : 'false',
+			'guardrails_topics' => str_replace("\r\n", "\n", trim($_POST['guardrails_topics'] ?? '')),
+			// Transfer Realtime Configuration
+			'transfer_realtime_enabled' => ($_POST['transfer_realtime_enabled'] ?? 'false') === 'true' ? 'true' : 'false',
+			'transfer_realtime_prompt' => str_replace("\r\n", "\n", trim($_POST['transfer_realtime_prompt'] ?? '')),
+			'transfer_realtime_timeout' => intval($_POST['transfer_realtime_timeout'] ?? 15),
+			'announcement_tts_provider' => $_POST['announcement_tts_provider'] ?? 'elevenlabs',
 			// Handoff OmniPlay settings
 			'handoff_enabled' => isset($_POST['handoff_enabled']) ? 'true' : 'false',
 			'handoff_keywords' => trim($_POST['handoff_keywords'] ?? 'atendente,humano,pessoa,operador'),
@@ -171,6 +182,17 @@
 			$array['voice_secretaries'][0]['time_condition_uuid'] = $form_data['time_condition_uuid'];
 			$array['voice_secretaries'][0]['enabled'] = $form_data['enabled'];
 			$array['voice_secretaries'][0]['omniplay_webhook_url'] = $form_data['webhook_url'] ?: null;
+			// VAD Configuration
+			$array['voice_secretaries'][0]['vad_type'] = $form_data['vad_type'] ?: 'semantic_vad';
+			$array['voice_secretaries'][0]['vad_eagerness'] = $form_data['vad_eagerness'] ?: 'medium';
+			// Guardrails Configuration
+			$array['voice_secretaries'][0]['guardrails_enabled'] = $form_data['guardrails_enabled'];
+			$array['voice_secretaries'][0]['guardrails_topics'] = $form_data['guardrails_topics'] ?: null;
+			// Transfer Realtime Configuration
+			$array['voice_secretaries'][0]['transfer_realtime_enabled'] = $form_data['transfer_realtime_enabled'];
+			$array['voice_secretaries'][0]['transfer_realtime_prompt'] = $form_data['transfer_realtime_prompt'] ?: null;
+			$array['voice_secretaries'][0]['transfer_realtime_timeout'] = $form_data['transfer_realtime_timeout'] ?: 15;
+			$array['voice_secretaries'][0]['announcement_tts_provider'] = $form_data['announcement_tts_provider'] ?: 'elevenlabs';
 			// Handoff OmniPlay settings
 			$array['voice_secretaries'][0]['handoff_enabled'] = $form_data['handoff_enabled'];
 			$array['voice_secretaries'][0]['handoff_keywords'] = $form_data['handoff_keywords'] ?: null;
@@ -363,6 +385,73 @@
 		echo "			<option value='".escape($p['voice_ai_provider_uuid'])."' ".$selected.">".escape($p['provider_name'])."</option>\n";
 	}
 	echo "		</select>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// VAD Type
+	echo "<tr id='vad_type_row' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_type'] ?? 'VAD Type')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$vad_type = $data['vad_type'] ?? 'semantic_vad';
+	echo "		<select class='formfld' name='vad_type' id='vad_type' onchange='toggleVadEagerness()'>\n";
+	echo "			<option value='semantic_vad' ".($vad_type === 'semantic_vad' ? 'selected' : '').">🧠 Semantic VAD (Recomendado)</option>\n";
+	echo "			<option value='server_vad' ".($vad_type === 'server_vad' ? 'selected' : '').">⏱️ Server VAD (Baseado em silêncio)</option>\n";
+	echo "			<option value='disabled' ".($vad_type === 'disabled' ? 'selected' : '').">❌ Desabilitado (Push-to-talk)</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint'>".($text['description-vad_type'] ?? 'Semantic VAD entende quando o usuário terminou de falar. Server VAD usa detecção de silêncio.')."</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// VAD Eagerness (only for semantic_vad)
+	echo "<tr id='vad_eagerness_row' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_eagerness'] ?? 'Eagerness')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$vad_eagerness = $data['vad_eagerness'] ?? 'medium';
+	echo "		<select class='formfld' name='vad_eagerness'>\n";
+	echo "			<option value='low' ".($vad_eagerness === 'low' ? 'selected' : '').">🐢 Low (Paciente - espera pausas longas)</option>\n";
+	echo "			<option value='medium' ".($vad_eagerness === 'medium' ? 'selected' : '').">⚖️ Medium (Balanceado - recomendado pt-BR)</option>\n";
+	echo "			<option value='high' ".($vad_eagerness === 'high' ? 'selected' : '').">⚡ High (Rápido - pode interromper)</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint'>".($text['description-vad_eagerness'] ?? 'Controla quão rápido o agente responde. Low = mais paciente, High = mais rápido.')."</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// =====================================================
+	// Guardrails Section (Security)
+	// =====================================================
+	echo "<tr>\n";
+	echo "	<td colspan='2' style='padding: 12px 10px; background: #ffebee; border-bottom: 1px solid #ef5350;'>\n";
+	echo "		<b>🛡️ ".($text['header-guardrails'] ?? 'Guardrails (Segurança)')."</b>\n";
+	echo "		<span style='font-size: 0.85em; color: #c62828; margin-left: 10px;'>"
+		. "Regras de segurança para evitar comportamentos indesejados"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Guardrails Enabled
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-guardrails_enabled'] ?? 'Ativar Guardrails')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$guardrails_enabled = (!isset($data['guardrails_enabled']) || $data['guardrails_enabled'] == 'true' || $data['guardrails_enabled'] === true);
+	echo "		<input type='checkbox' name='guardrails_enabled' id='guardrails_enabled' ".($guardrails_enabled ? 'checked' : '')." onchange='toggleGuardrailsOptions()'>\n";
+	echo "		<label for='guardrails_enabled'>".($text['label-enabled'] ?? 'Enabled')."</label>\n";
+	echo "		<br /><span class='vtable-hint'>"
+		. "Adiciona regras de segurança ao prompt: não revelar instruções, manter escopo, detectar abusos, etc."
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Guardrails Topics (prohibited topics)
+	echo "<tr class='guardrails-option'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-guardrails_topics'] ?? 'Tópicos Proibidos')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$guardrails_topics = str_replace("\r\n", "\n", str_replace("\r", "", $data['guardrails_topics'] ?? ''));
+	echo "		<textarea class='formfld' name='guardrails_topics' rows='4' style='width: 100%;' placeholder='política&#10;religião&#10;concorrentes&#10;preços de outras empresas'>".escape(trim($guardrails_topics))."</textarea>\n";
+	echo "		<br /><span class='vtable-hint'>"
+		. "<b>Opcional:</b> Lista de tópicos que o agente NÃO deve discutir (um por linha). "
+		. "Ex: política, religião, concorrentes.<br/>"
+		. "O agente redirecionará educadamente quando esses tópicos forem mencionados."
+		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -608,6 +697,73 @@
 	echo "		<input class='formfld' type='number' name='handoff_timeout' min='5' max='120' value='".intval($data['handoff_timeout'] ?? 30)."' style='width: 80px;'>\n";
 	echo "		<span style='margin-left: 5px;'>segundos</span>\n";
 	echo "		<br /><span class='vtable-hint'>Tempo aguardando atendente antes de criar callback/ticket. <b>Padrão:</b> 30s</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// =====================================================
+	// Transfer Realtime Mode (Premium Feature)
+	// =====================================================
+	echo "<tr>\n";
+	echo "	<td colspan='2' style='padding: 12px 10px; background: #e8f5e9; border-bottom: 1px solid #4caf50;'>\n";
+	echo "		<b>🎙️ ".($text['header-transfer_realtime'] ?? 'Anúncio de Transferência (Premium)')."</b>\n";
+	echo "		<span style='font-size: 0.85em; color: #2e7d32; margin-left: 10px;'>"
+		. "Como o agente anuncia o cliente ao atendente humano"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Transfer Realtime Enabled
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_realtime'] ?? 'Modo de Anúncio')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$transfer_realtime = ($data['transfer_realtime_enabled'] === true || $data['transfer_realtime_enabled'] === 'true' || $data['transfer_realtime_enabled'] === 't');
+	echo "		<select class='formfld' name='transfer_realtime_enabled' id='transfer_realtime_enabled' onchange='toggleTransferRealtimeOptions()'>\n";
+	echo "			<option value='false' ".(!$transfer_realtime ? 'selected' : '').">📢 TTS Simples (Padrão)</option>\n";
+	echo "			<option value='true' ".($transfer_realtime ? 'selected' : '').">🗣️ Conversa Realtime (Premium)</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint'>"
+		. "<b>TTS Simples:</b> Toca um áudio pré-gerado + aguarda DTMF ou timeout<br/>"
+		. "<b>Conversa Realtime:</b> O agente IA conversa por voz com o humano (mais natural, mais caro)"
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Transfer Realtime Prompt
+	echo "<tr class='transfer-realtime-option' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_realtime_prompt'] ?? 'Prompt de Anúncio')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$transfer_prompt_default = "Você está anunciando uma ligação para um atendente humano.\nInforme quem está ligando e o motivo.\nSe o humano disser que pode atender, diga \"conectando\" e encerre.\nSe disser que não pode, pergunte se quer deixar recado.\nSeja breve e objetivo.";
+	$transfer_prompt = str_replace("\r\n", "\n", str_replace("\r", "", $data['transfer_realtime_prompt'] ?? $transfer_prompt_default));
+	echo "		<textarea class='formfld' name='transfer_realtime_prompt' rows='5' style='width: 100%;'>".escape(trim($transfer_prompt))."</textarea>\n";
+	echo "		<br /><span class='vtable-hint'>"
+		. "Instruções para o agente ao conversar com o humano. O agente deve informar quem está ligando, "
+		. "o motivo, e detectar se o humano aceita ou recusa a chamada."
+		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Transfer Realtime Timeout
+	echo "<tr class='transfer-realtime-option' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_realtime_timeout'] ?? 'Timeout do Anúncio')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<input class='formfld' type='number' name='transfer_realtime_timeout' min='5' max='60' value='".intval($data['transfer_realtime_timeout'] ?? 15)."' style='width: 80px;'>\n";
+	echo "		<span style='margin-left: 5px;'>segundos</span>\n";
+	echo "		<br /><span class='vtable-hint'>Tempo para o humano responder durante o anúncio. <b>Padrão:</b> 15s</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// Announcement TTS Provider
+	echo "<tr>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-announcement_tts'] ?? 'TTS do Anúncio')."</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	$announcement_tts = $data['announcement_tts_provider'] ?? 'elevenlabs';
+	echo "		<select class='formfld' name='announcement_tts_provider'>\n";
+	echo "			<option value='elevenlabs' ".($announcement_tts === 'elevenlabs' ? 'selected' : '').">🎤 ElevenLabs (Melhor qualidade)</option>\n";
+	echo "			<option value='openai' ".($announcement_tts === 'openai' ? 'selected' : '').">🤖 OpenAI TTS (Mais barato)</option>\n";
+	echo "		</select>\n";
+	echo "		<br /><span class='vtable-hint'>"
+		. "Provider para gerar o áudio de anúncio. ElevenLabs tem melhor qualidade, OpenAI é mais barato."
+		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -894,12 +1050,49 @@
 <script>
 function toggleRealtimeProvider() {
 	var mode = document.getElementById('processing_mode').value;
-	var row = document.getElementById('realtime_provider_row');
-	if (mode === 'realtime' || mode === 'auto') {
-		row.style.display = '';
+	var isRealtime = (mode === 'realtime' || mode === 'auto');
+	
+	// Provider row
+	var providerRow = document.getElementById('realtime_provider_row');
+	if (providerRow) providerRow.style.display = isRealtime ? '' : 'none';
+	
+	// VAD Type row
+	var vadTypeRow = document.getElementById('vad_type_row');
+	if (vadTypeRow) vadTypeRow.style.display = isRealtime ? '' : 'none';
+	
+	// Also toggle VAD eagerness based on VAD type
+	if (isRealtime) {
+		toggleVadEagerness();
 	} else {
-		row.style.display = 'none';
+		var eagerRow = document.getElementById('vad_eagerness_row');
+		if (eagerRow) eagerRow.style.display = 'none';
 	}
+}
+
+function toggleVadEagerness() {
+	var vadType = document.getElementById('vad_type')?.value || 'semantic_vad';
+	var eagerRow = document.getElementById('vad_eagerness_row');
+	
+	// Eagerness só aparece para semantic_vad
+	if (eagerRow) {
+		eagerRow.style.display = (vadType === 'semantic_vad') ? '' : 'none';
+	}
+}
+
+function toggleGuardrailsOptions() {
+	var enabled = document.getElementById('guardrails_enabled')?.checked;
+	var rows = document.querySelectorAll('.guardrails-option');
+	rows.forEach(function(row) {
+		row.style.display = enabled ? '' : 'none';
+	});
+}
+
+function toggleTransferRealtimeOptions() {
+	var enabled = document.getElementById('transfer_realtime_enabled')?.value === 'true';
+	var rows = document.querySelectorAll('.transfer-realtime-option');
+	rows.forEach(function(row) {
+		row.style.display = enabled ? '' : 'none';
+	});
 }
 
 function toggleHandoffOptions() {
@@ -925,6 +1118,9 @@ function toggleFallbackOptions() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
 	toggleRealtimeProvider();
+	toggleVadEagerness();
+	toggleGuardrailsOptions();
+	toggleTransferRealtimeOptions();
 	toggleHandoffOptions();
 	toggleFallbackOptions();
 });
