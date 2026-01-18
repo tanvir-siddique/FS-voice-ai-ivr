@@ -762,6 +762,65 @@ class AsyncESLClient:
             logger.error(f"uuid_break error: {e}")
             return False
     
+    async def uuid_audio_stream(
+        self,
+        uuid: str,
+        action: str,
+        url: Optional[str] = None,
+        format: str = "mono",
+        rate: str = "16k"
+    ) -> bool:
+        """
+        Controla streaming de áudio via mod_audio_stream.
+        
+        Ref: https://github.com/amigniter/mod_audio_stream
+        REQUER: mod_audio_stream v1.0.3+ para suporte a pause/resume
+        
+        Args:
+            uuid: UUID da chamada
+            action: start, stop, pause, resume, send_text
+            url: URL do WebSocket (obrigatório para start)
+            format: mono, mixed, stereo (default: mono)
+                - mono: apenas áudio do chamador (caller) - RECOMENDADO
+                - mixed: caller + callee em um canal
+                - stereo: caller no canal esquerdo, callee no direito
+            rate: 8k ou 16k (default: 16k)
+        
+        Returns:
+            True se sucesso
+        
+        IMPORTANTE - Uso durante transferências:
+        1. PAUSE antes de iniciar MOH - evita que MOH seja capturado
+        2. RESUME após parar MOH (se falhou) - retoma captura do caller
+        3. STOP após bridge sucesso - cliente agora fala com humano
+        
+        Isso evita loops de feedback onde o bot "ouve" a si mesmo.
+        """
+        try:
+            if action == "start":
+                if not url:
+                    logger.error("uuid_audio_stream start requires URL")
+                    return False
+                cmd = f"uuid_audio_stream {uuid} start {url} {format} {rate}"
+            elif action in ("stop", "pause", "resume"):
+                cmd = f"uuid_audio_stream {uuid} {action}"
+            else:
+                logger.error(f"uuid_audio_stream invalid action: {action}")
+                return False
+            
+            result = await self.execute_api(cmd)
+            success = "+OK" in result
+            
+            if success:
+                logger.debug(f"uuid_audio_stream {action} success for {uuid}")
+            else:
+                logger.warning(f"uuid_audio_stream {action} failed for {uuid}: {result}")
+            
+            return success
+        except Exception as e:
+            logger.error(f"uuid_audio_stream error: {e}")
+            return False
+    
     async def uuid_bridge(self, uuid_a: str, uuid_b: str) -> bool:
         """
         Cria bridge entre duas chamadas.
