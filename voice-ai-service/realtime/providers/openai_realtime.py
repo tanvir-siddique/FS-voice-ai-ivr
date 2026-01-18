@@ -9,14 +9,16 @@ OpenAI Realtime API Provider.
 - SDK: https://github.com/openai/openai-python (src/openai/resources/beta/realtime/)
 
 === MODELOS DISPONÍVEIS (Jan/2026) ===
-- gpt-realtime (GA - principal)
-- gpt-4o-realtime-preview (deprecated, mas ainda funciona)
+- gpt-realtime (GA - RECOMENDADO)
+- gpt-realtime-mini (GA - mais barato, menor latência)
+- gpt-4o-realtime-preview (DEPRECATED - não usar)
 
 === CONFIGURAÇÕES DE ÁUDIO ===
 - Input: 24kHz PCM16 mono (audio/pcm)
 - Output: 24kHz PCM16 mono (audio/pcm)
 - Endpoint: wss://api.openai.com/v1/realtime?model={model}
-- Headers: Authorization: Bearer {api_key}, OpenAI-Beta: realtime=v1
+- Headers: Authorization: Bearer {api_key}
+- NOTA: Header OpenAI-Beta NÃO É MAIS NECESSÁRIO para modelos GA
 
 === FORMATO DE EVENTOS (Context7 verificado) ===
 Client → Server:
@@ -59,9 +61,13 @@ Dois tipos disponíveis:
    - Não inclui turn_detection no session.update
    - Requer input_audio_buffer.commit manual
 
-=== DEPRECATION WARNING ===
-A interface Beta (OpenAI-Beta: realtime=v1) será DESCONTINUADA em 27/02/2026.
-Migrar para GA quando disponível. Ref: platform.openai.com/docs/deprecations
+=== API GA (General Availability) ===
+Migrado para API GA em Jan/2026.
+- Modelo: gpt-realtime (padrão)
+- Sem header OpenAI-Beta necessário
+- Limite de sessão: 60 minutos
+- Custo ~20% menor que versão preview
+Ref: openai.com/blog/introducing-gpt-realtime
 
 === SESSION.UPDATE FORMAT ===
 IMPORTANTE: API Beta usa formato DIFERENTE da documentação GA!
@@ -144,16 +150,17 @@ DEFAULT_TOOLS: List[Dict[str, Any]] = [
 
 class OpenAIRealtimeProvider(BaseRealtimeProvider):
     """
-    Provider para OpenAI Realtime API.
+    Provider para OpenAI Realtime API (GA - General Availability).
     
     Sample rates (conforme SDK oficial):
     - Input: 24kHz PCM16 mono
     - Output: 24kHz PCM16 mono
     
-    Protocolo WebSocket:
+    Protocolo WebSocket (GA):
     - Header: Authorization: Bearer {api_key}
-    - Header: OpenAI-Beta: realtime=v1
     - URL: wss://api.openai.com/v1/realtime?model={model}
+    
+    NOTA: Header OpenAI-Beta NÃO é mais necessário para modelos GA.
     """
     
     REALTIME_URL = "wss://api.openai.com/v1/realtime"
@@ -204,14 +211,22 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             return
         
         url = f"{self.REALTIME_URL}?model={self.model}"
+        
+        # Headers para API GA (General Availability)
+        # NOTA: OpenAI-Beta NÃO é mais necessário para modelos GA (gpt-realtime)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "OpenAI-Beta": "realtime=v1"
         }
         
-        logger.debug(f"Connecting to OpenAI Realtime: {url}", extra={
+        # Adicionar header Beta apenas para modelos preview (fallback)
+        if "preview" in self.model.lower():
+            headers["OpenAI-Beta"] = "realtime=v1"
+            logger.warning(f"Using preview model {self.model} - consider migrating to gpt-realtime")
+        
+        logger.debug(f"Connecting to OpenAI Realtime (GA): {url}", extra={
             "domain_uuid": self.config.domain_uuid,
             "model": self.model,
+            "is_ga": "preview" not in self.model.lower(),
         })
         
         self._ws = await websockets.connect(
@@ -244,7 +259,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         """
         Configura sessão com prompt, voz, VAD, tools.
         
-        FORMATO BETA (gpt-4o-realtime-preview):
+        FORMATO GA (gpt-realtime):
         {
             "type": "session.update",
             "session": {
@@ -258,7 +273,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             }
         }
         
-        NOTA: Campos dentro de "session" wrapper, NÃO no nível superior.
+        NOTA: Formato GA é o mesmo do Beta para session.update.
         Ref: https://platform.openai.com/docs/api-reference/realtime
         """
         if not self._ws:
@@ -267,8 +282,8 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         # Vozes disponíveis: alloy, ash, ballad, coral, echo, sage, shimmer, verse
         voice = self.config.voice or "alloy"
         
-        # === FORMATO BETA (gpt-4o-realtime-preview) ===
-        # IMPORTANTE: Sem session.type, sem audio aninhado!
+        # === FORMATO GA (gpt-realtime) ===
+        # Campos dentro de "session" wrapper
         session_config = {
             "type": "session.update",
             "session": {

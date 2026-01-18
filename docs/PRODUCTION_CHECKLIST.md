@@ -53,13 +53,18 @@
 
 ---
 
-## ⚠️ Avisos Importantes
+## ✅ Migração para API GA Completa
 
-### Depreciação da API Beta
-> **ATENÇÃO:** A interface Beta (`OpenAI-Beta: realtime=v1`) será **DESCONTINUADA em 27/02/2026**.
+### Status: MIGRADO (Jan/2026)
+- [x] Modelo atualizado para `gpt-realtime` (GA)
+- [x] Header `OpenAI-Beta` removido para modelos GA
+- [x] Fallback automático para modelos preview (deprecated)
+- [x] Custo ~20% menor que versão preview
+
+> **NOTA:** Modelos preview (`gpt-4o-realtime-preview`) ainda funcionam
+> com header `OpenAI-Beta: realtime=v1`, mas serão descontinuados em 27/02/2026.
 > 
-> Planejar migração para API GA quando disponível.
-> Ref: https://platform.openai.com/docs/deprecations
+> Ref: https://openai.com/blog/introducing-gpt-realtime
 
 ### Custos
 - Modelo `gpt-realtime` é ~20% mais barato que preview

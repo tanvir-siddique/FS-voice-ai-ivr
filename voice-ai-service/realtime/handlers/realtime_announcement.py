@@ -22,9 +22,10 @@ from .esl_client import AsyncESLClient
 
 logger = logging.getLogger(__name__)
 
-# Configurações OpenAI Realtime
+# Configurações OpenAI Realtime (GA)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
+# Modelo GA (General Availability) - Recomendado
+OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime")
 OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "nova")
 
 
@@ -161,15 +162,21 @@ class RealtimeAnnouncementSession:
         )
     
     async def _connect_openai(self) -> None:
-        """Conecta ao WebSocket do OpenAI Realtime."""
+        """Conecta ao WebSocket do OpenAI Realtime (GA)."""
         if not OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY not configured")
         
         url = f"wss://api.openai.com/v1/realtime?model={self.model}"
+        
+        # Headers para API GA - OpenAI-Beta não é mais necessário
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "OpenAI-Beta": "realtime=v1",
         }
+        
+        # Fallback para modelos preview (deprecated)
+        if "preview" in self.model.lower():
+            headers["OpenAI-Beta"] = "realtime=v1"
+            logger.warning(f"Using preview model - consider migrating to gpt-realtime")
         
         self._ws = await websockets.connect(
             url,
@@ -185,13 +192,13 @@ class RealtimeAnnouncementSession:
         if event.get("type") != "session.created":
             raise RuntimeError(f"Expected session.created, got {event.get('type')}")
         
-        logger.info("Connected to OpenAI Realtime for announcement")
+        logger.info(f"Connected to OpenAI Realtime (GA) for announcement - model={self.model}")
     
     async def _configure_session(self) -> None:
         """
         Configura a sessão OpenAI Realtime.
         
-        FORMATO BETA (gpt-4o-realtime-preview):
+        FORMATO GA (gpt-realtime):
         - Campos DENTRO de "session" wrapper
         - Ref: https://platform.openai.com/docs/api-reference/realtime
         
