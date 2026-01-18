@@ -1294,8 +1294,9 @@ IMPORTANTE:
             except Exception as e:
                 logger.warning(f"Failed to clear playback before MOH: {e}")
             
-            # 3. Pequeno delay para garantir que o break foi processado
-            await asyncio.sleep(0.1)
+            # 3. Delay para serialização de comandos ESL
+            # Evita "readuntil() called while another coroutine is already waiting"
+            await asyncio.sleep(0.2)
             
             # 4. Iniciar MOH
             success = await self._esl.uuid_broadcast(
