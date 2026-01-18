@@ -284,7 +284,8 @@ class RealtimeServer:
                     if session and session.is_active:
                         await session.handle_audio_input(message)
                     else:
-                        logger.warning("Received audio but session is not active", extra={
+                        # DEBUG: Áudio após sessão encerrar é normal durante hangup
+                        logger.debug("Received audio but session is not active", extra={
                             "call_uuid": call_uuid,
                             "session_active": session.is_active if session else False,
                         })
