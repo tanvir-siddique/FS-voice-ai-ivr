@@ -2416,9 +2416,40 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
         else:
             # Transferência não concluída - retomar Voice AI
+            # 
+            # CRÍTICO: Ordem correta para evitar race condition:
+            # 1. Interromper provider (cancelar resposta em andamento)
+            # 2. Limpar buffer de áudio de entrada
+            # 3. Pequeno delay para garantir que FreeSWITCH parou MOH
+            # 4. Só então setar transfer_in_progress = False
+            # 5. Enviar mensagem contextual
+            #
+            # Se a ordem estiver errada, o áudio do canal pode vazar para
+            # o provider e gerar respostas "picotadas" enquanto o MOH toca.
+            
+            # 1. Interromper provider para cancelar qualquer resposta em andamento
+            if self._provider:
+                try:
+                    await self._provider.interrupt()
+                    logger.debug("Provider interrupted before resume")
+                except Exception as e:
+                    logger.debug(f"Provider interrupt before resume: {e}")
+            
+            # 2. Limpar buffer de áudio de entrada para descartar áudio acumulado
+            self._input_audio_buffer.clear()
+            if self._resampler:
+                try:
+                    self._resampler.reset_output_buffer()
+                except Exception:
+                    pass
+            
+            # 3. Pequeno delay para garantir que FreeSWITCH processou uuid_break
+            await asyncio.sleep(0.1)
+            
+            # 4. Agora sim, setar transfer_in_progress = False
             self._set_transfer_in_progress(False, "transfer_not_completed")
             
-            # Enviar mensagem contextual
+            # 5. Enviar mensagem contextual
             message = result.message
             await self._send_text_to_provider(message)
             
@@ -2461,6 +2492,14 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         Chamado pelo TransferManager quando música de espera para
         e precisamos retomar a conversa.
         """
+        # Limpar buffers antes de retomar para evitar vazamento de áudio
+        self._input_audio_buffer.clear()
+        if self._resampler:
+            try:
+                self._resampler.reset_output_buffer()
+            except Exception:
+                pass
+        
         self._set_transfer_in_progress(False, "transfer_resume")
         
         logger.info(
