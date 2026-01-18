@@ -299,6 +299,7 @@ class TransferManager:
         self._current_transfer: Optional[TransferResult] = None
         self._b_leg_uuid: Optional[str] = None
         self._moh_active = False
+        self._stream_paused = False
         self._caller_hungup = False
         
         # Cache de destinos
@@ -1277,8 +1278,10 @@ IMPORTANTE:
         if not self._moh_active:
             # 1. CRÍTICO: Pausar audio_stream ANTES de iniciar MOH
             # Isso evita que o MOH seja capturado e enviado para OpenAI
+            self._stream_paused = False
             try:
                 await self._esl.uuid_audio_stream(self.call_uuid, "pause")
+                self._stream_paused = True
                 logger.info(f"Audio stream paused before MOH for {self.call_uuid}")
             except Exception as e:
                 logger.warning(f"Failed to pause audio stream before MOH: {e}")
@@ -1303,22 +1306,33 @@ IMPORTANTE:
             if success:
                 self._moh_active = True
                 logger.debug(f"MOH started for {self.call_uuid}")
+            else:
+                # MOH falhou - resumir stream imediatamente!
+                logger.warning(f"MOH failed to start for {self.call_uuid}, resuming audio stream")
+                if self._stream_paused:
+                    try:
+                        await self._esl.uuid_audio_stream(self.call_uuid, "resume")
+                        self._stream_paused = False
+                        logger.info(f"Audio stream resumed after MOH failure for {self.call_uuid}")
+                    except Exception as e:
+                        logger.error(f"Failed to resume audio stream after MOH failure: {e}")
     
     async def _stop_moh(self, resume_stream: bool = True) -> None:
         """
-        Para música de espera.
+        Para música de espera e gerencia o audio_stream.
         
-        Robusto: sempre marca como inativo e trata exceções
-        para garantir que o cliente não fique preso em espera.
+        Robusto: sempre executa o gerenciamento do stream, mesmo se MOH não iniciou.
+        Isso garante que o cliente não fique preso em espera/silêncio.
         
         Args:
             resume_stream: Se True (default), resume o audio_stream após parar MOH.
                           Usar False quando a transferência foi bem-sucedida e o
                           cliente está em bridge com humano.
         
-        IMPORTANTE: Resume o audio_stream DEPOIS de parar MOH para
-        permitir que o provider AI ouça o chamador novamente.
+        IMPORTANTE: Resume o audio_stream SEMPRE que _stream_paused=True e
+        resume_stream=True, mesmo que MOH não tenha iniciado corretamente.
         """
+        # 1. Parar MOH se estava ativo
         if self._moh_active:
             try:
                 await self._esl.uuid_break(self.call_uuid)
@@ -1334,27 +1348,32 @@ IMPORTANTE:
                 except Exception as e2:
                     logger.error(f"Failed to stop MOH even after reconnect: {e2}")
             finally:
-                # Sempre marcar como inativo para não ficar em loop
                 self._moh_active = False
-                
-                # Pequeno delay para garantir que FreeSWITCH processou uuid_break
-                await asyncio.sleep(0.1)
-                
-                # CRÍTICO: Resumir audio_stream DEPOIS de parar MOH
-                # Apenas se a transferência FALHOU e precisamos retomar o bot
-                if resume_stream:
-                    try:
-                        await self._esl.uuid_audio_stream(self.call_uuid, "resume")
-                        logger.info(f"Audio stream resumed after MOH for {self.call_uuid}")
-                    except Exception as e:
-                        logger.warning(f"Failed to resume audio stream after MOH: {e}")
-                else:
-                    # Transferência bem-sucedida - cliente em bridge, parar stream
-                    try:
-                        await self._esl.uuid_audio_stream(self.call_uuid, "stop")
-                        logger.info(f"Audio stream stopped (transfer success) for {self.call_uuid}")
-                    except Exception as e:
-                        logger.debug(f"Failed to stop audio stream (may be normal): {e}")
+        
+        # 2. Pequeno delay para garantir que FreeSWITCH processou
+        await asyncio.sleep(0.1)
+        
+        # 3. CRÍTICO: Gerenciar audio_stream baseado em _stream_paused
+        # Isso garante que o stream é retomado mesmo se MOH falhou ao iniciar
+        stream_paused = getattr(self, '_stream_paused', False)
+        
+        if resume_stream:
+            # Transferência FALHOU - precisamos retomar o bot
+            if stream_paused:
+                try:
+                    await self._esl.uuid_audio_stream(self.call_uuid, "resume")
+                    self._stream_paused = False
+                    logger.info(f"Audio stream resumed after failed transfer for {self.call_uuid}")
+                except Exception as e:
+                    logger.warning(f"Failed to resume audio stream: {e}")
+        else:
+            # Transferência bem-sucedida - cliente em bridge, parar stream
+            try:
+                await self._esl.uuid_audio_stream(self.call_uuid, "stop")
+                self._stream_paused = False
+                logger.info(f"Audio stream stopped (transfer success) for {self.call_uuid}")
+            except Exception as e:
+                logger.debug(f"Failed to stop audio stream (may be normal): {e}")
     
     async def stop_moh_and_resume(self) -> None:
         """Para música e sinaliza para retomar Voice AI."""
