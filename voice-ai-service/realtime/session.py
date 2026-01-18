@@ -710,6 +710,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             System prompt com guardrails incorporados
         """
         base_prompt = self.config.system_prompt or ""
+
+        # Regra explícita para transferência (OpenAI Realtime)
+        if self.config.intelligent_handoff_enabled:
+            base_prompt += """
+
+## TRANSFERÊNCIA (OBRIGATÓRIA)
+- Se o cliente pedir para falar com humano/setor, **sempre** chame a função `request_handoff`.
+- **Não** continue respondendo com texto quando iniciar transferência.
+- Se houver ambiguidade, peça o setor/ramal antes de transferir.
+"""
         
         if not self.config.guardrails_enabled:
             return base_prompt
@@ -1828,6 +1838,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             result = await adapter.execute_api(
                 f"sofia status profile internal reg {extension}@"
             )
+            if not result:
+                return {
+                    "extension": extension,
+                    "available": False,
+                    "reason": "Não foi possível verificar o ramal (ESL indisponível)"
+                }
             
             # Resultado esperado contém "Registrations:" se encontrou
             is_registered = result and (
@@ -1844,6 +1860,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
             # 2. Verificar se está em chamada usando show channels
             channels_output = await adapter.execute_api("show channels")
+            if channels_output is None:
+                return {
+                    "extension": extension,
+                    "available": False,
+                    "reason": "Não foi possível verificar o ramal (ESL indisponível)"
+                }
             
             if not channels_output:
                 # Se não conseguiu verificar, assumir disponível

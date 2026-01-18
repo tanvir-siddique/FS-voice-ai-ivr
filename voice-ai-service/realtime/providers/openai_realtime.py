@@ -192,6 +192,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         # Tracking de tempo de sessão (limite OpenAI: 60 minutos)
         self._session_start_time: Optional[float] = None
         self._max_session_duration_seconds: int = 55 * 60  # 55 min (5 min de margem)
+        self._response_active: bool = False
     
     @property
     def name(self) -> str:
@@ -344,7 +345,10 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             logger.debug(f"Sending first message: {self.config.first_message[:50]}...")
             await self.send_text(self.config.first_message)
             # Solicitar resposta do modelo
-            await self._ws.send(json.dumps({"type": "response.create"}))
+            if not self._response_active:
+                await self._ws.send(json.dumps({"type": "response.create"}))
+            else:
+                logger.debug("Response already active; skipping response.create for first_message")
     
     def _build_vad_config(self) -> Dict[str, Any]:
         """
@@ -461,10 +465,15 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         
         # Solicitar resposta do modelo (gera áudio TTS)
         if request_response:
-            await self._ws.send(json.dumps({"type": "response.create"}))
-            logger.debug("Response requested from OpenAI", extra={
-                "domain_uuid": self.config.domain_uuid,
-            })
+            if not self._response_active:
+                await self._ws.send(json.dumps({"type": "response.create"}))
+                logger.debug("Response requested from OpenAI", extra={
+                    "domain_uuid": self.config.domain_uuid,
+                })
+            else:
+                logger.debug("Response already active; skipping response.create", extra={
+                    "domain_uuid": self.config.domain_uuid,
+                })
     
     async def interrupt(self) -> None:
         """
@@ -502,7 +511,13 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         }))
         
         # Solicitar nova resposta após enviar resultado da função
-        await self._ws.send(json.dumps({"type": "response.create"}))
+        if not self._response_active:
+            await self._ws.send(json.dumps({"type": "response.create"}))
+        else:
+            logger.debug("Response already active; skipping response.create after function", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "call_id": call_id,
+            })
         
         logger.debug(f"Function result sent to OpenAI: {function_name}", extra={
             "domain_uuid": self.config.domain_uuid,
@@ -730,12 +745,14 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         
         # ===== RESPONSE LIFECYCLE =====
         if etype == "response.created":
+            self._response_active = True
             logger.debug("Response started", extra={
                 "domain_uuid": self.config.domain_uuid,
             })
             return ProviderEvent(type=ProviderEventType.RESPONSE_STARTED, data={})
         
         if etype == "response.done":
+            self._response_active = False
             response = event.get("response", {})
             status = response.get("status", "completed")
             logger.debug(f"Response done: {status}", extra={
