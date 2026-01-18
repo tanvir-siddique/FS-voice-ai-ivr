@@ -1054,8 +1054,28 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                         logger.info("Max AI turns reached, initiating handoff", extra={
                             "call_uuid": self.call_uuid,
                         })
-                        # NÃO bloquear - handoff em background
-                        asyncio.create_task(self._initiate_handoff(reason="max_turns_exceeded"))
+                        if (
+                            self._transfer_manager
+                            and self.config.intelligent_handoff_enabled
+                            and not self._transfer_in_progress
+                        ):
+                            # Preferir transferência inteligente quando disponível
+                            self._set_transfer_in_progress(True, "max_turns_exceeded")
+                            await self._notify_transfer_start()
+                            try:
+                                if self._provider:
+                                    await self._provider.interrupt()
+                            except Exception:
+                                pass
+                            asyncio.create_task(
+                                self._execute_intelligent_handoff(
+                                    "qualquer atendente",
+                                    "max_turns_exceeded"
+                                )
+                            )
+                        else:
+                            # NÃO bloquear - handoff legacy em background
+                            asyncio.create_task(self._initiate_handoff(reason="max_turns_exceeded"))
         
         elif event.type == ProviderEventType.SPEECH_STARTED:
             self._user_speaking = True
@@ -1206,8 +1226,25 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 "call_uuid": self.call_uuid,
                 "keyword": keyword,
             })
-            # NÃO bloquear o event loop - handoff roda em background
-            asyncio.create_task(self._initiate_handoff(reason=f"keyword_match:{keyword}"))
+            if (
+                self._transfer_manager
+                and self.config.intelligent_handoff_enabled
+                and not self._transfer_in_progress
+            ):
+                self._set_transfer_in_progress(True, f"keyword_match:{keyword}")
+                await self._notify_transfer_start()
+                try:
+                    if self._provider:
+                        await self._provider.interrupt()
+                except Exception:
+                    pass
+                # Usar keyword como destination_text (pode ser genérico)
+                asyncio.create_task(
+                    self._execute_intelligent_handoff(keyword, f"keyword_match:{keyword}")
+                )
+            else:
+                # NÃO bloquear o event loop - handoff roda em background
+                asyncio.create_task(self._initiate_handoff(reason=f"keyword_match:{keyword}"))
             return True
         return False
     
