@@ -12,6 +12,7 @@ import logging
 import os
 import audioop
 import time
+from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -38,6 +39,13 @@ from .handlers.transfer_manager import (
 from .handlers.transfer_destination_loader import TransferDestination
 
 logger = logging.getLogger(__name__)
+
+
+class CallState(Enum):
+    LISTENING = "listening"
+    SPEAKING = "speaking"
+    TRANSFERRING = "transferring"
+    RECORDING = "recording"
 
 
 # Function call definitions para o LLM
@@ -274,6 +282,7 @@ class RealtimeSession:
         self._ending_call = False  # True quando detectamos farewell, bloqueia novo áudio
         self._user_speaking = False
         self._assistant_speaking = False
+        self._call_state = CallState.LISTENING
         self._last_barge_in_ts = 0.0
         self._last_audio_delta_ts = 0.0
         self._local_barge_hits = 0
@@ -281,6 +290,7 @@ class RealtimeSession:
         self._pending_audio_bytes = 0  # Audio bytes da resposta ATUAL (reset a cada nova resposta)
         self._response_audio_start_time = 0.0  # Quando a resposta atual começou
         self._farewell_response_started = False  # True quando o áudio de despedida começou
+        self._input_audio_buffer = bytearray()
         
         self._transcript: List[TranscriptEntry] = []
         self._current_assistant_text = ""
@@ -350,6 +360,56 @@ class RealtimeSession:
     @property
     def transcript(self) -> List[TranscriptEntry]:
         return self._transcript.copy()
+
+    def _set_call_state(self, state: CallState, reason: str = "") -> None:
+        """Atualiza o estado da chamada com log em nível DEBUG."""
+        if self._call_state == state:
+            return
+        prev = self._call_state
+        self._call_state = state
+        logger.debug("Call state changed", extra={
+            "call_uuid": self.call_uuid,
+            "from": prev.value,
+            "to": state.value,
+            "reason": reason,
+        })
+
+    def _set_transfer_in_progress(self, in_progress: bool, reason: str = "") -> None:
+        """Atualiza flag de transferência e sincroniza estado da chamada."""
+        self._transfer_in_progress = in_progress
+        if in_progress:
+            self._set_call_state(CallState.TRANSFERRING, reason or "transfer_start")
+        else:
+            self._set_call_state(CallState.LISTENING, reason or "transfer_end")
+
+    def _normalize_pcm16(self, frame: bytes) -> bytes:
+        """
+        Normaliza áudio PCM16 com ganho limitado.
+        
+        Usar apenas se REALTIME_INPUT_NORMALIZE=true.
+        """
+        if not frame:
+            return frame
+
+        if os.getenv("REALTIME_INPUT_NORMALIZE", "false").lower() not in ("1", "true", "yes"):
+            return frame
+
+        rms = audioop.rms(frame, 2)
+        if rms <= 0:
+            return frame
+
+        target_rms = int(os.getenv("REALTIME_INPUT_TARGET_RMS", "2000"))
+        min_rms = int(os.getenv("REALTIME_INPUT_MIN_RMS", "300"))
+        max_gain = float(os.getenv("REALTIME_INPUT_MAX_GAIN", "3.0"))
+
+        if rms < min_rms:
+            return frame
+
+        gain = min(max_gain, target_rms / rms)
+        if gain <= 1.0:
+            return frame
+
+        return audioop.mul(frame, 2, gain)
     
     async def start(self) -> None:
         """Inicia a sessão."""
@@ -721,10 +781,23 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         self._last_activity = time.time()
         
-        if self._resampler and self._resampler.input_resampler.needs_resample:
-            audio_bytes = self._resampler.resample_input(audio_bytes)
-        
-        await self._provider.send_audio(audio_bytes)
+        # Bufferizar e enviar em frames fixos (ex: 20ms)
+        frame_bytes = int(self.config.freeswitch_sample_rate * 0.02 * 2)  # 20ms PCM16
+        if frame_bytes <= 0:
+            frame_bytes = 640  # fallback 20ms @ 16kHz
+
+        self._input_audio_buffer.extend(audio_bytes)
+        while len(self._input_audio_buffer) >= frame_bytes:
+            frame = bytes(self._input_audio_buffer[:frame_bytes])
+            del self._input_audio_buffer[:frame_bytes]
+
+            # Normalização opcional (ganho limitado)
+            frame = self._normalize_pcm16(frame)
+
+            if self._resampler and self._resampler.input_resampler.needs_resample:
+                frame = self._resampler.resample_input(frame)
+
+            await self._provider.send_audio(frame)
     
     async def _handle_audio_output(self, audio_bytes: bytes) -> None:
         """
@@ -805,6 +878,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self._provider:
             await self._provider.interrupt()
         self._assistant_speaking = False
+        if not self._transfer_in_progress:
+            self._set_call_state(CallState.LISTENING, "interrupt")
     
     async def _event_loop(self) -> None:
         """Loop de eventos do provider."""
@@ -842,6 +917,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         elif event.type == ProviderEventType.AUDIO_DELTA:
             self._assistant_speaking = True
             self._last_audio_delta_ts = time.time()
+            if not self._transfer_in_progress:
+                self._set_call_state(CallState.SPEAKING, "audio_delta")
             
             # Se estamos encerrando e este é o primeiro áudio da resposta de despedida,
             # resetar o contador para medir apenas o áudio de despedida
@@ -864,6 +941,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         elif event.type == ProviderEventType.AUDIO_DONE:
             self._assistant_speaking = False
+            if not self._transfer_in_progress:
+                self._set_call_state(CallState.LISTENING, "audio_done")
             # Flush buffer restante ao final do áudio
             if self._resampler:
                 remaining = self._resampler.flush_output()
@@ -941,6 +1020,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # IMPORTANTE: Marcar que o assistente terminou de falar
             # Isso é usado pelo _delayed_stop() para saber quando pode desligar
             self._assistant_speaking = False
+            if not self._transfer_in_progress:
+                self._set_call_state(CallState.LISTENING, "response_done")
             
             if self._speech_start_time:
                 self._metrics.record_latency(self.call_uuid, time.time() - self._speech_start_time)
@@ -999,7 +1080,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             if self._transfer_manager and self.config.intelligent_handoff_enabled:
                 # CRÍTICO: Interromper o provider IMEDIATAMENTE para parar de gerar áudio
                 # Isso evita que o agente continue falando enquanto o handoff inicia
-                self._transfer_in_progress = True
+                self._set_transfer_in_progress(True, "request_handoff")
                 try:
                     if self._provider:
                         await self._provider.interrupt()
@@ -1761,12 +1842,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             if error:
                 # Destino não encontrado - informar usuário e retomar
                 await self._send_text_to_provider(error)
-                self._transfer_in_progress = False
+                self._set_transfer_in_progress(False, "destination_error")
                 return
             
             if not destination:
                 # Retomar conversa normal se destino não encontrado
-                self._transfer_in_progress = False
+                self._set_transfer_in_progress(False, "destination_missing")
                 await self._send_text_to_provider(
                     "Não consegui identificar para quem você quer falar. "
                     "Pode repetir o nome ou departamento?"
@@ -1836,7 +1917,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 "Desculpe, não foi possível completar a transferência. "
                 "Posso ajudar de outra forma?"
             )
-            self._transfer_in_progress = False
+            self._set_transfer_in_progress(False, "handoff_error")
     
     async def _handle_transfer_result(
         self,
@@ -1872,7 +1953,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
         else:
             # Transferência não concluída - retomar Voice AI
-            self._transfer_in_progress = False
+            self._set_transfer_in_progress(False, "transfer_not_completed")
             
             # Enviar mensagem contextual
             message = result.message
@@ -1917,7 +1998,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         Chamado pelo TransferManager quando música de espera para
         e precisamos retomar a conversa.
         """
-        self._transfer_in_progress = False
+        self._set_transfer_in_progress(False, "transfer_resume")
         
         logger.info(
             "Resuming Voice AI after transfer",
