@@ -378,19 +378,32 @@
 	echo "<tr id='realtime_provider_row' style='display: none;'>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-realtime_provider'] ?? 'Realtime Provider')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<select class='formfld' name='realtime_provider_uuid'>\n";
-	echo "			<option value=''>".($text['option-select'] ?? '-- Select --')."</option>\n";
+	echo "		<select class='formfld' name='realtime_provider_uuid' id='realtime_provider_uuid' onchange='toggleProviderSpecificFields()'>\n";
+	echo "			<option value='' data-provider-key=''>".($text['option-select'] ?? '-- Select --')."</option>\n";
 	foreach ($realtime_providers as $p) {
 		$selected = (($data['realtime_provider_uuid'] ?? '') === $p['voice_ai_provider_uuid']) ? 'selected' : '';
-		echo "			<option value='".escape($p['voice_ai_provider_uuid'])."' ".$selected.">".escape($p['provider_name'])."</option>\n";
+		// Detectar tipo do provider pelo nome
+		$provider_key = 'unknown';
+		$pname_lower = strtolower($p['provider_name']);
+		if (strpos($pname_lower, 'openai') !== false || strpos($pname_lower, 'gpt') !== false) {
+			$provider_key = 'openai';
+		} elseif (strpos($pname_lower, 'elevenlabs') !== false || strpos($pname_lower, 'eleven') !== false) {
+			$provider_key = 'elevenlabs';
+		} elseif (strpos($pname_lower, 'gemini') !== false || strpos($pname_lower, 'google') !== false) {
+			$provider_key = 'gemini';
+		} elseif (strpos($pname_lower, 'custom') !== false || strpos($pname_lower, 'pipeline') !== false) {
+			$provider_key = 'custom';
+		}
+		echo "			<option value='".escape($p['voice_ai_provider_uuid'])."' data-provider-key='".$provider_key."' ".$selected.">".escape($p['provider_name'])."</option>\n";
 	}
 	echo "		</select>\n";
+	echo "		<div id='provider_hint' style='margin-top: 5px; font-size: 11px; color: #666;'></div>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	// VAD Type
-	echo "<tr id='vad_type_row' style='display: none;'>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_type'] ?? 'VAD Type')."</td>\n";
+	// VAD Type - OPENAI ONLY
+	echo "<tr id='vad_type_row' class='provider-openai provider-gemini' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_type'] ?? 'VAD Type')." <span class='provider-badge openai'>OpenAI</span></td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	$vad_type = $data['vad_type'] ?? 'semantic_vad';
 	echo "		<select class='formfld' name='vad_type' id='vad_type' onchange='toggleVadEagerness()'>\n";
@@ -402,9 +415,9 @@
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	// VAD Eagerness (only for semantic_vad)
-	echo "<tr id='vad_eagerness_row' style='display: none;'>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_eagerness'] ?? 'Eagerness')."</td>\n";
+	// VAD Eagerness (only for semantic_vad) - OPENAI ONLY
+	echo "<tr id='vad_eagerness_row' class='provider-openai provider-gemini' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-vad_eagerness'] ?? 'Eagerness')." <span class='provider-badge openai'>OpenAI</span></td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	$vad_eagerness = $data['vad_eagerness'] ?? 'medium';
 	echo "		<select class='formfld' name='vad_eagerness'>\n";
@@ -415,21 +428,33 @@
 	echo "		<br /><span class='vtable-hint'>".($text['description-vad_eagerness'] ?? 'Controla quão rápido o agente responde. Low = mais paciente, High = mais rápido.')."</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
+	
+	// ElevenLabs Info - ELEVENLABS ONLY
+	echo "<tr id='elevenlabs_info_row' class='provider-elevenlabs' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>VAD <span class='provider-badge elevenlabs'>ElevenLabs</span></td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<div style='background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px; border-radius: 4px;'>\n";
+	echo "			<b>✅ VAD Automático</b><br/>\n";
+	echo "			<span style='color: #666;'>ElevenLabs possui detecção de fala inteligente integrada. Não há configurações manuais necessárias.</span>\n";
+	echo "		</div>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
 
 	// =====================================================
-	// Guardrails Section (Security)
+	// Guardrails Section (Security) - OPENAI/GEMINI ONLY
 	// =====================================================
-	echo "<tr>\n";
+	echo "<tr id='guardrails_section_header' class='provider-openai provider-gemini provider-custom' style='display: none;'>\n";
 	echo "	<td colspan='2' style='padding: 12px 10px; background: #ffebee; border-bottom: 1px solid #ef5350;'>\n";
 	echo "		<b>🛡️ ".($text['header-guardrails'] ?? 'Guardrails (Segurança)')."</b>\n";
+	echo "		<span class='provider-badge openai' style='margin-left: 10px;'>OpenAI</span>\n";
 	echo "		<span style='font-size: 0.85em; color: #c62828; margin-left: 10px;'>"
-		. "Regras de segurança para evitar comportamentos indesejados"
+		. "Regras de segurança via prompt"
 		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
 	// Guardrails Enabled
-	echo "<tr>\n";
+	echo "<tr class='provider-openai provider-gemini provider-custom' style='display: none;'>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-guardrails_enabled'] ?? 'Ativar Guardrails')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	$guardrails_enabled = (!isset($data['guardrails_enabled']) || $data['guardrails_enabled'] == 'true' || $data['guardrails_enabled'] === true);
@@ -442,7 +467,7 @@
 	echo "</tr>\n";
 
 	// Guardrails Topics (prohibited topics)
-	echo "<tr class='guardrails-option'>\n";
+	echo "<tr class='guardrails-option provider-openai provider-gemini provider-custom' style='display: none;'>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-guardrails_topics'] ?? 'Tópicos Proibidos')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	$guardrails_topics = str_replace("\r\n", "\n", str_replace("\r", "", $data['guardrails_topics'] ?? ''));
@@ -452,6 +477,25 @@
 		. "Ex: política, religião, concorrentes.<br/>"
 		. "O agente redirecionará educadamente quando esses tópicos forem mencionados."
 		. "</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	// ElevenLabs Guardrails Info
+	echo "<tr id='elevenlabs_guardrails_info' class='provider-elevenlabs' style='display: none;'>\n";
+	echo "	<td colspan='2' style='padding: 12px 10px; background: #e3f2fd; border-bottom: 1px solid #2196f3;'>\n";
+	echo "		<b>🛡️ Guardrails</b> <span class='provider-badge elevenlabs'>ElevenLabs</span>\n";
+	echo "	</td>\n";
+	echo "</tr>\n";
+
+	echo "<tr class='provider-elevenlabs' style='display: none;'>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>Configuração</td>\n";
+	echo "	<td class='vtable' align='left'>\n";
+	echo "		<div style='background: #fff3e0; border-left: 4px solid #ff9800; padding: 10px; border-radius: 4px;'>\n";
+	echo "			<b>⚙️ Configure no Painel ElevenLabs</b><br/>\n";
+	echo "			<span style='color: #666;'>O ElevenLabs possui guardrails próprios configuráveis no </span>\n";
+	echo "			<a href='https://elevenlabs.io/app/conversational-ai' target='_blank'>painel do Conversational AI</a>.\n";
+	echo "			<br/><span style='color: #666; font-size: 0.9em;'>Inclui: bloqueio de tópicos, detecção de abusos, limites de tempo, etc.</span>\n";
+	echo "		</div>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -1056,16 +1100,57 @@ function toggleRealtimeProvider() {
 	var providerRow = document.getElementById('realtime_provider_row');
 	if (providerRow) providerRow.style.display = isRealtime ? '' : 'none';
 	
-	// VAD Type row
-	var vadTypeRow = document.getElementById('vad_type_row');
-	if (vadTypeRow) vadTypeRow.style.display = isRealtime ? '' : 'none';
-	
-	// Also toggle VAD eagerness based on VAD type
+	// Toggle provider-specific fields
 	if (isRealtime) {
-		toggleVadEagerness();
+		toggleProviderSpecificFields();
 	} else {
-		var eagerRow = document.getElementById('vad_eagerness_row');
-		if (eagerRow) eagerRow.style.display = 'none';
+		// Hide all provider-specific rows
+		hideAllProviderSpecificRows();
+	}
+}
+
+function hideAllProviderSpecificRows() {
+	var providerClasses = ['provider-openai', 'provider-elevenlabs', 'provider-gemini', 'provider-custom'];
+	providerClasses.forEach(function(cls) {
+		document.querySelectorAll('.' + cls).forEach(function(row) {
+			row.style.display = 'none';
+		});
+	});
+}
+
+function toggleProviderSpecificFields() {
+	var select = document.getElementById('realtime_provider_uuid');
+	var selectedOption = select?.options[select.selectedIndex];
+	var providerKey = selectedOption?.getAttribute('data-provider-key') || '';
+	var hint = document.getElementById('provider_hint');
+	
+	// Hide all provider-specific rows first
+	hideAllProviderSpecificRows();
+	
+	// Provider hints
+	var hints = {
+		'openai': '🟢 OpenAI Realtime: VAD configurável (semantic/server), Guardrails via prompt, Transfer Realtime',
+		'elevenlabs': '🎤 ElevenLabs: VAD automático, Guardrails no painel ElevenLabs, Voice ID específico',
+		'gemini': '🔷 Gemini Live: Similar ao OpenAI, VAD configurável, Guardrails via prompt',
+		'custom': '🔧 Custom Pipeline: Deepgram + Groq + Piper, configuração avançada',
+	};
+	
+	if (hint) {
+		hint.textContent = hints[providerKey] || '';
+		hint.style.display = providerKey ? 'block' : 'none';
+	}
+	
+	// Show rows for selected provider
+	if (providerKey) {
+		document.querySelectorAll('.provider-' + providerKey).forEach(function(row) {
+			row.style.display = '';
+		});
+		
+		// Also toggle VAD eagerness if OpenAI/Gemini
+		if (providerKey === 'openai' || providerKey === 'gemini') {
+			toggleVadEagerness();
+			toggleGuardrailsOptions();
+		}
 	}
 }
 
@@ -1075,15 +1160,31 @@ function toggleVadEagerness() {
 	
 	// Eagerness só aparece para semantic_vad
 	if (eagerRow) {
-		eagerRow.style.display = (vadType === 'semantic_vad') ? '' : 'none';
+		// Check if VAD type row is visible first
+		var vadTypeRow = document.getElementById('vad_type_row');
+		var isVadVisible = vadTypeRow && vadTypeRow.style.display !== 'none';
+		eagerRow.style.display = (isVadVisible && vadType === 'semantic_vad') ? '' : 'none';
 	}
 }
 
 function toggleGuardrailsOptions() {
 	var enabled = document.getElementById('guardrails_enabled')?.checked;
-	var rows = document.querySelectorAll('.guardrails-option');
-	rows.forEach(function(row) {
-		row.style.display = enabled ? '' : 'none';
+	// Only toggle guardrails-option class, not provider-specific ones
+	document.querySelectorAll('.guardrails-option').forEach(function(row) {
+		// Check if parent provider class is visible
+		var isProviderVisible = row.classList.contains('provider-openai') || 
+			row.classList.contains('provider-gemini') || 
+			row.classList.contains('provider-custom');
+		
+		if (isProviderVisible) {
+			// Get current provider visibility
+			var select = document.getElementById('realtime_provider_uuid');
+			var selectedOption = select?.options[select.selectedIndex];
+			var providerKey = selectedOption?.getAttribute('data-provider-key') || '';
+			
+			var shouldShow = enabled && (providerKey === 'openai' || providerKey === 'gemini' || providerKey === 'custom');
+			row.style.display = shouldShow ? '' : 'none';
+		}
 	});
 }
 
@@ -1118,8 +1219,6 @@ function toggleFallbackOptions() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
 	toggleRealtimeProvider();
-	toggleVadEagerness();
-	toggleGuardrailsOptions();
 	toggleTransferRealtimeOptions();
 	toggleHandoffOptions();
 	toggleFallbackOptions();
@@ -1194,5 +1293,44 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 .vtable-hint b {
 	color: #333;
+}
+
+/* Provider Badges */
+.provider-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 10px;
+	font-weight: bold;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+.provider-badge.openai {
+	background: #10a37f;
+	color: white;
+}
+.provider-badge.elevenlabs {
+	background: #000000;
+	color: white;
+}
+.provider-badge.gemini {
+	background: #4285f4;
+	color: white;
+}
+.provider-badge.custom {
+	background: #6c757d;
+	color: white;
+}
+
+/* Provider-specific row highlighting */
+.provider-openai td:first-child,
+.provider-gemini td:first-child {
+	border-left: 3px solid #10a37f;
+}
+.provider-elevenlabs td:first-child {
+	border-left: 3px solid #000000;
+}
+.provider-custom td:first-child {
+	border-left: 3px solid #6c757d;
 }
 </style>
