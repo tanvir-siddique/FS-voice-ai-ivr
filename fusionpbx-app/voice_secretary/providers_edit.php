@@ -383,7 +383,7 @@ function applyPreset(providerName, preset) {
 			},
 			low_latency: {
 				vad_threshold: "0.7",
-				silence_duration_ms: "600",
+				silence_duration_ms: "500",
 				prefix_padding_ms: "200",
 				max_response_output_tokens: "2048"
 			},
@@ -391,19 +391,19 @@ function applyPreset(providerName, preset) {
 				vad_threshold: "0.45",
 				silence_duration_ms: "1200",
 				prefix_padding_ms: "400",
-				max_response_output_tokens: "6144"
+				max_response_output_tokens: "inf"
 			},
 			stability: {
 				vad_threshold: "0.8",
 				silence_duration_ms: "1500",
 				prefix_padding_ms: "300",
-				max_response_output_tokens: "3072"
+				max_response_output_tokens: "4096"
 			},
 			top10: {
-				vad_threshold: "0.7",
+				vad_threshold: "0.6",
 				silence_duration_ms: "700",
 				prefix_padding_ms: "200",
-				max_response_output_tokens: "3072",
+				max_response_output_tokens: "4096",
 				barge_in_enabled: "true",
 				adaptive_warmup: "true",
 				warmup_chunks: "4",
@@ -419,7 +419,7 @@ function applyPreset(providerName, preset) {
 			},
 			ptbr_low_latency: {
 				vad_threshold: "0.75",
-				silence_duration_ms: "700",
+				silence_duration_ms: "600",
 				prefix_padding_ms: "200",
 				max_response_output_tokens: "2048"
 			},
@@ -427,19 +427,19 @@ function applyPreset(providerName, preset) {
 				vad_threshold: "0.5",
 				silence_duration_ms: "1300",
 				prefix_padding_ms: "400",
-				max_response_output_tokens: "6144"
+				max_response_output_tokens: "inf"
 			},
 			ptbr_stability: {
 				vad_threshold: "0.85",
 				silence_duration_ms: "1600",
 				prefix_padding_ms: "300",
-				max_response_output_tokens: "3072"
+				max_response_output_tokens: "4096"
 			},
 			ptbr_top10: {
 				vad_threshold: "0.7",
 				silence_duration_ms: "800",
 				prefix_padding_ms: "200",
-				max_response_output_tokens: "3072",
+				max_response_output_tokens: "4096",
 				barge_in_enabled: "true",
 				adaptive_warmup: "true",
 				warmup_chunks: "4",
@@ -548,7 +548,7 @@ function applyPreset(providerName, preset) {
 			low_latency: {},
 			high_quality: {},
 			top10: {
-				max_response_output_tokens: "3072",
+				max_response_output_tokens: "4096",
 				barge_in_enabled: "true",
 				adaptive_warmup: "true",
 				warmup_chunks: "4",
@@ -560,7 +560,7 @@ function applyPreset(providerName, preset) {
 			ptbr_low_latency: {},
 			ptbr_high_quality: {},
 			ptbr_top10: {
-				max_response_output_tokens: "3072",
+				max_response_output_tokens: "4096",
 				barge_in_enabled: "true",
 				adaptive_warmup: "true",
 				warmup_chunks: "4",
