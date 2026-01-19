@@ -16,6 +16,7 @@ Referências:
 
 import asyncio
 import logging
+from queue import Queue, Empty
 import os
 import threading
 import weakref
@@ -132,6 +133,7 @@ class DualModeEventRelay:
         self._hangup_received = False
         self._session_lock = threading.Lock()  # Protege acesso à sessão
         self._outbound_moh_active = False
+        self._command_queue: Queue = Queue()
         
         # Últimos eventos recebidos (para debug)
         self._last_dtmf: Optional[str] = None
@@ -374,6 +376,9 @@ class DualModeEventRelay:
                         retry_correlation_counter = 0
                         self._try_late_correlation()
                 
+                # Processar comandos pendentes (thread-safe)
+                self._process_command_queue()
+                
                 # Yield para outras greenlets (CRÍTICO para greenswitch funcionar)
                 gevent.sleep(EVENT_LOOP_INTERVAL)
                 
@@ -383,6 +388,20 @@ class DualModeEventRelay:
                 break
         
         logger.debug(f"[{self._uuid}] Main loop ended")
+
+    def _process_command_queue(self) -> None:
+        """Processa comandos enfileirados de outras threads."""
+        while True:
+            try:
+                command, payload = self._command_queue.get_nowait()
+            except Empty:
+                break
+            
+            try:
+                if command == "hold":
+                    self._execute_outbound_hold(payload)
+            except Exception as e:
+                logger.warning(f"[{self._uuid}] Failed processing command '{command}': {e}")
     
     def _try_late_correlation(self) -> None:
         """
@@ -584,36 +603,40 @@ class DualModeEventRelay:
     
     def uuid_hold(self, on: bool = True) -> bool:
         """
-        Coloca/retira a chamada em espera no modo ESL Outbound.
+        Enfileira comando de espera no modo ESL Outbound.
         
-        NOTA: uuid_hold (API) não funciona em Outbound. No greenswitch,
-        usamos playback de MOH em background e interrompemos com uuid_break.
-        
-        Args:
-            on: True para colocar em espera, False para retirar
-            
-        Returns:
-            True se executado com sucesso, False caso contrário
+        A execução real ocorre na greenlet do EventRelay para evitar
+        bloqueios quando chamado a partir de threads asyncio.
         """
         if not self._connected or not self.session:
             logger.warning(f"[{self._uuid}] Cannot hold/unhold: not connected")
             return False
         
         try:
+            self._command_queue.put_nowait(("hold", on))
+            logger.debug(f"[{self._uuid}] Hold command queued (on={on})")
+            return True
+        except Exception as e:
+            logger.warning(f"[{self._uuid}] Failed to queue hold command: {e}")
+            return False
+
+    def _execute_outbound_hold(self, on: bool) -> bool:
+        """
+        Executa hold/unhold no contexto da greenlet (seguro para greenswitch).
+        """
+        try:
             if on:
                 # Tocar MOH em background (não bloqueante)
                 self.session.playback("local_stream://default", block=False)
                 self._outbound_moh_active = True
                 logger.info(f"[{self._uuid}] MOH started via ESL Outbound")
-                return True
             else:
                 # Parar MOH (uuid_break é API global e requer permissão full)
                 if self._outbound_moh_active:
                     self.session.uuid_break()
                     self._outbound_moh_active = False
                     logger.info(f"[{self._uuid}] MOH stopped via ESL Outbound (uuid_break)")
-                return True
-            
+            return True
         except Exception as e:
             logger.warning(f"[{self._uuid}] hold/unhold via ESL Outbound failed: {e}")
             return False

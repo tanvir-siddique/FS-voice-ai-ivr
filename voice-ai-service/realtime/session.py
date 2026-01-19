@@ -59,7 +59,9 @@ HANDOFF_FUNCTION_DEFINITION = {
         "Use quando o cliente pedir para falar com alguém ou quando não souber resolver. "
         "IMPORTANTE: Antes de chamar esta função, AVISE o cliente que vai verificar "
         "(ex: 'Um momento, vou verificar a disponibilidade do setor de vendas.'). "
-        "O cliente será colocado em espera enquanto você verifica."
+        "O cliente será colocado em espera enquanto você verifica. "
+        "Se o cliente disser o próprio nome e um departamento (ex: 'Juliano, quero falar no vendas'), "
+        "use o DEPARTAMENTO como destino, nunca o nome do cliente."
     ),
     "parameters": {
         "type": "object",
@@ -2537,8 +2539,17 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         try:
             # 1. Encontrar destino
+            normalized_destination_text = self._normalize_handoff_destination_text(destination_text)
+            if normalized_destination_text != destination_text:
+                logger.info(
+                    "Normalized handoff destination text",
+                    extra={
+                        "original": destination_text,
+                        "normalized": normalized_destination_text,
+                    }
+                )
             destination, error = await self._transfer_manager.find_and_validate_destination(
-                destination_text
+                normalized_destination_text
             )
             
             if error:
@@ -2914,6 +2925,57 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                             return name
         
         return None
+
+    def _normalize_handoff_destination_text(self, destination_text: str) -> str:
+        """
+        Normaliza texto de destino para transferência.
+        
+        Objetivo: evitar usar nome do cliente como destino quando ele
+        informa nome + departamento na mesma frase.
+        """
+        import re
+        
+        if not destination_text:
+            return destination_text
+        
+        text = destination_text.strip()
+        text_lower = text.lower()
+        
+        # Remover nome do cliente se aparecer no texto
+        caller_name = self._extract_caller_name()
+        if caller_name:
+            pattern = r"\b" + re.escape(caller_name.lower()) + r"\b"
+            text_lower = re.sub(pattern, "", text_lower).strip()
+        
+        # Se houver vírgula, geralmente o destino vem depois
+        if "," in text_lower:
+            parts = [p.strip() for p in text_lower.split(",") if p.strip()]
+            if len(parts) > 1:
+                text_lower = parts[-1]
+        
+        # Remover frases de intenção comuns
+        prefixes = [
+            "quero falar com",
+            "quero falar no",
+            "quero falar na",
+            "preciso falar com",
+            "falar com",
+            "falar no",
+            "falar na",
+            "me transfere para",
+            "me transfira para",
+            "transferir para",
+            "transferência para",
+        ]
+        for prefix in prefixes:
+            if text_lower.startswith(prefix):
+                text_lower = text_lower[len(prefix):].strip()
+                break
+        
+        # Limpeza final de palavras soltas
+        text_lower = re.sub(r"\s+", " ", text_lower).strip()
+        
+        return text_lower or destination_text
     
     def _extract_call_reason(self, handoff_reason: str) -> Optional[str]:
         """
