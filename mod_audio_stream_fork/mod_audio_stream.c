@@ -47,7 +47,7 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
              * This is called every 20ms when receiving audio from caller.
              * We use this opportunity to also send audio TO the caller.
              */
-            if (tech_pvt->playback_buffer && tech_pvt->playback_mutex && tech_pvt->codec_initialized) {
+            if (tech_pvt->playback_buffer && tech_pvt->playback_mutex) {
                 switch_mutex_lock(tech_pvt->playback_mutex);
                 
                 switch_size_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
@@ -64,33 +64,19 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
                 if (tech_pvt->playback_active && available >= l16_frame_size) {
                     /* Read L16 audio from buffer */
                     int16_t l16_data[160];  /* 160 samples of L16 */
-                    uint8_t encoded_data[160]; /* 160 bytes of PCMU/PCMA */
-                    uint32_t encoded_len = sizeof(encoded_data);
-                    uint32_t encoded_rate = 8000;
-                    uint32_t flag = 0;
-                    
                     switch_buffer_read(tech_pvt->playback_buffer, l16_data, l16_frame_size);
                     
-                    /* Encode L16 to PCMU/PCMA using the initialized codec */
-                    switch_status_t encode_status = switch_core_codec_encode(
-                        &tech_pvt->write_codec,
-                        NULL,
-                        l16_data,
-                        l16_frame_size,
-                        8000,
-                        encoded_data,
-                        &encoded_len,
-                        &encoded_rate,
-                        &flag
-                    );
+                    /* Get read codec (L16 internal) - FS will transcode to wire codec */
+                    switch_codec_t *read_codec = switch_core_session_get_read_codec(session);
                     
-                    if (encode_status == SWITCH_STATUS_SUCCESS && encoded_len > 0) {
-                        /* Create and send encoded frame */
+                    if (read_codec) {
+                        /* Create frame with L16 data - FreeSWITCH handles transcoding */
                         switch_frame_t write_frame = { 0 };
-                        write_frame.data = encoded_data;
-                        write_frame.datalen = encoded_len;
+                        write_frame.data = l16_data;
+                        write_frame.datalen = l16_frame_size;
                         write_frame.samples = 160;
-                        write_frame.codec = &tech_pvt->write_codec;
+                        write_frame.rate = 8000;
+                        write_frame.codec = read_codec;
                         
                         switch_core_session_write_frame(session, &write_frame, SWITCH_IO_FLAG_NONE, 0);
                     }
@@ -355,7 +341,7 @@ done:
  *   - SMBF_WRITE_REPLACE for frame injection
  *   - Barge-in support via stopAudio command
  * ======================================== */
-#define MOD_AUDIO_STREAM_VERSION "2.2.1-netplay"
+#define MOD_AUDIO_STREAM_VERSION "2.2.2-netplay"
 #define MOD_AUDIO_STREAM_BUILD_DATE "2026-01-19"
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
