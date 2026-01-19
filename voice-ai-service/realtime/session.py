@@ -57,9 +57,9 @@ HANDOFF_FUNCTION_DEFINITION = {
     "description": (
         "Transfere a chamada para um atendente humano, departamento ou pessoa específica. "
         "Use quando o cliente pedir para falar com alguém ou quando não souber resolver. "
-        "IMPORTANTE: Antes de chamar esta função, AVISE o cliente que vai verificar "
-        "(ex: 'Um momento, vou verificar a disponibilidade do setor de vendas.'). "
-        "O cliente será colocado em espera enquanto você verifica. "
+        "IMPORTANTE: Ao receber o resultado desta função, você DEVE falar imediatamente ao cliente "
+        "informando que vai verificar a disponibilidade e colocá-lo em espera. "
+        "Exemplo: 'Um momento, vou verificar se o setor de vendas está disponível. Aguarde na linha.' "
         "Se o cliente disser o próprio nome e um departamento (ex: 'Juliano, quero falar no vendas'), "
         "use o DEPARTAMENTO como destino, nunca o nome do cliente."
     ),
@@ -1356,34 +1356,49 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # FASE 1: Usar TransferManager se disponível
             destination = args.get("destination", "qualquer atendente")
             reason = args.get("reason", "solicitação do cliente")
+            
+            logger.info(
+                "🔄 [HANDOFF] request_handoff INICIADO",
+                extra={
+                    "call_uuid": self.call_uuid,
+                    "destination_raw": destination,
+                    "reason": reason,
+                    "has_transfer_manager": self._transfer_manager is not None,
+                    "intelligent_handoff_enabled": self.config.intelligent_handoff_enabled,
+                }
+            )
+            
             # Cancelar fallback automático quando o tool for chamado
             self._cancel_handoff_fallback()
             
             if self._transfer_manager and self.config.intelligent_handoff_enabled:
-                # Interromper o provider para evitar fala concorrente
-                try:
-                    if self._provider:
-                        await self._provider.interrupt()
-                        logger.info("Provider interrupted on handoff request")
-                except Exception as e:
-                    logger.debug(f"Provider interrupt failed: {e}")
+                # ========================================
+                # NOVA ABORDAGEM: Usar voz do OpenAI
+                # ========================================
+                # 1. Retornar resultado que faz o OpenAI FALAR o aviso
+                # 2. Agendar task para colocar em espera DEPOIS que o OpenAI terminar
+                # 3. O OpenAI vai falar naturalmente usando sua própria voz
+                # ========================================
                 
-                # Falar ao cliente ANTES de iniciar transferência e colocar em espera
                 normalized_destination = self._normalize_handoff_destination_text(destination)
                 spoken_destination = self._format_destination_for_speech(normalized_destination)
-                pre_message = (
-                    f"Um momento, vou verificar a disponibilidade de {spoken_destination}. "
-                    "Vou colocar você em espera."
+                
+                # Agendar o handoff para executar DEPOIS que a resposta do OpenAI terminar
+                # O delay de 4 segundos permite que o OpenAI fale o aviso
+                logger.info("🔄 [HANDOFF] Agendando handoff com delay para OpenAI falar...")
+                asyncio.create_task(
+                    self._delayed_intelligent_handoff(destination, reason, delay_seconds=4.0)
                 )
-                await self._say_to_caller(pre_message)
                 
-                # Agora sim, mutar áudio do agente durante a transferência
-                self._set_transfer_in_progress(True, "request_handoff")
-                await self._notify_transfer_start()
-                
-                # Handoff inteligente com attended transfer
-                asyncio.create_task(self._execute_intelligent_handoff(destination, reason))
-                return {"status": "transfer_initiated", "destination": destination}
+                # Retornar mensagem que instrui o OpenAI a falar o aviso
+                # O OpenAI vai gerar uma resposta natural baseada neste resultado
+                logger.info("🔄 [HANDOFF] request_handoff FINALIZADO - OpenAI vai falar o aviso")
+                return {
+                    "status": "verifying",
+                    "message": f"Diga ao cliente que vai verificar a disponibilidade de {spoken_destination} e que vai colocá-lo em espera por um momento. Seja breve e natural.",
+                    "destination": destination,
+                    "action": "FALE_AGORA_E_AGUARDE"
+                }
             else:
                 # Fallback para handoff legacy (cria ticket)
                 asyncio.create_task(self._initiate_handoff(reason="llm_intent"))
@@ -2510,6 +2525,68 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
     # Ref: voice-ai-ivr/openspec/changes/intelligent-voice-handoff/
     # =========================================================================
     
+    async def _delayed_intelligent_handoff(
+        self,
+        destination_text: str,
+        reason: str,
+        delay_seconds: float = 4.0
+    ) -> None:
+        """
+        Aguarda o OpenAI terminar de falar e então executa o handoff.
+        
+        Este método:
+        1. Aguarda `delay_seconds` para o OpenAI falar o aviso
+        2. Muta o áudio (transfer_in_progress = True)
+        3. Coloca o cliente em espera
+        4. Executa o handoff inteligente
+        
+        Args:
+            destination_text: Texto do destino (ex: "Jeni", "financeiro")
+            reason: Motivo do handoff
+            delay_seconds: Segundos para aguardar o OpenAI falar
+        """
+        logger.info(
+            "⏳ [DELAYED_HANDOFF] Aguardando OpenAI terminar de falar...",
+            extra={
+                "call_uuid": self.call_uuid,
+                "destination_text": destination_text,
+                "delay_seconds": delay_seconds,
+            }
+        )
+        
+        try:
+            # Aguardar o OpenAI terminar de falar o aviso
+            await asyncio.sleep(delay_seconds)
+            
+            # Verificar se a chamada ainda está ativa
+            if self._ending_call or not self._provider:
+                logger.warning("⏳ [DELAYED_HANDOFF] Chamada encerrada durante delay, abortando")
+                return
+            
+            logger.info("⏳ [DELAYED_HANDOFF] Delay concluído, iniciando handoff...")
+            
+            # Agora sim, mutar o áudio e iniciar o handoff
+            self._set_transfer_in_progress(True, "delayed_handoff_start")
+            
+            # Interromper qualquer resposta do OpenAI
+            try:
+                if self._provider:
+                    await self._provider.interrupt()
+            except Exception as e:
+                logger.warning(f"⏳ [DELAYED_HANDOFF] Interrupt falhou: {e}")
+            
+            # Notificar início de transferência
+            await self._notify_transfer_start()
+            
+            # Executar o handoff inteligente
+            await self._execute_intelligent_handoff(destination_text, reason)
+            
+        except asyncio.CancelledError:
+            logger.info("⏳ [DELAYED_HANDOFF] Task cancelada")
+        except Exception as e:
+            logger.error(f"⏳ [DELAYED_HANDOFF] Erro: {e}", exc_info=True)
+            self._set_transfer_in_progress(False, "delayed_handoff_error")
+    
     async def _execute_intelligent_handoff(
         self,
         destination_text: str,
@@ -2532,16 +2609,18 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             reason: Motivo do handoff
         """
         logger.info(
-            "Intelligent handoff started",
+            "📞 [INTELLIGENT_HANDOFF] ========== INÍCIO ==========",
             extra={
                 "call_uuid": self.call_uuid,
                 "destination_text": destination_text,
                 "reason": reason,
+                "transfer_in_progress": self._transfer_in_progress,
+                "on_hold": self._on_hold,
             }
         )
         
         if not self._transfer_manager:
-            logger.warning("TransferManager not initialized")
+            logger.warning("📞 [INTELLIGENT_HANDOFF] ERRO: TransferManager não inicializado")
             return
         
         # NOTA: _transfer_in_progress já é True (setado em _execute_function)
@@ -2552,27 +2631,32 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         
         try:
             # 1. Encontrar destino
+            logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 1: Normalizando destino '{destination_text}'...")
             normalized_destination_text = self._normalize_handoff_destination_text(destination_text)
             if normalized_destination_text != destination_text:
                 logger.info(
-                    "Normalized handoff destination text",
+                    "📞 [INTELLIGENT_HANDOFF] Step 1: Destino normalizado",
                     extra={
                         "original": destination_text,
                         "normalized": normalized_destination_text,
                     }
                 )
+            
+            logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 1: Buscando destino '{normalized_destination_text}'...")
             destination, error = await self._transfer_manager.find_and_validate_destination(
                 normalized_destination_text
             )
             
             if error:
                 # Destino não encontrado - informar usuário e retomar
+                logger.warning(f"📞 [INTELLIGENT_HANDOFF] Step 1: ERRO ao buscar destino: {error}")
                 await self._send_text_to_provider(error)
                 self._set_transfer_in_progress(False, "destination_error")
                 return
             
             if not destination:
                 # Retomar conversa normal se destino não encontrado
+                logger.warning("📞 [INTELLIGENT_HANDOFF] Step 1: Destino não encontrado (None)")
                 self._set_transfer_in_progress(False, "destination_missing")
                 await self._send_text_to_provider(
                     "Não consegui identificar para quem você quer falar. "
@@ -2580,25 +2664,36 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 )
                 return
             
+            logger.info(
+                "📞 [INTELLIGENT_HANDOFF] Step 1: Destino encontrado",
+                extra={
+                    "destination_name": destination.name,
+                    "destination_number": destination.destination_number,
+                    "destination_type": destination.destination_type,
+                }
+            )
+            
             # 2. COLOCAR CLIENTE EM ESPERA antes de verificar/transferir
             # O agente já avisou o cliente através do LLM, agora colocamos em hold
-            logger.info("Placing client on hold before transfer verification")
+            logger.info("📞 [INTELLIGENT_HANDOFF] Step 2: Colocando cliente em HOLD...")
             hold_start_time = asyncio.get_event_loop().time()
             hold_success = await self.hold_call()
             if hold_success:
                 client_on_hold = True
-                logger.info("Client placed on hold successfully")
+                logger.info("📞 [INTELLIGENT_HANDOFF] Step 2: Cliente em HOLD com sucesso")
             else:
-                logger.warning("Failed to place client on hold, continuing anyway")
+                logger.warning("📞 [INTELLIGENT_HANDOFF] Step 2: FALHA ao colocar em HOLD, continuando...")
 
             logger.info(
-                "Executing intelligent handoff",
+                "📞 [INTELLIGENT_HANDOFF] Step 3: Preparando execução da transferência",
                 extra={
                     "call_uuid": self.call_uuid,
                     "destination": destination.name,
                     "destination_number": destination.destination_number,
                     "reason": reason,
                     "announced_transfer": self.config.transfer_announce_enabled,
+                    "realtime_enabled": self.config.transfer_realtime_enabled,
+                    "client_on_hold": client_on_hold,
                 }
             )
             
@@ -2606,6 +2701,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             MIN_HOLD_TIME_SECONDS = 10.0
             
             # 3. Executar transferência
+            logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 3: transfer_announce_enabled={self.config.transfer_announce_enabled}")
             if self.config.transfer_announce_enabled:
                 # ANNOUNCED TRANSFER: Anunciar para o HUMANO antes de conectar
                 announcement = self._build_announcement_for_human(destination_text, reason)
@@ -2644,21 +2740,35 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
             self._current_transfer = result
             
+            logger.info(
+                "📞 [INTELLIGENT_HANDOFF] Step 4: Processando resultado da transferência",
+                extra={
+                    "result_status": result.status.value if result.status else "None",
+                    "result_message": result.message,
+                    "hangup_cause": result.hangup_cause,
+                    "client_on_hold": client_on_hold,
+                }
+            )
+            
             # 4. Processar resultado
             # Se o cliente ainda estiver em hold e a transferência não foi sucesso, fazer unhold
             if client_on_hold and result.status != TransferStatus.SUCCESS:
                 # Garantir tempo mínimo de espera para parecer natural
                 elapsed = asyncio.get_event_loop().time() - hold_start_time
+                logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 4: Tempo em hold: {elapsed:.1f}s")
                 if elapsed < MIN_HOLD_TIME_SECONDS:
                     remaining = MIN_HOLD_TIME_SECONDS - elapsed
-                    logger.info(f"Waiting {remaining:.1f}s more to complete minimum hold time")
+                    logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 4: Aguardando +{remaining:.1f}s para mínimo de hold")
                     await asyncio.sleep(remaining)
                 
-                logger.info("Transfer not successful, removing client from hold")
-                await self.unhold_call()
+                logger.info("📞 [INTELLIGENT_HANDOFF] Step 4: Transferência não sucedida, removendo do HOLD...")
+                unhold_result = await self.unhold_call()
+                logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 4: unhold_call retornou: {unhold_result}")
                 client_on_hold = False
             
+            logger.info("📞 [INTELLIGENT_HANDOFF] Step 5: Chamando _handle_transfer_result...")
             await self._handle_transfer_result(result, reason)
+            logger.info("📞 [INTELLIGENT_HANDOFF] ========== FIM ==========")
             
         except Exception as e:
             logger.exception(f"Intelligent handoff error: {e}")
@@ -2689,10 +2799,22 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             result: Resultado da transferência
             original_reason: Motivo original do handoff
         """
+        logger.info(
+            "📋 [HANDLE_TRANSFER_RESULT] Processando resultado...",
+            extra={
+                "call_uuid": self.call_uuid,
+                "status": result.status.value if result.status else "None",
+                "message": result.message,
+                "hangup_cause": result.hangup_cause,
+                "should_offer_callback": result.should_offer_callback,
+                "destination": result.destination.name if result.destination else None,
+            }
+        )
+        
         if result.status == TransferStatus.SUCCESS:
             # Bridge estabelecido com sucesso
             logger.info(
-                "Transfer successful - bridge established",
+                "📋 [HANDLE_TRANSFER_RESULT] ✅ SUCESSO - Bridge estabelecido",
                 extra={
                     "call_uuid": self.call_uuid,
                     "destination": result.destination.name if result.destination else None,
@@ -2711,26 +2833,30 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
         else:
             # Transferência não concluída - retomar Voice AI
+            logger.info(
+                "📋 [HANDLE_TRANSFER_RESULT] ❌ Transferência NÃO concluída - retomando Voice AI",
+                extra={
+                    "call_uuid": self.call_uuid,
+                    "status": result.status.value if result.status else "None",
+                }
+            )
             # 
-            # CRÍTICO: Ordem correta para evitar race condition:
-            # 1. Interromper provider (cancelar resposta em andamento)
-            # 2. Limpar buffer de áudio de entrada
-            # 3. Pequeno delay para garantir que FreeSWITCH parou MOH
-            # 4. Só então setar transfer_in_progress = False
-            # 5. Enviar mensagem contextual
+            # NOVA ABORDAGEM: Usar voz do OpenAI em vez de FreeSWITCH TTS
+            # 
+            # Fluxo:
+            # 1. Tirar cliente do hold
+            # 2. Limpar buffers
+            # 3. Habilitar áudio novamente (transfer_in_progress = False)
+            # 4. Enviar mensagem ao OpenAI para ele FALAR
+            # 5. O OpenAI vai falar naturalmente usando sua própria voz
             #
-            # Se a ordem estiver errada, o áudio do canal pode vazar para
-            # o provider e gerar respostas "picotadas" enquanto o MOH toca.
             
-            # 1. Interromper provider para cancelar qualquer resposta em andamento
-            if self._provider:
-                try:
-                    await self._provider.interrupt()
-                    logger.debug("Provider interrupted before resume")
-                except Exception as e:
-                    logger.debug(f"Provider interrupt before resume: {e}")
+            # 1. Tirar cliente do hold
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 1: Tirando cliente do hold...")
+            await self.unhold_call()
             
             # 2. Limpar buffer de áudio de entrada para descartar áudio acumulado
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 2: Limpando buffers de áudio...")
             self._input_audio_buffer.clear()
             if self._resampler:
                 try:
@@ -2738,24 +2864,42 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 except Exception:
                     pass
             
-            # 3. Pequeno delay para garantir que FreeSWITCH processou uuid_break
-            await asyncio.sleep(0.1)
+            # 3. Pequeno delay para garantir que FreeSWITCH processou unhold
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 3: Aguardando 200ms...")
+            await asyncio.sleep(0.2)
             
-            # 4. Agora sim, setar transfer_in_progress = False
+            # 4. Habilitar áudio novamente ANTES de enviar mensagem
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 4: Habilitando áudio (transfer_in_progress=False)...")
             self._set_transfer_in_progress(False, "transfer_not_completed")
             
-            # 5. Enviar mensagem contextual (fala direta ao caller)
+            # 5. Enviar mensagem ao OpenAI para ele FALAR
+            # O OpenAI vai gerar uma resposta de voz natural
             message = result.message
-            await self._say_to_caller(message)
-            # Registrar no contexto do LLM sem forçar nova resposta
-            await self._send_text_to_provider(message, request_response=False)
+            destination_name = result.destination.name if result.destination else "o ramal"
             
-            # Aguardar TTS
-            await asyncio.sleep(2.0)
+            # Construir mensagem clara para o OpenAI falar
+            openai_instruction = (
+                f"[SISTEMA] A transferência para {destination_name} não foi possível. "
+                f"Motivo: {message}. "
+                "Informe o cliente de forma clara e empática, e pergunte se deseja deixar um recado ou tentar novamente mais tarde."
+            )
             
-            # Oferecer callback/recado se aplicável
+            logger.info(
+                "📋 [HANDLE_TRANSFER_RESULT] Step 5: Enviando instrução ao OpenAI...",
+                extra={"instruction": openai_instruction}
+            )
+            
+            # Enviar e solicitar resposta (o OpenAI vai FALAR)
+            await self._send_text_to_provider(openai_instruction, request_response=True)
+            
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Processamento concluído - OpenAI vai falar")
+            
+            # Oferecer callback/recado se aplicável (após o OpenAI falar)
             if result.should_offer_callback and result.destination:
+                logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 6: Callback será oferecido pelo OpenAI...")
                 await self._offer_callback_or_message(result, original_reason)
+            
+            logger.info("📋 [HANDLE_TRANSFER_RESULT] Processamento concluído")
     
     async def _offer_callback_or_message(
         self,
@@ -2996,14 +3140,32 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """
         Fala texto diretamente no canal do caller via FreeSWITCH (mod_flite).
         """
+        logger.info(
+            "🔊 [SAY_TO_CALLER] Iniciando...",
+            extra={
+                "call_uuid": self.call_uuid,
+                "domain_uuid": self.domain_uuid,
+                "text_length": len(text),
+                "text_preview": text[:100] if text else "",
+            }
+        )
         try:
             from .handlers.esl_client import get_esl_for_domain
+            logger.debug("🔊 [SAY_TO_CALLER] Obtendo ESL client para domínio...")
             esl = await get_esl_for_domain(self.domain_uuid)
+            
+            logger.debug(f"🔊 [SAY_TO_CALLER] ESL client obtido, is_connected={esl.is_connected}")
             if not esl.is_connected:
+                logger.info("🔊 [SAY_TO_CALLER] ESL não conectado, conectando...")
                 await esl.connect()
-            return await esl.uuid_say(self.call_uuid, text)
+                logger.info(f"🔊 [SAY_TO_CALLER] ESL conectado: {esl.is_connected}")
+            
+            logger.info(f"🔊 [SAY_TO_CALLER] Chamando uuid_say para {self.call_uuid}...")
+            result = await esl.uuid_say(self.call_uuid, text)
+            logger.info(f"🔊 [SAY_TO_CALLER] uuid_say retornou: {result}")
+            return result
         except Exception as e:
-            logger.warning(f"Failed to speak to caller: {e}")
+            logger.warning(f"🔊 [SAY_TO_CALLER] ERRO: {e}", exc_info=True)
             return False
 
     def _format_destination_for_speech(self, destination_text: str) -> str:

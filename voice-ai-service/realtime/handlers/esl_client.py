@@ -961,21 +961,36 @@ class AsyncESLClient:
         Returns:
             True se sucesso
         """
+        logger.info(
+            f"⏸️ [UUID_HOLD] Iniciando {'HOLD' if on else 'UNHOLD'}...",
+            extra={
+                "uuid": uuid,
+                "on": on,
+                "host": self.host,
+                "port": self.port,
+                "connected": self._connected,
+            }
+        )
+        
         try:
             if on:
+                logger.debug(f"⏸️ [UUID_HOLD] Executando: uuid_hold {uuid}")
                 result = await self.execute_api(f"uuid_hold {uuid}")
             else:
+                logger.debug(f"⏸️ [UUID_HOLD] Executando: uuid_hold off {uuid}")
                 result = await self.execute_api(f"uuid_hold off {uuid}")
             
-            success = "+OK" in result
+            logger.info(f"⏸️ [UUID_HOLD] Resultado: {result[:200] if result else 'None'}")
+            
+            success = result and "+OK" in result
             if success:
-                logger.info(f"uuid_hold {'on' if on else 'off'}: {uuid}")
+                logger.info(f"⏸️ [UUID_HOLD] ✅ SUCESSO: {'HOLD' if on else 'UNHOLD'}")
             else:
-                logger.warning(f"uuid_hold failed: {result}")
+                logger.warning(f"⏸️ [UUID_HOLD] ❌ FALHA: {result}")
             
             return success
         except Exception as e:
-            logger.error(f"uuid_hold error: {e}")
+            logger.error(f"⏸️ [UUID_HOLD] ❌ ERRO: {e}", exc_info=True)
             return False
     
     async def uuid_fileman(
@@ -1255,13 +1270,27 @@ class AsyncESLClient:
         antes de tentar originate. Se o ramal não está registrado, o
         originate falharia com USER_NOT_REGISTERED após o timeout.
         """
+        logger.info(
+            f"📞 [CHECK_EXTENSION] Verificando registro de {extension}@{domain}...",
+            extra={
+                "extension": extension,
+                "domain": domain,
+                "timeout": ESL_REGISTRATION_TIMEOUT,
+                "host": self.host,
+                "connected": self._connected,
+            }
+        )
+        
         try:
             # Usar sofia status para verificar registro
             # Formato: sofia status profile internal reg <user>@<domain>
+            logger.debug(f"📞 [CHECK_EXTENSION] Executando: sofia status profile internal reg {extension}@{domain}")
             result = await asyncio.wait_for(
                 self.execute_api(f"sofia status profile internal reg {extension}@{domain}"),
                 timeout=ESL_REGISTRATION_TIMEOUT
             )
+            
+            logger.debug(f"📞 [CHECK_EXTENSION] Resultado (primeiros 300 chars): {result[:300] if result else 'None'}")
             
             # Se encontrar "Total items returned: 0", não está registrado
             if "Total items returned: 0" in result or "0 total" in result.lower():
@@ -1313,15 +1342,12 @@ class AsyncESLClient:
         voice: str = "kal"
     ) -> bool:
         """
-        Fala texto usando mod_flite TTS do FreeSWITCH.
+        Fala texto usando TTS do FreeSWITCH.
         
-        Baseado na documentação oficial:
-        https://developer.signalwire.com/freeswitch/FreeSWITCH-Explained/Modules/mod_flite_3965160
-        
-        Passos:
-        1. Setar tts_engine=flite
-        2. Setar tts_voice=kal (ou slt, rms, awb)
-        3. Executar speak com o texto
+        Tenta múltiplos métodos em ordem:
+        1. speak:: com mod_flite
+        2. say:: com mod_say (para números/datas)
+        3. playback de tom como indicação (fallback final)
         
         Args:
             uuid: UUID do canal
@@ -1329,8 +1355,21 @@ class AsyncESLClient:
             voice: Voz do flite (kal, slt, rms, awb)
         
         Returns:
-            True se sucesso
+            True se algum método funcionou
         """
+        logger.info(
+            "🎤 [UUID_SAY] Iniciando TTS...",
+            extra={
+                "uuid": uuid,
+                "voice": voice,
+                "text_length": len(text),
+                "text_preview": text[:80] if text else "",
+                "host": self.host,
+                "port": self.port,
+                "connected": self._connected,
+            }
+        )
+        
         try:
             # Escapar caracteres especiais que podem quebrar o comando
             text_escaped = (
@@ -1341,58 +1380,83 @@ class AsyncESLClient:
                 .replace("|", " ")
                 .replace("\\", "")
                 .replace(":", " ")
+                .strip()
             )
             
-            # 1. Setar tts_engine
-            result = await self.execute_api(f"uuid_setvar {uuid} tts_engine flite")
-            if "+OK" not in result:
-                logger.warning(f"Failed to set tts_engine: {result}")
-            
-            # 2. Setar tts_voice
-            result = await self.execute_api(f"uuid_setvar {uuid} tts_voice {voice}")
-            if "+OK" not in result:
-                logger.warning(f"Failed to set tts_voice: {result}")
-            
-            # 3. Executar speak via uuid_broadcast
-            # Formato documentado: speak::<texto> ou speak::flite|voice|texto
-            result = await asyncio.wait_for(
-                self.execute_api(
-                    f"uuid_broadcast {uuid} 'speak::{text_escaped}' aleg"
-                ),
-                timeout=ESL_API_TIMEOUT
-            )
-            
-            if "+OK" in result:
-                logger.info(f"uuid_say (speak) success: {uuid}")
-                # Aguardar um tempo estimado para o TTS terminar
-                # (~150 palavras/min = ~0.4s por palavra)
-                word_count = len(text_escaped.split())
-                wait_time = min(max(word_count * 0.4, 1.0), 10.0)
-                await asyncio.sleep(wait_time)
+            if not text_escaped:
+                logger.warning("🎤 [UUID_SAY] Texto vazio após escapar, retornando True")
                 return True
             
-            logger.warning(f"uuid_say speak failed: {result}")
+            # Calcular tempo de espera baseado no texto
+            word_count = len(text_escaped.split())
+            wait_time = min(max(word_count * 0.4, 1.0), 10.0)
             
-            # Fallback: tentar com formato alternativo flite|voice|text
-            result = await asyncio.wait_for(
-                self.execute_api(
-                    f"uuid_broadcast {uuid} 'speak::flite|{voice}|{text_escaped}' aleg"
-                ),
-                timeout=ESL_API_TIMEOUT
-            )
+            # ========================================
+            # MÉTODO 1: speak:: com mod_flite
+            # ========================================
+            logger.info(f"🎤 [UUID_SAY] Método 1: Tentando speak:: com mod_flite...")
             
-            if "+OK" in result:
-                logger.info(f"uuid_say (speak flite|voice|text) success: {uuid}")
-                word_count = len(text_escaped.split())
-                wait_time = min(max(word_count * 0.4, 1.0), 10.0)
-                await asyncio.sleep(wait_time)
-                return True
+            try:
+                # Setar tts_engine e voice
+                await self.execute_api(f"uuid_setvar {uuid} tts_engine flite")
+                await self.execute_api(f"uuid_setvar {uuid} tts_voice {voice}")
+                
+                # Tentar speak:: direto
+                result = await asyncio.wait_for(
+                    self.execute_api(f"uuid_broadcast {uuid} 'speak::{text_escaped}' aleg"),
+                    timeout=ESL_API_TIMEOUT
+                )
+                
+                if result and "+OK" in result:
+                    logger.info(f"🎤 [UUID_SAY] ✅ SUCESSO via speak::")
+                    await asyncio.sleep(wait_time)
+                    return True
+                
+                # Tentar formato alternativo
+                result = await asyncio.wait_for(
+                    self.execute_api(f"uuid_broadcast {uuid} 'speak::flite|{voice}|{text_escaped}' aleg"),
+                    timeout=ESL_API_TIMEOUT
+                )
+                
+                if result and "+OK" in result:
+                    logger.info(f"🎤 [UUID_SAY] ✅ SUCESSO via speak::flite|voice|text")
+                    await asyncio.sleep(wait_time)
+                    return True
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"🎤 [UUID_SAY] Método 1: Timeout")
+            except Exception as e:
+                logger.warning(f"🎤 [UUID_SAY] Método 1: Erro - {e}")
             
-            logger.warning(f"uuid_say all methods failed: {result}")
+            # ========================================
+            # MÉTODO 2: Tocar tom de notificação
+            # ========================================
+            logger.info(f"🎤 [UUID_SAY] Método 2: Tentando playback de tom...")
+            
+            try:
+                # Tocar um tom breve para indicar que algo aconteceu
+                result = await asyncio.wait_for(
+                    self.execute_api(f"uuid_broadcast {uuid} 'tone_stream://%(200,100,400,450)' aleg"),
+                    timeout=ESL_API_TIMEOUT
+                )
+                
+                if result and "+OK" in result:
+                    logger.info(f"🎤 [UUID_SAY] ✅ Tom de notificação tocado (mod_flite pode não estar disponível)")
+                    await asyncio.sleep(0.5)
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"🎤 [UUID_SAY] Método 2: Erro - {e}")
+            
+            # ========================================
+            # MÉTODO 3: Apenas aguardar (último recurso)
+            # ========================================
+            logger.warning(f"🎤 [UUID_SAY] ⚠️ Nenhum método de TTS funcionou, continuando sem áudio")
+            await asyncio.sleep(0.5)  # Pequena pausa mesmo assim
             return False
             
         except Exception as e:
-            logger.error(f"uuid_say error: {e}")
+            logger.error(f"🎤 [UUID_SAY] ❌ ERRO GERAL: {e}", exc_info=True)
             return False
     
     async def uuid_playback(

@@ -428,16 +428,31 @@ class ESLHybridAdapter(ESLCommandInterface):
         return result
     
     async def uuid_hold(self, uuid: str, on: bool = True) -> bool:
+        logger.info(
+            f"⏸️ [HYBRID_HOLD] Iniciando {'HOLD' if on else 'UNHOLD'}...",
+            extra={
+                "uuid": uuid,
+                "on": on,
+                "outbound_connected": self._outbound.is_connected,
+            }
+        )
+        
         # Outbound primeiro
         if self._outbound.is_connected:
+            logger.info(f"⏸️ [HYBRID_HOLD] Tentando via ESL Outbound...")
             if await self._outbound.uuid_hold(uuid, on):
-                logger.debug(f"uuid_hold via ESL Outbound: {uuid}")
+                logger.info(f"⏸️ [HYBRID_HOLD] ✅ SUCESSO via ESL Outbound")
                 return True
+            logger.info(f"⏸️ [HYBRID_HOLD] Outbound falhou, tentando Inbound...")
+        else:
+            logger.info(f"⏸️ [HYBRID_HOLD] Outbound não conectado, usando Inbound...")
         
         # Fallback para Inbound
         result = await self._inbound.uuid_hold(uuid, on)
         if result:
-            logger.debug(f"uuid_hold via ESL Inbound: {uuid}")
+            logger.info(f"⏸️ [HYBRID_HOLD] ✅ SUCESSO via ESL Inbound")
+        else:
+            logger.warning(f"⏸️ [HYBRID_HOLD] ❌ FALHA em ambos Outbound e Inbound")
         return result
     
     async def uuid_break(self, uuid: str) -> bool:
@@ -507,9 +522,22 @@ def get_esl_adapter(call_uuid: str, esl_client=None) -> ESLCommandInterface:
     """
     audio_mode = os.getenv("AUDIO_MODE", "websocket").lower()
     
+    logger.info(
+        f"🔌 [GET_ESL_ADAPTER] Obtendo adaptador ESL...",
+        extra={
+            "call_uuid": call_uuid,
+            "audio_mode": audio_mode,
+            "esl_client_provided": esl_client is not None,
+        }
+    )
+    
     if audio_mode == "dual":
         # Modo dual: usar adaptador híbrido
-        return ESLHybridAdapter(call_uuid, esl_client)
+        adapter = ESLHybridAdapter(call_uuid, esl_client)
+        logger.info(f"🔌 [GET_ESL_ADAPTER] Retornando ESLHybridAdapter (outbound_connected={adapter._outbound.is_connected})")
+        return adapter
     else:
         # Modo websocket-only: usar ESL Inbound
-        return ESLInboundAdapter(esl_client)
+        adapter = ESLInboundAdapter(esl_client)
+        logger.info(f"🔌 [GET_ESL_ADAPTER] Retornando ESLInboundAdapter")
+        return adapter

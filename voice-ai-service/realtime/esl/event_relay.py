@@ -397,11 +397,21 @@ class DualModeEventRelay:
             except Empty:
                 break
             
+            logger.info(
+                f"🔄 [EVENT_RELAY] Processando comando da queue: {command}",
+                extra={
+                    "uuid": self._uuid,
+                    "command": command,
+                    "payload": payload,
+                }
+            )
+            
             try:
                 if command == "hold":
-                    self._execute_outbound_hold(payload)
+                    result = self._execute_outbound_hold(payload)
+                    logger.info(f"🔄 [EVENT_RELAY] Comando hold executado: {result}")
             except Exception as e:
-                logger.warning(f"[{self._uuid}] Failed processing command '{command}': {e}")
+                logger.warning(f"🔄 [EVENT_RELAY] ERRO ao processar comando '{command}': {e}")
     
     def _try_late_correlation(self) -> None:
         """
@@ -608,37 +618,82 @@ class DualModeEventRelay:
         A execução real ocorre na greenlet do EventRelay para evitar
         bloqueios quando chamado a partir de threads asyncio.
         """
+        logger.info(
+            f"⏸️ [OUTBOUND_HOLD] Enfileirando comando {'HOLD' if on else 'UNHOLD'}...",
+            extra={
+                "uuid": self._uuid,
+                "on": on,
+                "connected": self._connected,
+                "has_session": self.session is not None,
+                "queue_size": self._command_queue.qsize(),
+            }
+        )
+        
         if not self._connected or not self.session:
-            logger.warning(f"[{self._uuid}] Cannot hold/unhold: not connected")
+            logger.warning(f"⏸️ [OUTBOUND_HOLD] ERRO: Não conectado (connected={self._connected}, session={self.session is not None})")
             return False
         
         try:
             self._command_queue.put_nowait(("hold", on))
-            logger.debug(f"[{self._uuid}] Hold command queued (on={on})")
+            logger.info(f"⏸️ [OUTBOUND_HOLD] Comando enfileirado com sucesso (queue_size={self._command_queue.qsize()})")
             return True
         except Exception as e:
-            logger.warning(f"[{self._uuid}] Failed to queue hold command: {e}")
+            logger.warning(f"⏸️ [OUTBOUND_HOLD] ERRO ao enfileirar comando: {e}")
             return False
 
     def _execute_outbound_hold(self, on: bool) -> bool:
         """
         Executa hold/unhold no contexto da greenlet (seguro para greenswitch).
         """
+        logger.info(
+            f"⏸️ [EXECUTE_OUTBOUND_HOLD] Executando {'HOLD' if on else 'UNHOLD'}...",
+            extra={
+                "uuid": self._uuid,
+                "on": on,
+                "moh_active": self._outbound_moh_active,
+            }
+        )
+        
         try:
             if on:
                 # Tocar MOH em background (não bloqueante)
-                self.session.playback("local_stream://default", block=False)
+                # Tentar várias opções de música de espera
+                moh_sources = [
+                    "local_stream://default",
+                    "local_stream://moh",
+                    "silence_stream://-1,1400",  # Silêncio com tom leve como fallback
+                ]
+                
+                for moh_source in moh_sources:
+                    try:
+                        logger.info(f"⏸️ [EXECUTE_OUTBOUND_HOLD] Tentando playback: {moh_source}")
+                        self.session.playback(moh_source, block=False)
+                        self._outbound_moh_active = True
+                        logger.info(f"⏸️ [EXECUTE_OUTBOUND_HOLD] ✅ MOH iniciado com sucesso: {moh_source}")
+                        return True
+                    except Exception as e:
+                        logger.warning(f"⏸️ [EXECUTE_OUTBOUND_HOLD] Falha com {moh_source}: {e}")
+                        continue
+                
+                # Se nenhum funcionou, marcar como ativo mesmo assim
                 self._outbound_moh_active = True
-                logger.info(f"[{self._uuid}] MOH started via ESL Outbound")
+                logger.warning(f"⏸️ [EXECUTE_OUTBOUND_HOLD] ⚠️ Nenhum MOH disponível, continuando sem música")
+                return True
             else:
                 # Parar MOH (uuid_break é API global e requer permissão full)
                 if self._outbound_moh_active:
-                    self.session.uuid_break()
+                    logger.info(f"⏸️ [EXECUTE_OUTBOUND_HOLD] Parando MOH via uuid_break...")
+                    try:
+                        self.session.uuid_break()
+                    except Exception as e:
+                        logger.warning(f"⏸️ [EXECUTE_OUTBOUND_HOLD] uuid_break falhou: {e}")
                     self._outbound_moh_active = False
-                    logger.info(f"[{self._uuid}] MOH stopped via ESL Outbound (uuid_break)")
+                    logger.info(f"⏸️ [EXECUTE_OUTBOUND_HOLD] ✅ MOH parado")
+                else:
+                    logger.info(f"⏸️ [EXECUTE_OUTBOUND_HOLD] MOH não estava ativo, nada a fazer")
             return True
         except Exception as e:
-            logger.warning(f"[{self._uuid}] hold/unhold via ESL Outbound failed: {e}")
+            logger.warning(f"⏸️ [EXECUTE_OUTBOUND_HOLD] ❌ ERRO: {e}", exc_info=True)
             return False
     
     def uuid_break(self) -> bool:
