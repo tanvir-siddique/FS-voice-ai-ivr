@@ -128,7 +128,9 @@ PCM16_CHUNK_MS = 20
 # Ref: os11k/freeswitch-elevenlabs-bridge usa 10 chunks (200ms)
 
 # Fallback streamAudio (base64) usa frames maiores para reduzir overhead de arquivos
-STREAMAUDIO_FRAME_MS = int(os.getenv("FS_STREAMAUDIO_FRAME_MS", "200"))
+# IMPORTANTE: Frames muito pequenos causam áudio picotado (gaps entre playbacks)
+# Recomendado: 1000ms+ para evitar stuttering
+STREAMAUDIO_FRAME_MS = int(os.getenv("FS_STREAMAUDIO_FRAME_MS", "1000"))
 STREAMAUDIO_FRAME_BYTES = PCM16_16K_CHUNK_BYTES * max(1, STREAMAUDIO_FRAME_MS // 20)
 
 

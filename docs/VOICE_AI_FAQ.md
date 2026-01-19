@@ -57,4 +57,4 @@ fs_cli -x "uuid_broadcast <UUID> /tmp/test.r16 aleg"
 
 - `FS_PLAYBACK_MODE=rawAudio|streamAudio`
 - `FS_STREAMAUDIO_FALLBACK=true|false`
-- `FS_STREAMAUDIO_FRAME_MS=200`
+- `FS_STREAMAUDIO_FRAME_MS=1000` (recomendado: 1000ms+ para evitar áudio picotado)
