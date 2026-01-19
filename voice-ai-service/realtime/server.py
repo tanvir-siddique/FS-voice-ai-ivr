@@ -882,18 +882,13 @@ class RealtimeServer:
         playback_mode = os.getenv("FS_PLAYBACK_MODE", "rawAudio").lower()
         allow_streamaudio_fallback = os.getenv("FS_STREAMAUDIO_FALLBACK", "true").lower() in ("1", "true", "yes")
         
-        # Determinar sample rate e chunk size baseado na configuração de áudio
-        # G.711: 8kHz, 160 bytes/20ms (1 byte/sample)
-        # L16: 8kHz, 320 bytes/20ms (2 bytes/sample)
-        audio_format = config.audio_format if config else "l16"
-        if audio_format in ("pcmu", "g711u", "ulaw", "pcma", "g711a", "alaw"):
-            fs_sample_rate = 8000
-            fs_chunk_size = 160  # G.711: 8000 samples/s * 0.020s * 1 byte/sample
-            logger.info(f"Audio output format: G.711 @ {fs_sample_rate}Hz, {fs_chunk_size}B/chunk", extra={"call_uuid": call_uuid})
-        else:
-            fs_sample_rate = 8000  # FreeSWITCH sempre recebe 8kHz do ResamplerPair
-            fs_chunk_size = 320   # L16: 8000 samples/s * 0.020s * 2 bytes/sample
-            logger.info(f"Audio output format: L16 PCM @ {fs_sample_rate}Hz, {fs_chunk_size}B/chunk", extra={"call_uuid": call_uuid})
+        # Determinar sample rate e chunk size para OUTPUT
+        # NOTA: mod_audio_stream sempre espera L16 PCM para playback (streamAudio)
+        # A conversão G.711 só acontece na entrada (FS→Python)
+        # Output é sempre L16 @ 8kHz
+        fs_sample_rate = 8000
+        fs_chunk_size = 320   # L16: 8000 samples/s * 0.020s * 2 bytes/sample
+        logger.info(f"Audio output format: L16 PCM @ {fs_sample_rate}Hz, {fs_chunk_size}B/chunk", extra={"call_uuid": call_uuid})
         
         # Audio Configuration - usar valores já extraídos do banco (db_warmup_* definidos acima)
         adaptive_warmup = db_adaptive_warmup
@@ -911,8 +906,14 @@ class RealtimeServer:
                 warmup_max = int(provider_config.get("warmup_chunks_max"))
             if "warmup_chunks" in provider_config:
                 warmup_default = int(provider_config.get("warmup_chunks"))
+        # NOTA: mod_audio_stream não suporta rawAudio binário para recepção
+        # Apenas streamAudio (base64 → arquivo → playback) funciona
+        # Forçar streamAudio até mod_audio_stream ser atualizado
         if playback_mode not in ("rawaudio", "streamaudio"):
-            playback_mode = "rawaudio"
+            playback_mode = "streamaudio"
+        # Forçar streamAudio para compatibilidade
+        playback_mode = "streamaudio"
+        logger.info(f"Playback mode: {playback_mode}", extra={"call_uuid": call_uuid})
 
         async def _send_rawaudio_header() -> bool:
             nonlocal format_sent

@@ -1238,43 +1238,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 self._echo_canceller.add_speaker_frame(audio_bytes)
             
             # ========================================
-            # OUTPUT - baseado no formato CONFIGURADO ou DETECTADO
+            # OUTPUT - sempre L16 PCM para mod_audio_stream
             # ========================================
-            # Se config.audio_format é G.711 e:
-            #   - detected_format é "g711" (confirmado), OU
-            #   - detected_format é None (ainda não detectado, assumir config)
-            # Então converter para G.711.
+            # NOTA: mod_audio_stream espera L16 PCM para playback (streamAudio)
+            # A conversão G.711 só acontece na ENTRADA (FS→Python)
+            # O ResamplerPair já converteu 24kHz→8kHz, então temos L16 @ 8kHz
             # ========================================
-            detected_format = getattr(self, '_detected_input_format', None)
-            use_g711 = self.config.audio_format in ("pcmu", "g711u", "ulaw", "pcma", "g711a", "alaw")
-            
-            # Se detectamos L16 explicitamente, não usar G.711
-            if detected_format in ("l16_8k", "l16_16k", "unknown"):
-                use_g711 = False
-            
-            pre_g711_len = len(audio_bytes)
-            
-            if use_g711:
-                # Converter para G.711
-                if self.config.audio_format in ("pcmu", "g711u", "ulaw"):
-                    audio_bytes = pcm_to_ulaw(audio_bytes)
-                    if self._output_frame_count == 1:
-                        logger.info(f"🔊 [OUTPUT→FS] L16 → G.711 μ-law: {pre_g711_len}B → {len(audio_bytes)}B", extra={
-                            "call_uuid": self.call_uuid,
-                        })
-                elif self.config.audio_format in ("pcma", "g711a", "alaw"):
-                    from .utils.audio_codec import pcm_to_alaw
-                    audio_bytes = pcm_to_alaw(audio_bytes)
-                    if self._output_frame_count == 1:
-                        logger.info(f"🔊 [OUTPUT→FS] L16 → G.711 A-law: {pre_g711_len}B → {len(audio_bytes)}B", extra={
-                            "call_uuid": self.call_uuid,
-                        })
-            else:
-                # L16 PCM direto
-                if self._output_frame_count == 1:
-                    logger.info(f"🔊 [OUTPUT→FS] L16 PCM direto: {len(audio_bytes)}B (detected={detected_format})", extra={
-                        "call_uuid": self.call_uuid,
-                    })
+            if self._output_frame_count == 1:
+                logger.info(f"🔊 [OUTPUT→FS] L16 PCM @ 8kHz: {len(audio_bytes)}B", extra={
+                    "call_uuid": self.call_uuid,
+                })
             
             self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
