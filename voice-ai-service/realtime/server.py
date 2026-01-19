@@ -913,7 +913,11 @@ class RealtimeServer:
             playback_mode = "streamaudio"
         # Forçar streamAudio para compatibilidade
         playback_mode = "streamaudio"
-        logger.info(f"Playback mode: {playback_mode}", extra={"call_uuid": call_uuid})
+        
+        # Calcular tamanho do frame streamAudio baseado no sample rate real
+        # L16 @ 8kHz: 8000 samples/s * 2 bytes * 0.200s = 3200 bytes (200ms)
+        streamaudio_frame_bytes = int(fs_sample_rate * 2 * STREAMAUDIO_FRAME_MS / 1000)
+        logger.info(f"Playback mode: {playback_mode}, frame_size: {streamaudio_frame_bytes}B ({STREAMAUDIO_FRAME_MS}ms)", extra={"call_uuid": call_uuid})
 
         async def _send_rawaudio_header() -> bool:
             nonlocal format_sent
@@ -1122,9 +1126,9 @@ class RealtimeServer:
 
                     if playback_mode == "streamaudio":
                         streamaudio_buffer.extend(chunk)
-                        while len(streamaudio_buffer) >= STREAMAUDIO_FRAME_BYTES:
-                            frame = bytes(streamaudio_buffer[:STREAMAUDIO_FRAME_BYTES])
-                            del streamaudio_buffer[:STREAMAUDIO_FRAME_BYTES]
+                        while len(streamaudio_buffer) >= streamaudio_frame_bytes:
+                            frame = bytes(streamaudio_buffer[:streamaudio_frame_bytes])
+                            del streamaudio_buffer[:streamaudio_frame_bytes]
                             await _send_streamaudio_frame(frame)
 
                     # Atualizar health score periodicamente
