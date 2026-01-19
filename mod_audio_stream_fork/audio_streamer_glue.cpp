@@ -749,9 +749,10 @@ extern "C" {
         auto *tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
         if (!tech_pvt || tech_pvt->audio_paused) return SWITCH_TRUE;
         
-        /* NETPLAY v2.3: Half-duplex mode - don't send mic audio while agent is speaking
-         * This prevents echo from being sent to OpenAI and causing self-interruption.
-         * When playback_active=1, the agent is speaking, so we skip capturing mic audio.
+        /* NETPLAY v2.4: Half-duplex safety net
+         * Even with AEC, we skip sending mic audio while agent is actively speaking.
+         * This provides extra protection against echo feedback.
+         * The user can still barge-in during natural pauses.
          */
         if (tech_pvt->playback_active) {
             return SWITCH_TRUE;
