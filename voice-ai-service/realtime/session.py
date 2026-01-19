@@ -28,6 +28,7 @@ from .providers.base import (
 from .providers.factory import RealtimeProviderFactory
 from .utils.resampler import ResamplerPair
 from .utils.metrics import get_metrics
+from .utils.echo_canceller import EchoCancellerWrapper
 from .handlers.handoff import HandoffHandler, HandoffConfig, HandoffResult
 
 # FASE 1: Handoff Inteligente
@@ -337,6 +338,11 @@ class RealtimeSessionConfig:
     # Input Audio Normalization (opcional)
     input_normalize_enabled: bool = False
     input_target_rms: int = 2000
+    
+    # Echo Cancellation (Speex AEC) - para viva-voz
+    # Remove eco do agente capturado pelo microfone do caller
+    aec_enabled: bool = True  # Habilitar AEC por padrão
+    aec_filter_length_ms: int = 128  # Quanto eco pode remover (100-200ms típico)
     input_min_rms: int = 300
     input_max_gain: float = 3.0
 
@@ -462,6 +468,19 @@ class RealtimeSession:
         self._esl_connected = False  # True quando ESL Outbound conectou
         self._on_hold = False  # True quando chamada está em espera
         self._bridged_to: Optional[str] = None  # UUID do canal bridged
+        
+        # ========================================
+        # Echo Cancellation (Speex AEC) para viva-voz
+        # Remove eco do agente captado pelo microfone do caller
+        # ========================================
+        self._echo_canceller: Optional[EchoCancellerWrapper] = None
+        if config.aec_enabled:
+            self._echo_canceller = EchoCancellerWrapper(
+                sample_rate=config.freeswitch_sample_rate,
+                frame_size_ms=20,  # Mesmo que nossos chunks
+                filter_length_ms=config.aec_filter_length_ms,
+                enabled=True
+            )
     
     @property
     def call_uuid(self) -> str:
@@ -989,6 +1008,13 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self._ending_call:
             return
         
+        # ========================================
+        # Echo Cancellation (Speex AEC)
+        # Remover eco do agente do áudio do caller
+        # ========================================
+        if self._echo_canceller and audio_bytes:
+            audio_bytes = self._echo_canceller.process(audio_bytes)
+        
         self._last_activity = time.time()
         # Resetar fallback de silêncio ao receber áudio do usuário
         self._silence_fallback_count = 0
@@ -1100,6 +1126,11 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                 # Áudio mutado durante transferência - MOH está tocando
                 logger.debug("Audio muted - transfer in progress")
                 return
+            
+            # Adicionar ao buffer de referência do AEC (para remover eco)
+            if self._echo_canceller:
+                self._echo_canceller.add_speaker_frame(audio_bytes)
+            
             self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)
     

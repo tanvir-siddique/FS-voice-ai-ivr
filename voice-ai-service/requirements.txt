@@ -128,6 +128,7 @@ soundfile>=0.12.1
 numpy>=1.26.0
 scipy>=1.12.0
 pydub>=0.25.1
+speexdsp>=0.1.2  # Echo Cancellation para viva-voz
 
 # ============================================
 # REALTIME (WebSocket Bridge)
