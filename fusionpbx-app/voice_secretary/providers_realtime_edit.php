@@ -56,10 +56,22 @@
 	$realtime_providers = [
 		'openai' => [
 			'name' => 'OpenAI Realtime API',
-			'description' => 'GPT-4o Realtime with voice',
+			'description' => 'GPT Realtime with voice (GA)',
 			'fields' => ['api_key', 'model', 'voice'],
 			'voices' => ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'],
-			'models' => ['gpt-realtime', 'gpt-realtime-mini', 'gpt-4o-realtime-preview', 'gpt-4o-mini-realtime-preview'],
+			'models' => [
+				// GA (General Availability) - Recommended
+				'gpt-realtime',
+				'gpt-realtime-mini',
+				// Preview with Snapshots
+				'gpt-4o-realtime-preview',
+				'gpt-4o-realtime-preview-2025-06-03',
+				'gpt-4o-realtime-preview-2024-12-17',
+				'gpt-4o-realtime-preview-2024-10-01',
+				// Mini Preview
+				'gpt-4o-mini-realtime-preview',
+				'gpt-4o-mini-realtime-preview-2024-12-17',
+			],
 		],
 		'elevenlabs' => [
 			'name' => 'ElevenLabs Conversational AI',
@@ -219,12 +231,27 @@
 	echo "<tr>\n";
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>Model</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
-	echo "		<select class='formfld' name='model'>\n";
-	echo "			<option value='gpt-realtime' ".((($config['model'] ?? '') === 'gpt-realtime') ? 'selected' : '').">gpt-realtime (GA - recomendado)</option>\n";
-	echo "			<option value='gpt-realtime-mini' ".((($config['model'] ?? '') === 'gpt-realtime-mini') ? 'selected' : '').">gpt-realtime-mini (GA - menor custo)</option>\n";
-	echo "			<option value='gpt-4o-realtime-preview' ".((($config['model'] ?? '') === 'gpt-4o-realtime-preview') ? 'selected' : '').">gpt-4o-realtime-preview (deprecated)</option>\n";
-	echo "			<option value='gpt-4o-mini-realtime-preview' ".((($config['model'] ?? '') === 'gpt-4o-mini-realtime-preview') ? 'selected' : '').">gpt-4o-mini-realtime-preview (deprecated)</option>\n";
+	$current_model = $config['model'] ?? 'gpt-realtime';
+	echo "		<select class='formfld' name='model' id='openai_model' onchange='updateModelInfo()' style='width: 350px;'>\n";
+	// GA Models (General Availability) - Recommended
+	echo "			<optgroup label='🚀 GA (Recomendados)'>\n";
+	echo "				<option value='gpt-realtime' ".(($current_model === 'gpt-realtime') ? 'selected' : '').">gpt-realtime (32k ctx, melhor qualidade)</option>\n";
+	echo "				<option value='gpt-realtime-mini' ".(($current_model === 'gpt-realtime-mini') ? 'selected' : '').">gpt-realtime-mini (32k ctx, menor custo)</option>\n";
+	echo "			</optgroup>\n";
+	// Preview Models with Snapshots
+	echo "			<optgroup label='🧪 Preview (com snapshots)'>\n";
+	echo "				<option value='gpt-4o-realtime-preview' ".(($current_model === 'gpt-4o-realtime-preview') ? 'selected' : '').">gpt-4o-realtime-preview (alias latest)</option>\n";
+	echo "				<option value='gpt-4o-realtime-preview-2025-06-03' ".(($current_model === 'gpt-4o-realtime-preview-2025-06-03') ? 'selected' : '').">gpt-4o-realtime-preview-2025-06-03</option>\n";
+	echo "				<option value='gpt-4o-realtime-preview-2024-12-17' ".(($current_model === 'gpt-4o-realtime-preview-2024-12-17') ? 'selected' : '').">gpt-4o-realtime-preview-2024-12-17</option>\n";
+	echo "				<option value='gpt-4o-realtime-preview-2024-10-01' ".(($current_model === 'gpt-4o-realtime-preview-2024-10-01') ? 'selected' : '').">gpt-4o-realtime-preview-2024-10-01</option>\n";
+	echo "			</optgroup>\n";
+	// Mini Preview Models
+	echo "			<optgroup label='🧪 Mini Preview (menor custo)'>\n";
+	echo "				<option value='gpt-4o-mini-realtime-preview' ".(($current_model === 'gpt-4o-mini-realtime-preview') ? 'selected' : '').">gpt-4o-mini-realtime-preview (16k ctx)</option>\n";
+	echo "				<option value='gpt-4o-mini-realtime-preview-2024-12-17' ".(($current_model === 'gpt-4o-mini-realtime-preview-2024-12-17') ? 'selected' : '').">gpt-4o-mini-realtime-preview-2024-12-17</option>\n";
+	echo "			</optgroup>\n";
 	echo "		</select>\n";
+	echo "		<div id='model_info' style='margin-top: 8px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 0.9em;'></div>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 	echo "<tr>\n";
@@ -372,7 +399,132 @@ function showProviderFields(provider) {
 		if (fields) {
 			fields.style.display = '';
 		}
+		
+		// Update model info if OpenAI
+		if (provider === 'openai') {
+			updateModelInfo();
+		}
 	}
+}
+
+function updateModelInfo() {
+	var model = document.getElementById('openai_model')?.value || '';
+	var infoDiv = document.getElementById('model_info');
+	if (!infoDiv) return;
+	
+	// Model information from OpenAI docs (Context7)
+	var models = {
+		// GA Models
+		'gpt-realtime': {
+			type: 'GA',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$5.00/1M',
+			textOutput: '$20.00/1M',
+			audioInput: '$40.00/1M',
+			audioOutput: '$80.00/1M',
+			badge: '🚀',
+			note: 'Modelo GA principal - Recomendado para produção. Suporta WebRTC, WebSocket e SIP.',
+		},
+		'gpt-realtime-mini': {
+			type: 'GA',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$0.60/1M',
+			textOutput: '$2.40/1M',
+			audioInput: '$10.00/1M',
+			audioOutput: '$20.00/1M',
+			badge: '💰',
+			note: 'Versão econômica do GA. Ideal para alto volume com custo reduzido.',
+		},
+		// Preview Models
+		'gpt-4o-realtime-preview': {
+			type: 'Preview',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$5.00/1M',
+			textOutput: '$20.00/1M',
+			audioInput: '$40.00/1M',
+			audioOutput: '$80.00/1M',
+			badge: '🧪',
+			note: 'Alias para o snapshot mais recente. Considere migrar para gpt-realtime.',
+		},
+		'gpt-4o-realtime-preview-2025-06-03': {
+			type: 'Snapshot',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$5.00/1M',
+			textOutput: '$20.00/1M',
+			audioInput: '$40.00/1M',
+			audioOutput: '$80.00/1M',
+			badge: '📌',
+			note: 'Snapshot fixo de junho/2025. Use para consistência entre deploys.',
+		},
+		'gpt-4o-realtime-preview-2024-12-17': {
+			type: 'Snapshot',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$5.00/1M',
+			textOutput: '$20.00/1M',
+			audioInput: '$40.00/1M',
+			audioOutput: '$80.00/1M',
+			badge: '📌',
+			note: 'Snapshot fixo de dezembro/2024.',
+		},
+		'gpt-4o-realtime-preview-2024-10-01': {
+			type: 'Snapshot',
+			context: '32,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$5.00/1M',
+			textOutput: '$20.00/1M',
+			audioInput: '$40.00/1M',
+			audioOutput: '$80.00/1M',
+			badge: '📌',
+			note: 'Snapshot original de outubro/2024. Versão mais antiga.',
+		},
+		// Mini Preview
+		'gpt-4o-mini-realtime-preview': {
+			type: 'Mini Preview',
+			context: '16,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$0.60/1M',
+			textOutput: '$2.40/1M',
+			audioInput: '$10.00/1M',
+			audioOutput: '$20.00/1M',
+			badge: '🧪💰',
+			note: 'Versão mini preview. Menor contexto mas custo reduzido.',
+		},
+		'gpt-4o-mini-realtime-preview-2024-12-17': {
+			type: 'Mini Snapshot',
+			context: '16,000 tokens',
+			maxOutput: '4,096 tokens',
+			textInput: '$0.60/1M',
+			textOutput: '$2.40/1M',
+			audioInput: '$10.00/1M',
+			audioOutput: '$20.00/1M',
+			badge: '📌💰',
+			note: 'Snapshot fixo mini de dezembro/2024.',
+		},
+	};
+	
+	var info = models[model];
+	if (!info) {
+		infoDiv.innerHTML = '<span style="color: #666;">Selecione um modelo para ver detalhes.</span>';
+		return;
+	}
+	
+	var html = '<div style="display: flex; gap: 20px; flex-wrap: wrap;">';
+	html += '<div><b>' + info.badge + ' ' + info.type + '</b></div>';
+	html += '<div>📊 Context: <b>' + info.context + '</b></div>';
+	html += '<div>📝 Max Output: <b>' + info.maxOutput + '</b></div>';
+	html += '</div>';
+	html += '<div style="margin-top: 8px; display: flex; gap: 15px; flex-wrap: wrap; font-size: 0.85em;">';
+	html += '<div>💬 Text: <span style="color: #2e7d32;">' + info.textInput + '</span> → <span style="color: #c62828;">' + info.textOutput + '</span></div>';
+	html += '<div>🎤 Audio: <span style="color: #2e7d32;">' + info.audioInput + '</span> → <span style="color: #c62828;">' + info.audioOutput + '</span></div>';
+	html += '</div>';
+	html += '<div style="margin-top: 8px; color: #555; font-size: 0.85em;">' + info.note + '</div>';
+	
+	infoDiv.innerHTML = html;
 }
 
 //initialize on page load
