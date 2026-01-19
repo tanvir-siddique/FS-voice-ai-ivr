@@ -451,9 +451,11 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             await asyncio.sleep(0.1)
             
             # ETAPA 2: Configurar tools separadamente
+            # IMPORTANTE: Para GA, session.type é OBRIGATÓRIO em TODOS os session.update!
             tools_config = {
                 "type": "session.update",
                 "session": {
+                    "type": "realtime",  # OBRIGATÓRIO em cada session.update para GA!
                     "tools": tools,
                     "tool_choice": "auto",
                 }
