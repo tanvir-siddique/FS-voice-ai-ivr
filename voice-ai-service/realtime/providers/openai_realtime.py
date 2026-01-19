@@ -9,9 +9,19 @@ OpenAI Realtime API Provider.
 - SDK: https://github.com/openai/openai-python (src/openai/resources/beta/realtime/)
 
 === MODELOS DISPONÍVEIS (Jan/2026) ===
-- gpt-realtime (GA - RECOMENDADO)
-- gpt-realtime-mini (GA - mais barato, menor latência)
-- gpt-4o-realtime-preview (DEPRECATED - não usar)
+GA (General Availability) - Recomendados:
+- gpt-realtime (melhor qualidade, 32k ctx)
+- gpt-realtime-mini (menor custo, 32k ctx)
+
+Preview (com snapshots, formato legado):
+- gpt-4o-realtime-preview (alias latest)
+- gpt-4o-realtime-preview-2025-06-03
+- gpt-4o-realtime-preview-2024-12-17
+- gpt-4o-realtime-preview-2024-10-01
+- gpt-4o-mini-realtime-preview (16k ctx)
+- gpt-4o-mini-realtime-preview-2024-12-17
+
+IMPORTANTE: Modelos GA e Preview usam formatos de session.update DIFERENTES!
 
 === CONFIGURAÇÕES DE ÁUDIO ===
 - Input: 24kHz PCM16 mono (audio/pcm)
@@ -72,27 +82,21 @@ Migrado para API GA em Jan/2026.
 - Custo ~20% menor que versão preview
 Ref: openai.com/blog/introducing-gpt-realtime
 
-=== SESSION.UPDATE FORMAT (GA - Context7 Jan/2026) ===
-Formato correto para API GA (General Availability):
+=== SESSION.UPDATE FORMAT (Context7 Jan/2026) ===
 
+FORMATO GA (gpt-realtime, gpt-realtime-mini):
 {
     "type": "session.update",
     "session": {
-        "type": "realtime",
-        "model": "gpt-realtime",
+        "type": "realtime",  // OBRIGATÓRIO
         "output_modalities": ["audio"],
-        "instructions": "system prompt",
+        "instructions": "...",
         "tools": [...],
         "tool_choice": "auto",
-        "turn_detection": {
-            "type": "semantic_vad",
-            "eagerness": "medium",
-            "create_response": true,
-            "interrupt_response": true
-        },
         "audio": {
             "input": {
-                "format": {"type": "audio/pcm", "rate": 24000}
+                "format": {"type": "audio/pcm", "rate": 24000},
+                "turn_detection": {"type": "semantic_vad", ...}
             },
             "output": {
                 "format": {"type": "audio/pcm"},
@@ -102,9 +106,25 @@ Formato correto para API GA (General Availability):
     }
 }
 
-NOTA: turn_detection pode estar em:
-- session.turn_detection (formato simplificado - RECOMENDADO)
-- session.audio.input.turn_detection (formato GA aninhado)
+FORMATO PREVIEW (gpt-4o-realtime-preview, etc.):
+{
+    "type": "session.update",
+    "session": {
+        // SEM "type"!
+        "modalities": ["text", "audio"],
+        "instructions": "...",
+        "voice": "alloy",
+        "input_audio_format": "pcm16",
+        "output_audio_format": "pcm16",
+        "turn_detection": {"type": "semantic_vad", ...},
+        "tools": [...],
+        "tool_choice": "auto"
+    }
+}
+
+NOTA sobre turn_detection:
+- GA: audio.input.turn_detection (dentro do objeto audio)
+- Preview: session.turn_detection (nível raiz da session)
 
 Ref: Context7 /websites/platform_openai - session.update, realtime-vad
 """
@@ -278,24 +298,38 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "max_duration_minutes": self._max_session_duration_seconds // 60,
         })
     
+    def _is_ga_model(self) -> bool:
+        """
+        Verifica se o modelo é GA (General Availability) ou Preview.
+        
+        GA models: gpt-realtime, gpt-realtime-mini
+        Preview models: gpt-4o-realtime-preview, gpt-4o-mini-realtime-preview, etc.
+        
+        Returns:
+            True se for modelo GA, False se for preview.
+        """
+        return "preview" not in self.model.lower()
+    
     async def configure(self) -> None:
         """
         Configura sessão com prompt, voz, VAD, tools.
         
-        FORMATO GA (gpt-realtime) - Context7 verificado Jan/2026:
+        DIFERENÇA ENTRE FORMATOS (Context7 Jan/2026):
+        
+        === FORMATO GA (gpt-realtime, gpt-realtime-mini) ===
         {
             "type": "session.update",
             "session": {
-                "type": "realtime",
+                "type": "realtime",  // OBRIGATÓRIO para GA
                 "model": "gpt-realtime",
                 "output_modalities": ["audio"],
                 "instructions": "system prompt",
                 "tools": [...],
                 "tool_choice": "auto",
-                "turn_detection": {...},  // VAD no nível session (formato simplificado)
                 "audio": {
                     "input": {
-                        "format": {"type": "audio/pcm", "rate": 24000}
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "turn_detection": {...}  // VAD em audio.input
                     },
                     "output": {
                         "format": {"type": "audio/pcm"},
@@ -305,13 +339,23 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             }
         }
         
-        NOTA: A documentação mostra turn_detection em DOIS lugares:
-        - session.turn_detection (formato simplificado - usado para VAD)
-        - session.audio.input.turn_detection (formato GA completo)
+        === FORMATO PREVIEW (gpt-4o-realtime-preview) ===
+        {
+            "type": "session.update",
+            "session": {
+                // SEM "type" - NÃO SUPORTADO EM PREVIEW!
+                "modalities": ["text", "audio"],  // "modalities", não "output_modalities"
+                "instructions": "system prompt",
+                "voice": "alloy",  // Voice no nível raiz, não em audio.output
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "turn_detection": {...},  // VAD no nível raiz
+                "tools": [...],
+                "tool_choice": "auto"
+            }
+        }
         
-        Usamos session.turn_detection para compatibilidade máxima.
-        
-        Ref: Context7 /websites/platform_openai - session.update, realtime-vad
+        Ref: Context7 /websites/platform_openai - session.update
         """
         if not self._ws:
             raise RuntimeError("Not connected")
@@ -322,70 +366,96 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         # Construir VAD config
         vad_config = self._build_vad_config()
         
-        # === FORMATO GA (gpt-realtime) - Context7 verificado Jan/2026 ===
-        # NOTA: turn_detection no nível session conforme docs de VAD
-        session_config = {
-            "type": "session.update",
-            "session": {
-                # Tipo de sessão: "realtime" para conversação por voz (speech-to-speech)
-                "type": "realtime",
-                
-                # Modelo (opcional, já especificado na URL de conexão)
-                "model": self.model,
-                
-                # Output modalities (Context7: usar output_modalities, não modalities)
-                "output_modalities": ["audio"],
-                
-                # System prompt
-                "instructions": self.config.system_prompt or "",
-                
-                # Tools (function calling)
-                "tools": self.config.tools or DEFAULT_TOOLS,
-                "tool_choice": "auto",
-                
-                # Configuração de áudio (formato GA)
-                "audio": {
-                    "input": {
-                        # Formato de áudio de entrada (Context7: objeto com rate obrigatório)
-                        "format": {
-                            "type": "audio/pcm",
-                            "rate": 24000
-                        },
-                    },
-                    "output": {
-                        # Formato de áudio de saída (rate é opcional)
-                        "format": {
-                            "type": "audio/pcm",
-                        },
-                        # Voz do assistente
-                        "voice": voice,
-                    },
-                },
-            }
-        }
+        # Detectar formato baseado no modelo
+        is_ga = self._is_ga_model()
         
-        # VAD - Turn Detection
-        # Context7 docs mostram turn_detection em session.turn_detection (formato simplificado)
-        # Ref: https://platform.openai.com/docs/guides/realtime-vad
-        if vad_config is not None:
-            session_config["session"]["turn_detection"] = vad_config
-        # Se vad_config é None, não incluímos turn_detection = push-to-talk
+        if is_ga:
+            # === FORMATO GA (gpt-realtime, gpt-realtime-mini) ===
+            session_config = {
+                "type": "session.update",
+                "session": {
+                    # Tipo de sessão: OBRIGATÓRIO para GA
+                    "type": "realtime",
+                    
+                    # Output modalities (Context7: usar output_modalities para GA)
+                    "output_modalities": ["audio"],
+                    
+                    # System prompt
+                    "instructions": self.config.system_prompt or "",
+                    
+                    # Tools (function calling)
+                    "tools": self.config.tools or DEFAULT_TOOLS,
+                    "tool_choice": "auto",
+                    
+                    # Configuração de áudio (formato GA estruturado)
+                    "audio": {
+                        "input": {
+                            "format": {
+                                "type": "audio/pcm",
+                                "rate": 24000
+                            },
+                        },
+                        "output": {
+                            "format": {
+                                "type": "audio/pcm",
+                            },
+                            "voice": voice,
+                        },
+                    },
+                }
+            }
+            
+            # VAD para GA: vai em audio.input.turn_detection
+            if vad_config is not None:
+                session_config["session"]["audio"]["input"]["turn_detection"] = vad_config
+                
+        else:
+            # === FORMATO PREVIEW (gpt-4o-realtime-preview, etc.) ===
+            session_config = {
+                "type": "session.update",
+                "session": {
+                    # NÃO incluir "type" - preview não suporta!
+                    
+                    # Modalities (formato preview usa "modalities", não "output_modalities")
+                    "modalities": ["text", "audio"],
+                    
+                    # System prompt
+                    "instructions": self.config.system_prompt or "",
+                    
+                    # Voice no nível raiz (formato preview)
+                    "voice": voice,
+                    
+                    # Formato de áudio (strings simples, não objetos)
+                    "input_audio_format": "pcm16",
+                    "output_audio_format": "pcm16",
+                    
+                    # Tools (function calling)
+                    "tools": self.config.tools or DEFAULT_TOOLS,
+                    "tool_choice": "auto",
+                }
+            }
+            
+            # VAD para preview: vai no nível raiz da session
+            if vad_config is not None:
+                session_config["session"]["turn_detection"] = vad_config
         
         vad_type = vad_config.get("type") if vad_config else "disabled"
         vad_eagerness = vad_config.get("eagerness") if vad_config else None
+        format_label = "GA" if is_ga else "PREVIEW"
         
-        logger.info(f"Sending session.update (GA format) - voice={voice}, vad={vad_type}", extra={
+        logger.info(f"Sending session.update ({format_label} format) - voice={voice}, vad={vad_type}", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_instructions": bool(self.config.system_prompt),
             "voice": voice,
             "vad_type": vad_type,
             "vad_eagerness": vad_eagerness,
             "model": self.model,
+            "is_ga_model": is_ga,
         })
         
         try:
             await self._ws.send(json.dumps(session_config))
-            logger.info("session.update sent successfully (GA format)")
+            logger.info(f"session.update sent successfully ({format_label} format)")
         except Exception as e:
             logger.error(f"Failed to send session.update: {e}")
             raise
