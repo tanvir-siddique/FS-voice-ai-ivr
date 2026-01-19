@@ -195,11 +195,15 @@ public:
             return status;
         }
         
-        /* Get tech_pvt for playback buffer access */
+        /* Get tech_pvt for playback buffer access 
+         * The channel stores the media bug, not tech_pvt directly.
+         * We need to get the bug first, then extract user_data.
+         */
         switch_channel_t *channel = switch_core_session_get_channel(session);
-        private_t *tech_pvt = (private_t *)switch_channel_get_private(channel, MY_BUG_NAME);
-        if (!tech_pvt) {
-            tech_pvt = (private_t *)switch_channel_get_private(channel, "audio_stream");
+        switch_media_bug_t *bug = (switch_media_bug_t *)switch_channel_get_private(channel, MY_BUG_NAME);
+        private_t *tech_pvt = NULL;
+        if (bug) {
+            tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
         }
         
         const char* jsType = cJSON_GetObjectCstr(json, "type");
