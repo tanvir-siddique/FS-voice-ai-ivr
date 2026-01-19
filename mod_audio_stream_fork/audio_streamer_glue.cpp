@@ -195,7 +195,32 @@ public:
             return status;
         }
         const char* jsType = cJSON_GetObjectCstr(json, "type");
-        if(jsType && strcmp(jsType, "streamAudio") == 0) {
+        
+        // NETPLAY: Tratar flushAudio - iniciar playback do buffer acumulado
+        if(jsType && strcmp(jsType, "flushAudio") == 0) {
+            if (!m_currentResponseFile.empty() && m_responseInProgress) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
+                    "(%s) 🔊 Flush playback: %s\n", m_sessionId.c_str(), m_currentResponseFile.c_str());
+                
+                switch_channel_t *channel = switch_core_session_get_channel(session);
+                if (channel && switch_channel_ready(channel)) {
+                    char broadcast_cmd[512];
+                    switch_snprintf(broadcast_cmd, sizeof(broadcast_cmd), "%s playback::%s aleg", 
+                        m_sessionId.c_str(), m_currentResponseFile.c_str());
+                    
+                    switch_stream_handle_t stream = { 0 };
+                    SWITCH_STANDARD_STREAM(stream);
+                    switch_api_execute("uuid_broadcast", broadcast_cmd, session, &stream);
+                    switch_safe_free(stream.data);
+                }
+                
+                // Reset para próxima resposta
+                m_currentResponseFile.clear();
+                m_responseInProgress = false;
+            }
+            status = SWITCH_TRUE;
+        }
+        else if(jsType && strcmp(jsType, "streamAudio") == 0) {
             cJSON* jsonData = cJSON_GetObjectItem(json, "data");
             if(jsonData) {
                 cJSON* jsonFile = nullptr;
@@ -208,8 +233,6 @@ public:
                     sampleRate = jsonSampleRate && jsonSampleRate->valueint ? jsonSampleRate->valueint : 0;
                     
                     // NETPLAY FIX: Usar .raw que é reconhecido por padrão pelo mod_sndfile
-                    // FreeSWITCH usa o sample rate do canal (8kHz para G.711)
-                    // O áudio é L16 PCM (16-bit signed linear)
                     if (sampleRate > 0) {
                         fileType = ".raw";
                     } else {
@@ -227,7 +250,6 @@ public:
                 }
 
                 if(jsonAudio && jsonAudio->valuestring != nullptr && !fileType.empty()) {
-                    char filePath[256];
                     std::string rawAudio;
                     try {
                         rawAudio = base64_decode(jsonAudio->valuestring);
@@ -237,13 +259,37 @@ public:
                         cJSON_Delete(jsonAudio); cJSON_Delete(json);
                         return status;
                     }
-                    switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
-                                    SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                    std::ofstream fstream(filePath, std::ofstream::binary);
-                    fstream << rawAudio;
-                    fstream.close();
-                    m_Files.insert(filePath);
-                    jsonFile = cJSON_CreateString(filePath);
+                    
+                    // NETPLAY: Usar arquivo único por resposta (append mode)
+                    // Criar novo arquivo apenas se não tiver um em andamento
+                    if (m_currentResponseFile.empty() || !m_responseInProgress) {
+                        char filePath[256];
+                        switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
+                                        SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
+                        m_currentResponseFile = filePath;
+                        m_responseInProgress = true;
+                        m_Files.insert(filePath);
+                        
+                        // Criar arquivo novo (truncate)
+                        std::ofstream fstream(filePath, std::ofstream::binary | std::ofstream::trunc);
+                        fstream << rawAudio;
+                        fstream.close();
+                        
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+                            "(%s) 📝 New response file: %s (%zu bytes)\n", 
+                            m_sessionId.c_str(), filePath, rawAudio.size());
+                    } else {
+                        // Append ao arquivo existente
+                        std::ofstream fstream(m_currentResponseFile.c_str(), std::ofstream::binary | std::ofstream::app);
+                        fstream << rawAudio;
+                        fstream.close();
+                        
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+                            "(%s) 📝 Appending to: %s (+%zu bytes)\n", 
+                            m_sessionId.c_str(), m_currentResponseFile.c_str(), rawAudio.size());
+                    }
+                    
+                    jsonFile = cJSON_CreateString(m_currentResponseFile.c_str());
                     cJSON_AddItemToObject(jsonData, "file", jsonFile);
                 }
 
@@ -254,31 +300,8 @@ public:
                     free(jsonString);
                     status = SWITCH_TRUE;
                     
-                    // NETPLAY FORK: Auto-playback do arquivo recebido (assíncrono)
-                    // Arquivos .raw são L16 PCM (16-bit signed linear)
-                    // FreeSWITCH usa sample rate do canal (8kHz para G.711)
-                    const char* audioFilePath = jsonFile->valuestring;
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
-                        "(%s) 🔊 Auto-playback: %s\n", m_sessionId.c_str(), audioFilePath);
-                    
-                    switch_channel_t *channel = switch_core_session_get_channel(session);
-                    if (channel && switch_channel_ready(channel)) {
-                        // Usar uuid_broadcast com formato playback::<path>
-                        // aleg = reproduz no A-leg (caller)
-                        char broadcast_cmd[512];
-                        switch_snprintf(broadcast_cmd, sizeof(broadcast_cmd), "%s playback::%s aleg", 
-                            m_sessionId.c_str(), audioFilePath);
-                        
-                        switch_stream_handle_t stream = { 0 };
-                        SWITCH_STANDARD_STREAM(stream);
-                        switch_status_t api_status = switch_api_execute("uuid_broadcast", broadcast_cmd, session, &stream);
-                        
-                        if (api_status != SWITCH_STATUS_SUCCESS) {
-                            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, 
-                                "(%s) uuid_broadcast failed for: %s\n", m_sessionId.c_str(), audioFilePath);
-                        }
-                        switch_safe_free(stream.data);
-                    }
+                    // NETPLAY: NÃO fazer auto-playback aqui
+                    // O playback será feito quando receber "flushAudio"
                 }
                 if (jsonAudio)
                     cJSON_Delete(jsonAudio);
@@ -339,6 +362,10 @@ private:
     int m_playFile;
     std::unordered_set<std::string> m_Files;
     std::atomic<bool> m_cleanedUp{false};
+    
+    // NETPLAY: Buffer único para resposta completa
+    std::string m_currentResponseFile;  // Arquivo atual sendo acumulado
+    bool m_responseInProgress{false};   // Flag de resposta em andamento
 };
 
 

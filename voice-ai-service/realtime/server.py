@@ -995,10 +995,20 @@ class RealtimeServer:
                     # Tratar sentinela FLUSH
                     if isinstance(item[0], str) and item[0] == "FLUSH":
                         flush_gen = item[1]
-                        if flush_gen == playback_generation and streamaudio_buffer:
-                            logger.debug(f"Flushing streamaudio buffer: {len(streamaudio_buffer)}B", extra={"call_uuid": call_uuid})
-                            await _send_streamaudio_frame(bytes(streamaudio_buffer))
-                            streamaudio_buffer.clear()
+                        if flush_gen == playback_generation:
+                            # Enviar buffer restante
+                            if streamaudio_buffer:
+                                logger.debug(f"Flushing streamaudio buffer: {len(streamaudio_buffer)}B", extra={"call_uuid": call_uuid})
+                                await _send_streamaudio_frame(bytes(streamaudio_buffer))
+                                streamaudio_buffer.clear()
+                            
+                            # Enviar sinal flushAudio para mod_audio_stream iniciar playback
+                            try:
+                                flush_msg = json.dumps({"type": "flushAudio"})
+                                await websocket.send(flush_msg)
+                                logger.info("FlushAudio sent to FreeSWITCH", extra={"call_uuid": call_uuid})
+                            except Exception as e:
+                                logger.warning(f"Failed to send flushAudio: {e}", extra={"call_uuid": call_uuid})
                         continue
                     
                     generation, chunk = item
@@ -1208,13 +1218,13 @@ class RealtimeServer:
 
         async def flush_audio() -> None:
             """
-            Flush: envia sentinela para fazer flush do buffer streamaudio.
+            Flush: envia sentinela FLUSH para o loop de áudio.
+            O loop envia buffer restante + flushAudio para FreeSWITCH.
             Chamado quando a resposta do AI termina (AUDIO_DONE).
             """
             if sender_task is not None:
-                # Envia sentinela "FLUSH" para forçar envio do buffer restante
                 await audio_out_queue.put(("FLUSH", playback_generation))
-                logger.debug("Flush signal sent to audio sender", extra={"call_uuid": call_uuid})
+                logger.debug("Flush signal queued", extra={"call_uuid": call_uuid})
         
         # Criar sessão via manager
         manager = get_session_manager()
