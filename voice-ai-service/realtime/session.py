@@ -352,6 +352,7 @@ class RealtimeSessionConfig:
     # Remove eco do agente capturado pelo microfone do caller
     aec_enabled: bool = True  # Habilitar AEC por padrão
     aec_filter_length_ms: int = 128  # Quanto eco pode remover (100-200ms típico)
+    aec_echo_delay_ms: int = 200  # Delay do echo (tempo entre speaker e mic capturar eco)
     input_min_rms: int = 300
     input_max_gain: float = 3.0
 
@@ -490,6 +491,7 @@ class RealtimeSession:
                 sample_rate=config.freeswitch_sample_rate,
                 frame_size_ms=20,  # Mesmo que nossos chunks
                 filter_length_ms=config.aec_filter_length_ms,
+                echo_delay_ms=config.aec_echo_delay_ms,  # Delay típico do echo (100-300ms)
                 enabled=True
             )
     

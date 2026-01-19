@@ -45,6 +45,14 @@ class EchoCancellerWrapper:
     
     Como o speaker é enviado antes do mic capturar o eco, mantemos um buffer
     circular do speaker para sincronizar com o delay acústico.
+    
+    IMPORTANTE: O echo delay típico em telefonia é 100-300ms:
+    - FreeSWITCH → RTP → Telefone: ~50-100ms
+    - Telefone speaker → mic: ~10-20ms  
+    - Telefone → RTP → FreeSWITCH: ~50-100ms
+    
+    Por isso, NÃO consumimos o speaker buffer imediatamente. Em vez disso,
+    mantemos os frames por um tempo (echo_delay_frames) antes de usá-los.
     """
     
     def __init__(
@@ -52,6 +60,7 @@ class EchoCancellerWrapper:
         sample_rate: int = 16000,
         frame_size_ms: int = 20,
         filter_length_ms: int = 128,
+        echo_delay_ms: int = 200,  # Delay típico do echo
         enabled: bool = True
     ):
         """
@@ -61,21 +70,29 @@ class EchoCancellerWrapper:
             sample_rate: Taxa de amostragem (Hz)
             frame_size_ms: Tamanho do frame em ms (deve coincidir com chunks de áudio)
             filter_length_ms: Tamanho do filtro adaptativo em ms (quanto eco pode remover)
+            echo_delay_ms: Delay estimado do echo em ms (100-300ms típico)
             enabled: Se True, processa AEC. Se False, retorna áudio inalterado.
         """
         self.sample_rate = sample_rate
         self.frame_size_ms = frame_size_ms
         self.filter_length_ms = filter_length_ms
+        self.echo_delay_ms = echo_delay_ms
         self.enabled = enabled and SPEEXDSP_AVAILABLE
         
         # Calcular tamanhos em samples
-        self.frame_size = int(sample_rate * frame_size_ms / 1000)  # 320 @ 16kHz, 20ms
-        self.filter_length = int(sample_rate * filter_length_ms / 1000)  # 2048 @ 16kHz, 128ms
+        self.frame_size = int(sample_rate * frame_size_ms / 1000)  # 160 @ 8kHz, 20ms
+        self.filter_length = int(sample_rate * filter_length_ms / 1000)  # 1024 @ 8kHz, 128ms
+        
+        # Calcular delay em frames
+        self.echo_delay_frames = int(echo_delay_ms / frame_size_ms)  # 10 frames @ 200ms
         
         # Buffer circular para speaker (referência)
-        # Guarda alguns frames para compensar delay acústico
-        self.max_speaker_frames = 10  # ~200ms de buffer
+        # Tamanho: delay + margem para variação de timing
+        self.max_speaker_frames = self.echo_delay_frames + 20  # ~600ms de buffer
         self.speaker_buffer: deque = deque(maxlen=self.max_speaker_frames)
+        
+        # Buffer de delay - mantém frames até o echo aparecer
+        self.delay_buffer: deque = deque(maxlen=self.max_speaker_frames)
         
         # Inicializar Speex AEC se disponível
         self._ec: Optional[EchoCanceller] = None
@@ -97,7 +114,10 @@ class EchoCancellerWrapper:
     
     def add_speaker_frame(self, audio_bytes: bytes) -> None:
         """
-        Adiciona áudio do speaker ao buffer de referência.
+        Adiciona áudio do speaker ao delay buffer.
+        
+        Os frames são mantidos no delay_buffer por echo_delay_frames antes
+        de serem movidos para o speaker_buffer (referência para AEC).
         
         Chamar sempre que enviar áudio para o FreeSWITCH (resposta do agente).
         
@@ -114,7 +134,8 @@ class EchoCancellerWrapper:
         
         while offset + frame_bytes <= len(audio_bytes):
             frame = audio_bytes[offset:offset + frame_bytes]
-            self.speaker_buffer.append(frame)
+            # Adicionar ao delay_buffer primeiro
+            self.delay_buffer.append(frame)
             offset += frame_bytes
             frames_added += 1
         
@@ -123,14 +144,22 @@ class EchoCancellerWrapper:
             # Pad com silêncio para completar frame
             remaining = audio_bytes[offset:]
             padding = bytes(frame_bytes - len(remaining))
-            self.speaker_buffer.append(remaining + padding)
+            self.delay_buffer.append(remaining + padding)
             frames_added += 1
         
+        # Mover frames do delay_buffer para speaker_buffer após o delay
+        # Isso sincroniza o speaker com o momento que o echo aparece no mic
+        while len(self.delay_buffer) > self.echo_delay_frames:
+            delayed_frame = self.delay_buffer.popleft()
+            self.speaker_buffer.append(delayed_frame)
+        
         # Log periódico
-        if frames_added > 0 and (self.frames_processed % 50 == 0 or self.frames_processed < 5):
-            logger.debug(
-                f"🔊 [AEC] speaker_frame: +{frames_added} frames, "
-                f"buffer={len(self.speaker_buffer)}/{self.max_speaker_frames}"
+        if frames_added > 0 and (self.frames_processed % 250 == 0 or self.frames_processed < 3):
+            logger.info(
+                f"🔊 [AEC] speaker: +{frames_added} frames, "
+                f"delay_buf={len(self.delay_buffer)}, "
+                f"speaker_buf={len(self.speaker_buffer)}, "
+                f"echo_delay={self.echo_delay_ms}ms"
             )
     
     def process(self, mic_audio: bytes) -> bytes:
@@ -202,6 +231,7 @@ class EchoCancellerWrapper:
     def reset(self) -> None:
         """Reseta o AEC e buffers."""
         self.speaker_buffer.clear()
+        self.delay_buffer.clear()
         if self._ec:
             try:
                 # Recriar o echo canceller (sem keyword arguments)
