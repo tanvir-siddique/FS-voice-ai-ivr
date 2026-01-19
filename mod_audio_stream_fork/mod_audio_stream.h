@@ -31,15 +31,16 @@ struct private_data {
     char ws_uri[MAX_WS_URI];
     int sampling;
     int channels;
+    /* Bitfields grouped together for proper alignment */
     int audio_paused:1;
     int close_requested:1;
     int cleanup_started:1;
+    int codec_initialized:1;    /* Flag indicating if G.711 codec is initialized */
     char initialMetadata[8192];
     switch_buffer_t *sbuffer;
     int rtp_packets;
     int audio_format;           /* AUDIO_FORMAT_L16, AUDIO_FORMAT_PCMU, AUDIO_FORMAT_PCMA */
     switch_codec_t write_codec; /* Codec for encoding L16 to PCMU/PCMA */
-    int codec_initialized:1;    /* Flag indicating if codec is initialized */
 };
 
 typedef struct private_data private_t;

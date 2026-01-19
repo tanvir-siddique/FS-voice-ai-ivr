@@ -375,6 +375,15 @@ namespace {
         /* Initialize G.711 codec if requested */
         if (audio_format == AUDIO_FORMAT_PCMU || audio_format == AUDIO_FORMAT_PCMA) {
             const char *codec_name = (audio_format == AUDIO_FORMAT_PCMU) ? "PCMU" : "PCMA";
+            
+            /* Defensive check: G.711 requires 8kHz sample rate */
+            if (desiredSampling != 8000) {
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                    "(%s) G.711 (%s) requires 8kHz sample rate, got %d Hz\n", 
+                    tech_pvt->sessionId, codec_name, desiredSampling);
+                return SWITCH_STATUS_FALSE;
+            }
+            
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
                 "(%s) Initializing %s codec for G.711 encoding\n", tech_pvt->sessionId, codec_name);
             
@@ -553,15 +562,16 @@ extern "C" {
                                         char* metadata,
                                         void **ppUserData)
     {
-        int deflate, heart_beat;
+        int deflate = 0;
+        int heart_beat = 0;
         bool suppressLog = false;
-        const char* buffer_size;
-        const char* extra_headers;
+        const char* buffer_size = NULL;
+        const char* extra_headers = NULL;
         int rtp_packets = 1; //20ms burst
         bool no_reconnect = false;
-        const char* tls_cafile = NULL;;
-        const char* tls_keyfile = NULL;;
-        const char* tls_certfile = NULL;;
+        const char* tls_cafile = NULL;
+        const char* tls_keyfile = NULL;
+        const char* tls_certfile = NULL;
         bool tls_disable_hostname_validation = false;
 
         switch_channel_t *channel = switch_core_session_get_channel(session);
@@ -625,9 +635,30 @@ extern "C" {
         return SWITCH_STATUS_SUCCESS;
     }
 
-    /* Helper function to encode L16 PCM to G.711 */
+    /* Helper function to encode L16 PCM to G.711 
+     * 
+     * Note: G.711 requires 8kHz audio. If input is not 8kHz, encoding will fail.
+     * The caller must ensure proper sample rate before calling this function.
+     * 
+     * L16 @ 8kHz: 160 samples = 320 bytes per 20ms frame
+     * G.711 @ 8kHz: 160 samples = 160 bytes per 20ms frame (1 byte per sample)
+     */
     static size_t encode_g711(private_t *tech_pvt, const uint8_t *pcm_data, size_t pcm_len, uint8_t *g711_data, size_t g711_buflen) {
-        if (!tech_pvt->codec_initialized) {
+        if (!tech_pvt || !tech_pvt->codec_initialized) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, 
+                "encode_g711: codec not initialized\n");
+            return 0;
+        }
+        
+        if (!pcm_data || pcm_len == 0) {
+            return 0;
+        }
+        
+        /* Validate buffer size: G.711 output is half the size of L16 input */
+        size_t expected_output = pcm_len / 2;
+        if (g711_buflen < expected_output) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, 
+                "encode_g711: output buffer too small (%zu < %zu)\n", g711_buflen, expected_output);
             return 0;
         }
         
@@ -640,7 +671,7 @@ extern "C" {
             NULL,
             (void *)pcm_data,
             (uint32_t)pcm_len,
-            8000,
+            8000,  /* G.711 is always 8kHz */
             g711_data,
             &encoded_len,
             &encoded_rate,
@@ -648,6 +679,8 @@ extern "C" {
         );
         
         if (status != SWITCH_STATUS_SUCCESS) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, 
+                "encode_g711: switch_core_codec_encode failed (pcm_len=%zu)\n", pcm_len);
             return 0;
         }
         
