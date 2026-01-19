@@ -86,16 +86,21 @@ END_CALL_FUNCTION_DEFINITION = {
     "type": "function",
     "name": "end_call",
     "description": (
-        "Encerra a chamada telefônica. "
-        "Use quando a conversa chegou ao fim, o cliente se despediu, "
-        "ou quando todas as dúvidas foram resolvidas e você já deu tchau."
+        "Encerra a chamada telefônica IMEDIATAMENTE. "
+        "VOCÊ deve chamar esta função PROATIVAMENTE após: "
+        "1) Resolver o assunto do cliente e se despedir. "
+        "2) Anotar um recado e agradecer. "
+        "3) O cliente dizer que não precisa de mais nada. "
+        "4) Qualquer despedida como 'obrigado, tenha um bom dia'. "
+        "IMPORTANTE: Não espere o cliente dizer 'tchau' - VOCÊ encerra a ligação "
+        "assim que terminar de se despedir. Seja proativo."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "reason": {
                 "type": "string",
-                "description": "Motivo do encerramento: 'cliente_despediu', 'atendimento_concluido', 'timeout'"
+                "description": "Motivo: 'atendimento_concluido', 'recado_anotado', 'cliente_nao_quer_recado', 'cliente_despediu'"
             }
         },
         "required": []
@@ -2903,16 +2908,25 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             destination_name = result.destination.name if result.destination else "o ramal"
             
             # Construir mensagem clara para o OpenAI falar
-            # IMPORTANTE: Instruir o agente a encerrar a ligação se cliente não quiser mais nada
+            # IMPORTANTE: Instruir o agente a encerrar a ligação proativamente
             openai_instruction = (
                 f"[SISTEMA] A transferência para {destination_name} não foi possível. "
                 f"Motivo: {message}. "
-                "INSTRUÇÕES OBRIGATÓRIAS: "
+                "INSTRUÇÕES OBRIGATÓRIAS - SIGA À RISCA: "
                 "1. Informe o cliente de forma clara e empática que não foi possível transferir. "
-                "2. Pergunte se deseja deixar um recado ou se prefere que liguem de volta. "
-                "3. Se o cliente disser que NÃO quer deixar recado e NÃO precisa de mais nada, "
-                "agradeça, despeça-se educadamente e chame a função end_call para encerrar. "
-                "4. Não fique esperando - se o cliente indicar que não quer mais nada, ENCERRE."
+                "2. Pergunte: 'Gostaria de deixar um recado para retornarem a ligação?' "
+                "3. SE O CLIENTE QUISER DEIXAR RECADO: "
+                "   - Peça o recado e AGUARDE o cliente falar. "
+                "   - Quando o cliente PARAR de falar por 2-3 segundos, ou disser algo como "
+                "     'é isso', 'só isso', 'pronto', 'ok', considere o recado FINALIZADO. "
+                "   - Repita um resumo breve do recado para confirmar. "
+                "   - Diga 'Recado anotado! Obrigado pelo contato, tenha um bom dia!' "
+                "   - IMEDIATAMENTE chame a função end_call. NÃO espere resposta. "
+                "4. SE O CLIENTE NÃO QUISER RECADO ou disser 'não precisa': "
+                "   - Diga 'Tudo bem! Obrigado pelo contato, tenha um bom dia!' "
+                "   - IMEDIATAMENTE chame a função end_call. NÃO espere resposta. "
+                "5. REGRA DE OURO: Após agradecer e se despedir, SEMPRE chame end_call. "
+                "   Nunca fique esperando o cliente dizer 'tchau'. VOCÊ encerra a ligação."
             )
             
             logger.info(

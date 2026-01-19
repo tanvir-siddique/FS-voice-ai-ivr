@@ -761,13 +761,17 @@ def build_transfer_tools_schema() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "end_call",
-                "description": "Encerra a chamada após resolver o assunto do cliente.",
+                "description": (
+                    "Encerra a chamada IMEDIATAMENTE. VOCÊ deve chamar PROATIVAMENTE após: "
+                    "1) Anotar recado e agradecer. 2) Cliente não quiser recado. "
+                    "3) Qualquer despedida sua. NÃO espere cliente dizer tchau."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "reason": {
                             "type": "string",
-                            "description": "Motivo do encerramento (ex: 'assunto resolvido', 'cliente desligou')"
+                            "description": "Motivo: 'recado_anotado', 'atendimento_concluido', 'cliente_nao_quer_recado'"
                         }
                     },
                     "required": []

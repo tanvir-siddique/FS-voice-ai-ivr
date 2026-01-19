@@ -198,13 +198,17 @@ DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "name": "end_call",
-        "description": "Encerra a chamada telefônica. Use quando o cliente se despedir (tchau, adeus, até logo) ou quando a conversa terminar naturalmente.",
+        "description": (
+            "Encerra a chamada IMEDIATAMENTE. VOCÊ deve chamar PROATIVAMENTE após: "
+            "1) Anotar recado e agradecer. 2) Cliente dizer que não precisa de mais nada. "
+            "3) Qualquer despedida sua. NÃO espere o cliente dizer tchau - VOCÊ encerra."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string",
-                    "description": "Motivo do encerramento (ex: despedida, cliente satisfeito)"
+                    "description": "Motivo: 'recado_anotado', 'atendimento_concluido', 'cliente_nao_quer_recado'"
                 }
             },
             "required": []
