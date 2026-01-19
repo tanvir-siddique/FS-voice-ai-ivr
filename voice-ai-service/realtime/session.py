@@ -2884,7 +2884,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # Adicionar margem de 20% para latência de rede + 300ms buffer
             if remaining_time > 0:
                 wait_playback = remaining_time * 1.2 + 0.3
-                wait_playback = max(0.3, min(wait_playback, 5.0))  # Entre 300ms e 5s
+                wait_playback = max(0.5, min(wait_playback, 6.0))  # Entre 500ms e 6s
                 
                 logger.info(
                     f"⏳ [DELAYED_HANDOFF] Audio: {audio_duration:.1f}s total, "
