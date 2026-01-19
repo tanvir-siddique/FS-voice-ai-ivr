@@ -1475,9 +1475,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
             return {
                 "status": "success",
-                "message": f"Recado de {caller_name} anotado com sucesso. "
-                           "ENCERRE AGORA: Diga brevemente 'Recado anotado! Obrigado, tenha um bom dia!' "
-                           "A chamada será encerrada automaticamente em seguida."
+                "message": "Recado anotado. Diga: 'Anotado! Obrigado, bom dia!' e encerre."
             }
         
         elif name == "get_business_info":
@@ -3050,11 +3048,9 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # Construir mensagem concisa para o OpenAI falar
             # IMPORTANTE: Instruções curtas são seguidas melhor pelo LLM
             openai_instruction = (
-                f"[SISTEMA] Transferência para {destination_name} falhou: {message}. "
-                "AÇÃO: Informe o cliente e pergunte se quer deixar recado. "
-                "Se SIM: colete o recado, use take_message, encerre com end_call. "
-                "Se NÃO: agradeça e encerre com end_call. "
-                "REGRA: Sempre chame end_call ao final, não espere o cliente."
+                f"[SISTEMA] {destination_name} não atendeu. "
+                "Diga: 'Não consegui contato. Quer deixar recado?' "
+                "SIM: anote e use take_message. NÃO: agradeça. Depois: end_call."
             )
             
             logger.info(
