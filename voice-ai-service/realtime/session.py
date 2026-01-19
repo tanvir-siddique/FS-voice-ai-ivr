@@ -2804,7 +2804,7 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             extra={
                 "call_uuid": self.call_uuid,
                 "status": result.status.value if result.status else "None",
-                "message": result.message,
+                "result_message": result.message,
                 "hangup_cause": result.hangup_cause,
                 "should_offer_callback": result.should_offer_callback,
                 "destination": result.destination.name if result.destination else None,
@@ -2878,10 +2878,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             destination_name = result.destination.name if result.destination else "o ramal"
             
             # Construir mensagem clara para o OpenAI falar
+            # IMPORTANTE: Instruir o agente a encerrar a ligação se cliente não quiser mais nada
             openai_instruction = (
                 f"[SISTEMA] A transferência para {destination_name} não foi possível. "
                 f"Motivo: {message}. "
-                "Informe o cliente de forma clara e empática, e pergunte se deseja deixar um recado ou tentar novamente mais tarde."
+                "INSTRUÇÕES OBRIGATÓRIAS: "
+                "1. Informe o cliente de forma clara e empática que não foi possível transferir. "
+                "2. Pergunte se deseja deixar um recado ou se prefere que liguem de volta. "
+                "3. Se o cliente disser que NÃO quer deixar recado e NÃO precisa de mais nada, "
+                "agradeça, despeça-se educadamente e chame a função end_call para encerrar. "
+                "4. Não fique esperando - se o cliente indicar que não quer mais nada, ENCERRE."
             )
             
             logger.info(
