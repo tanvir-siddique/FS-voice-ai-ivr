@@ -28,8 +28,19 @@ import re
 
 logger = logging.getLogger(__name__)
 
+def _is_docker_runtime() -> bool:
+    return os.path.exists("/.dockerenv") or os.getenv("DOCKER_CONTAINER") == "true"
+
+def _resolve_esl_host(raw_host: Optional[str]) -> str:
+    host = (raw_host or "127.0.0.1").strip()
+    allow_loopback = os.getenv("ESL_HOST_ALLOW_LOOPBACK", "false").lower() == "true"
+    if host in ("127.0.0.1", "localhost") and _is_docker_runtime() and not allow_loopback:
+        logger.warning("ESL_HOST aponta para loopback em container; usando host.docker.internal")
+        return "host.docker.internal"
+    return host
+
 # Configurações ESL
-ESL_HOST = os.getenv("ESL_HOST", "127.0.0.1")
+ESL_HOST = _resolve_esl_host(os.getenv("ESL_HOST"))
 ESL_PORT = int(os.getenv("ESL_PORT", "8021"))
 ESL_PASSWORD = os.getenv("ESL_PASSWORD", "ClueCon")
 
@@ -1554,8 +1565,9 @@ def create_esl_client_from_settings(settings: Dict[str, Any]) -> AsyncESLClient:
     Returns:
         Novo AsyncESLClient configurado
     """
+    host = _resolve_esl_host(settings.get('esl_host', ESL_HOST))
     return AsyncESLClient(
-        host=settings.get('esl_host', ESL_HOST),
+        host=host,
         port=int(settings.get('esl_port', ESL_PORT)),
         password=settings.get('esl_password', ESL_PASSWORD)
     )
@@ -1585,7 +1597,7 @@ async def get_esl_for_domain(domain_uuid: str) -> AsyncESLClient:
         # Se configurações são diferentes do singleton, criar novo cliente
         singleton = get_esl_client()
         
-        db_host = settings.get('esl_host', ESL_HOST)
+        db_host = _resolve_esl_host(settings.get('esl_host', ESL_HOST))
         db_port = int(settings.get('esl_port', ESL_PORT))
         
         if singleton.host != db_host or singleton.port != db_port:
