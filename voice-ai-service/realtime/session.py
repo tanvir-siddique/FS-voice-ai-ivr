@@ -2859,25 +2859,38 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         )
         
         try:
-            # Aguardar delay mínimo para o OpenAI começar a gerar resposta
-            await asyncio.sleep(1.0)
+            # Aguardar delay mínimo para o OpenAI gerar a resposta completa
+            # 2.5s é suficiente para frases curtas como "Vou transferir para vendas"
+            min_delay = 2.5
+            await asyncio.sleep(min_delay)
             
             # Depois, esperar o OpenAI terminar de falar (máximo delay_seconds)
             # _assistant_speaking = True enquanto o OpenAI está gerando áudio
             wait_time = 0
-            max_wait = delay_seconds - 1.0  # já esperamos 1s
+            max_wait = delay_seconds - min_delay  # já esperamos min_delay
             while self._assistant_speaking and wait_time < max_wait:
                 if self._ending_call or not self._provider:
                     break
                 await asyncio.sleep(0.2)
                 wait_time += 0.2
             
+            # Esperar o buffer de áudio pendente ser reproduzido
+            # _pending_audio_bytes contém áudio ainda não enviado ao FreeSWITCH
+            if hasattr(self, '_pending_audio_bytes') and self._pending_audio_bytes > 0:
+                # Calcular tempo de reprodução: bytes / (sample_rate * 2 bytes)
+                bytes_per_second = self.config.freeswitch_sample_rate * 2
+                audio_duration = self._pending_audio_bytes / bytes_per_second
+                extra_wait = min(audio_duration + 0.5, 3.0)  # máximo 3s extra
+                logger.info(f"⏳ [DELAYED_HANDOFF] Aguardando {extra_wait:.1f}s para buffer de áudio ({self._pending_audio_bytes}B)")
+                await asyncio.sleep(extra_wait)
+            
             # Verificar se a chamada ainda está ativa
             if self._ending_call or not self._provider:
                 logger.warning("⏳ [DELAYED_HANDOFF] Chamada encerrada durante delay, abortando")
                 return
             
-            logger.info(f"⏳ [DELAYED_HANDOFF] Delay concluído (esperou {1.0 + wait_time:.1f}s), iniciando handoff...")
+            total_wait = min_delay + wait_time
+            logger.info(f"⏳ [DELAYED_HANDOFF] Delay concluído (esperou {total_wait:.1f}s), iniciando handoff...")
             
             # Agora sim, mutar o áudio e iniciar o handoff
             self._set_transfer_in_progress(True, "delayed_handoff_start")
