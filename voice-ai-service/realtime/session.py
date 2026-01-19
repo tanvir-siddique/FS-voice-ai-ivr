@@ -2319,9 +2319,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             logger.error(f"Error placing call on hold: {e}")
             return False
     
-    async def unhold_call(self) -> bool:
+    async def unhold_call(self, timeout: float = 5.0) -> bool:
         """
         Retira o cliente da espera.
+        
+        Args:
+            timeout: Timeout em segundos (default 5s para não travar o fluxo)
         
         Returns:
             True se sucesso
@@ -2333,7 +2336,18 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             from .esl import get_esl_adapter
             adapter = get_esl_adapter(self.call_uuid)
             
-            success = await adapter.uuid_hold(self.call_uuid, on=False)
+            # Usar timeout para não travar o fluxo se ESL não responder
+            try:
+                success = await asyncio.wait_for(
+                    adapter.uuid_hold(self.call_uuid, on=False),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"unhold_call timeout after {timeout}s - continuing anyway")
+                # Marcar como não em hold mesmo se timeout (evitar estado inconsistente)
+                self._on_hold = False
+                return True
+            
             if success:
                 self._on_hold = False
                 logger.info("Call taken off hold", extra={"call_uuid": self.call_uuid})
@@ -2341,6 +2355,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
         except Exception as e:
             logger.error(f"Error taking call off hold: {e}")
+            # Marcar como não em hold para não ficar em estado inconsistente
+            self._on_hold = False
             return False
     
     async def check_extension_available(self, extension: str) -> dict:
