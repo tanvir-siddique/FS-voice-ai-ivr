@@ -943,225 +943,69 @@ class RealtimeServer:
         # Obter instância de métricas para funções aninhadas
         _metrics = get_metrics()
 
-        async def _send_streamaudio_frame(frame_bytes: bytes) -> None:
+        async def _send_streamaudio_chunk(chunk_bytes: bytes) -> None:
+            """Send audio chunk directly to FreeSWITCH streaming buffer."""
             payload = json.dumps({
                 "type": "streamAudio",
                 "data": {
                     "audioDataType": "raw",
                     "sampleRate": fs_sample_rate,
-                    "audioData": base64.b64encode(frame_bytes).decode("utf-8"),
+                    "audioData": base64.b64encode(chunk_bytes).decode("utf-8"),
                 }
             })
             await websocket.send(payload)
             try:
-                _metrics.record_audio(call_uuid, "out", len(frame_bytes))
+                _metrics.record_audio(call_uuid, "out", len(chunk_bytes))
             except Exception:
                 pass
-            await asyncio.sleep(STREAMAUDIO_FRAME_MS / 1000.0)
+        
+        async def _send_stop_audio() -> None:
+            """Send stop signal for barge-in."""
+            try:
+                await websocket.send(json.dumps({"type": "stopAudio"}))
+                logger.info("StopAudio sent to FreeSWITCH (barge-in)", extra={"call_uuid": call_uuid})
+            except Exception as e:
+                logger.warning(f"Failed to send stopAudio: {e}", extra={"call_uuid": call_uuid})
 
         async def _sender_loop_rawaudio() -> None:
             """
-            Envia áudio para o FreeSWITCH usando protocolo rawAudio + binário.
-            Fallback para streamAudio quando rawAudio falhar (opcional).
+            Envia áudio diretamente para o buffer de streaming do FreeSWITCH.
             
-            FIX: Não resetar streaming_started após cada micro-pausa.
-            Problema anterior: cada pausa de 20ms forçava re-warmup de 300ms.
-            Solução: usar contador de underruns consecutivos para decidir reset.
+            v2.0: TRUE STREAMING - sem buffering pesado no Python.
+            O mod_audio_stream mantém ring buffer interno e injeta no canal.
             """
             nonlocal playback_mode
             try:
-                buffered_chunks: list[tuple[int, bytes]] = []
-                streaming_started = False
-                streamaudio_buffer = bytearray()
-                warmup_chunks = max(warmup_min, min(warmup_default, warmup_max))
-                underrun_count = 0
-                consecutive_underruns = 0  # NEW: contador de underruns consecutivos
-                # TTS envia audio em bursts - entre bursts pode haver 200-500ms de pausa
-                # 25 underruns × 20ms = 500ms de tolerância
-                max_consecutive_underruns = 25
                 last_health_update = 0.0
+                chunks_sent = 0
 
                 while True:
                     item = await audio_out_queue.get()
                     if item is None:
-                        # Flush remaining chunks
-                        for _, remaining in buffered_chunks:
-                            await websocket.send(remaining)
-                            await asyncio.sleep(PCM16_CHUNK_MS / 1000.0)
-                        if streamaudio_buffer:
-                            await _send_streamaudio_frame(bytes(streamaudio_buffer))
                         return
                     
-                    # Tratar sentinela FLUSH
-                    if isinstance(item[0], str) and item[0] == "FLUSH":
-                        flush_gen = item[1]
-                        if flush_gen == playback_generation:
-                            # Enviar buffer restante
-                            if streamaudio_buffer:
-                                logger.debug(f"Flushing streamaudio buffer: {len(streamaudio_buffer)}B", extra={"call_uuid": call_uuid})
-                                await _send_streamaudio_frame(bytes(streamaudio_buffer))
-                                streamaudio_buffer.clear()
-                            
-                            # Enviar sinal flushAudio para mod_audio_stream iniciar playback
-                            try:
-                                flush_msg = json.dumps({"type": "flushAudio"})
-                                await websocket.send(flush_msg)
-                                logger.info("FlushAudio sent to FreeSWITCH", extra={"call_uuid": call_uuid})
-                            except Exception as e:
-                                logger.warning(f"Failed to send flushAudio: {e}", extra={"call_uuid": call_uuid})
+                    # Tratar sentinela STOP (barge-in)
+                    if isinstance(item[0], str) and item[0] == "STOP":
+                        await _send_stop_audio()
                         continue
                     
                     generation, chunk = item
                     if generation != playback_generation:
                         continue
-
-                    # rawAudio header
-                    if playback_mode == "rawaudio":
-                        header_ok = await _send_rawaudio_header()
-                        if not header_ok and allow_streamaudio_fallback:
-                            playback_mode = "streamaudio"
-                            logger.warning("Switching to streamAudio fallback (header failed)", extra={"call_uuid": call_uuid})
-
-                    if playback_mode == "rawaudio":
-                        # Limpar chunks obsoletos (de generation anterior) antes de acumular
-                        # Isso evita que chunks antigos sejam contados no warmup
-                        buffered_chunks = [(g, c) for g, c in buffered_chunks if g == generation]
-                        
-                        # Acumular chunks para warmup
-                        buffered_chunks.append((generation, chunk))
-
-                        # Iniciar streaming após warmup
-                        if not streaming_started and len(buffered_chunks) >= warmup_chunks:
-                            streaming_started = True
-                            consecutive_underruns = 0  # Reset ao iniciar
-                            logger.debug(
-                                f"Warmup complete ({warmup_chunks} chunks), starting playback",
-                                extra={"call_uuid": call_uuid},
-                            )
-
-                        # Enviar chunks com pacing PRECISO usando clock absoluto
-                        # FIX: Usar clock absoluto ao invés de sleep relativo para evitar drift
-                        if streaming_started:
-                            chunk_interval = PCM16_CHUNK_MS / 1000.0  # 0.02s
-                            next_send_time = time.monotonic()
-                            
-                            while buffered_chunks:
-                                buffered_generation, chunk_to_send = buffered_chunks.pop(0)
-                                if buffered_generation != playback_generation:
-                                    continue
-                                try:
-                                    await websocket.send(chunk_to_send)
-                                    try:
-                                        _metrics.record_audio(call_uuid, "out", len(chunk_to_send))
-                                    except Exception:
-                                        pass
-                                    consecutive_underruns = 0
-                                    
-                                    # Clock absoluto: dormir apenas o tempo restante até próximo slot
-                                    next_send_time += chunk_interval
-                                    sleep_duration = next_send_time - time.monotonic()
-                                    if sleep_duration > 0:
-                                        await asyncio.sleep(sleep_duration)
-                                    # Se sleep_duration <= 0, estamos atrasados - não dormir!
-                                except Exception as e:
-                                    if allow_streamaudio_fallback:
-                                        playback_mode = "streamaudio"
-                                        streamaudio_buffer.extend(chunk_to_send)
-                                        logger.warning(
-                                            f"Switching to streamAudio fallback (send failed): {e}",
-                                            extra={"call_uuid": call_uuid},
-                                        )
-                                        break
-                                    raise
-
-                            # Continuar recebendo e enviando em tempo real
-                            while playback_mode == "rawaudio":
-                                try:
-                                    c = await asyncio.wait_for(
-                                        audio_out_queue.get(),
-                                        timeout=chunk_interval,
-                                    )
-                                except asyncio.TimeoutError:
-                                    underrun_count += 1
-                                    consecutive_underruns += 1
-                                    _metrics.record_playback_underrun(call_uuid)
-                                    
-                                    # Logar apenas no primeiro, ou a cada 50
-                                    if underrun_count == 1 or underrun_count % 50 == 0:
-                                        logger.warning(
-                                            f"Audio underrun #{underrun_count} (consecutive: {consecutive_underruns})",
-                                            extra={"call_uuid": call_uuid, "underrun_count": underrun_count}
-                                        )
-                                    
-                                    # Só resetar streaming após múltiplos underruns consecutivos
-                                    if consecutive_underruns >= max_consecutive_underruns:
-                                        if adaptive_warmup and warmup_chunks < warmup_max:
-                                            warmup_chunks += 1
-                                        streaming_started = False
-                                        consecutive_underruns = 0
-                                        logger.debug(
-                                            f"Stream paused after {max_consecutive_underruns} underruns, waiting for new audio",
-                                            extra={"call_uuid": call_uuid}
-                                        )
-                                        break
-                                    else:
-                                        # Atualizar clock mesmo em underrun para manter sincronização
-                                        next_send_time += chunk_interval
-                                        continue
-
-                                if c is None:
-                                    return
-                                c_generation, c_bytes = c
-                                if c_generation != playback_generation:
-                                    continue
-
-                                consecutive_underruns = 0
-                                try:
-                                    await websocket.send(c_bytes)
-                                    try:
-                                        _metrics.record_audio(call_uuid, "out", len(c_bytes))
-                                    except Exception:
-                                        pass
-                                    
-                                    # Clock absoluto preciso
-                                    next_send_time += chunk_interval
-                                    sleep_duration = next_send_time - time.monotonic()
-                                    if sleep_duration > 0:
-                                        await asyncio.sleep(sleep_duration)
-                                except Exception as e:
-                                    if allow_streamaudio_fallback:
-                                        playback_mode = "streamaudio"
-                                        streamaudio_buffer.extend(c_bytes)
-                                        logger.warning(
-                                            f"Switching to streamAudio fallback (send failed): {e}",
-                                            extra={"call_uuid": call_uuid},
-                                        )
-                                        break
-                                    raise
-
-                            # Só resetar streaming se saiu por underruns consecutivos
-                            # (Não resetar se saiu por outro motivo)
-                            if consecutive_underruns >= max_consecutive_underruns:
-                                streaming_started = False
-                            elif adaptive_warmup and underrun_count == 0 and warmup_chunks > warmup_min:
-                                warmup_chunks -= 1
-
-                    if playback_mode == "streamaudio":
-                        streamaudio_buffer.extend(chunk)
-                        while len(streamaudio_buffer) >= streamaudio_frame_bytes:
-                            frame = bytes(streamaudio_buffer[:streamaudio_frame_bytes])
-                            del streamaudio_buffer[:streamaudio_frame_bytes]
-                            await _send_streamaudio_frame(frame)
+                    
+                    # Enviar chunk imediatamente para FreeSWITCH
+                    await _send_streamaudio_chunk(chunk)
+                    chunks_sent += 1
+                    
+                    if chunks_sent == 1:
+                        logger.info("Streaming playback started", extra={"call_uuid": call_uuid})
 
                     # Atualizar health score periodicamente
                     now = time.time()
                     if now - last_health_update >= 1.0:
                         session_metrics = _metrics.get_session_metrics(call_uuid)
                         if session_metrics:
-                            underrun_ratio = session_metrics.playback_underruns / max(1, session_metrics.audio_chunks_sent)
-                            latency_penalty = min(30.0, session_metrics.avg_latency_ms / 50.0)
-                            underrun_penalty = min(50.0, underrun_ratio * 200.0)
-                            health_score = 100.0 - latency_penalty - underrun_penalty
+                            health_score = 100.0 - min(30.0, session_metrics.avg_latency_ms / 50.0)
                             _metrics.update_health_score(call_uuid, health_score)
                         last_health_update = now
 
@@ -1204,7 +1048,7 @@ class RealtimeServer:
 
         async def clear_playback(_: str) -> None:
             """
-            Barge-in: limpa buffer e descarta áudio pendente.
+            Barge-in: limpa buffer local e envia stopAudio para FreeSWITCH.
             """
             nonlocal playback_generation
             async with playback_lock:
@@ -1215,16 +1059,9 @@ class RealtimeServer:
                         audio_out_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     pass
-
-        async def flush_audio() -> None:
-            """
-            Flush: envia sentinela FLUSH para o loop de áudio.
-            O loop envia buffer restante + flushAudio para FreeSWITCH.
-            Chamado quando a resposta do AI termina (AUDIO_DONE).
-            """
-            if sender_task is not None:
-                await audio_out_queue.put(("FLUSH", playback_generation))
-                logger.debug("Flush signal queued", extra={"call_uuid": call_uuid})
+                # Enviar STOP para FreeSWITCH limpar seu buffer interno
+                if sender_task is not None:
+                    await audio_out_queue.put(("STOP", playback_generation))
         
         # Criar sessão via manager
         manager = get_session_manager()
@@ -1233,7 +1070,6 @@ class RealtimeServer:
             on_audio_output=send_audio,
             on_barge_in=clear_playback,
             on_transfer=clear_playback,
-            on_audio_done=flush_audio,
         )
         
         return session

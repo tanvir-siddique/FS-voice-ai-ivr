@@ -194,120 +194,74 @@ public:
         if (!json) {
             return status;
         }
+        
+        /* Get tech_pvt for playback buffer access */
+        switch_channel_t *channel = switch_core_session_get_channel(session);
+        private_t *tech_pvt = (private_t *)switch_channel_get_private(channel, MY_BUG_NAME);
+        if (!tech_pvt) {
+            tech_pvt = (private_t *)switch_channel_get_private(channel, "audio_stream");
+        }
+        
         const char* jsType = cJSON_GetObjectCstr(json, "type");
         
-        // NETPLAY: Tratar flushAudio - iniciar playback do buffer acumulado
-        if(jsType && strcmp(jsType, "flushAudio") == 0) {
-            if (!m_currentResponseFile.empty() && m_responseInProgress) {
+        // NETPLAY: stopAudio - clear playback buffer (barge-in)
+        if(jsType && strcmp(jsType, "stopAudio") == 0) {
+            if (tech_pvt && tech_pvt->playback_buffer) {
+                switch_mutex_lock(tech_pvt->playback_mutex);
+                switch_buffer_zero(tech_pvt->playback_buffer);
+                tech_pvt->playback_active = 0;
+                switch_mutex_unlock(tech_pvt->playback_mutex);
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
-                    "(%s) 🔊 Flush playback: %s\n", m_sessionId.c_str(), m_currentResponseFile.c_str());
-                
-                switch_channel_t *channel = switch_core_session_get_channel(session);
-                if (channel && switch_channel_ready(channel)) {
-                    char broadcast_cmd[512];
-                    switch_snprintf(broadcast_cmd, sizeof(broadcast_cmd), "%s playback::%s aleg", 
-                        m_sessionId.c_str(), m_currentResponseFile.c_str());
-                    
-                    switch_stream_handle_t stream = { 0 };
-                    SWITCH_STANDARD_STREAM(stream);
-                    switch_api_execute("uuid_broadcast", broadcast_cmd, session, &stream);
-                    switch_safe_free(stream.data);
-                }
-                
-                // Reset para próxima resposta
-                m_currentResponseFile.clear();
-                m_responseInProgress = false;
+                    "(%s) 🛑 Playback stopped (barge-in)\n", m_sessionId.c_str());
             }
             status = SWITCH_TRUE;
         }
+        // NETPLAY: streamAudio - write directly to playback buffer (streaming)
         else if(jsType && strcmp(jsType, "streamAudio") == 0) {
             cJSON* jsonData = cJSON_GetObjectItem(json, "data");
-            if(jsonData) {
-                cJSON* jsonFile = nullptr;
+            if(jsonData && tech_pvt && tech_pvt->playback_buffer) {
                 cJSON* jsonAudio = cJSON_DetachItemFromObject(jsonData, "audioData");
                 const char* jsAudioDataType = cJSON_GetObjectCstr(jsonData, "audioDataType");
-                std::string fileType;
-                int sampleRate;
-                if (0 == strcmp(jsAudioDataType, "raw")) {
-                    cJSON* jsonSampleRate = cJSON_GetObjectItem(jsonData, "sampleRate");
-                    sampleRate = jsonSampleRate && jsonSampleRate->valueint ? jsonSampleRate->valueint : 0;
-                    
-                    // NETPLAY FIX: Usar .raw que é reconhecido por padrão pelo mod_sndfile
-                    if (sampleRate > 0) {
-                        fileType = ".raw";
-                    } else {
-                        fileType = "";
-                    }
-                } else if (0 == strcmp(jsAudioDataType, "wav")) {
-                    fileType = ".wav";
-                } else if (0 == strcmp(jsAudioDataType, "mp3")) {
-                    fileType = ".mp3";
-                } else if (0 == strcmp(jsAudioDataType, "ogg")) {
-                    fileType = ".ogg";
-                } else {
-                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - unsupported audio type: %s\n",
-                                      m_sessionId.c_str(), jsAudioDataType);
-                }
-
-                if(jsonAudio && jsonAudio->valuestring != nullptr && !fileType.empty()) {
+                
+                if (jsAudioDataType && strcmp(jsAudioDataType, "raw") == 0 && jsonAudio && jsonAudio->valuestring) {
                     std::string rawAudio;
                     try {
                         rawAudio = base64_decode(jsonAudio->valuestring);
                     } catch (const std::exception& e) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - base64 decode error: %s\n",
-                                          m_sessionId.c_str(), e.what());
-                        cJSON_Delete(jsonAudio); cJSON_Delete(json);
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, 
+                            "(%s) base64 decode error: %s\n", m_sessionId.c_str(), e.what());
+                        cJSON_Delete(jsonAudio); 
+                        cJSON_Delete(json);
                         return status;
                     }
                     
-                    // NETPLAY: Usar arquivo único por resposta (append mode)
-                    // Criar novo arquivo apenas se não tiver um em andamento
-                    if (m_currentResponseFile.empty() || !m_responseInProgress) {
-                        char filePath[256];
-                        switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
-                                        SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                        m_currentResponseFile = filePath;
-                        m_responseInProgress = true;
-                        m_Files.insert(filePath);
-                        
-                        // Criar arquivo novo (truncate)
-                        std::ofstream fstream(filePath, std::ofstream::binary | std::ofstream::trunc);
-                        fstream << rawAudio;
-                        fstream.close();
-                        
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
-                            "(%s) 📝 New response file: %s (%zu bytes)\n", 
-                            m_sessionId.c_str(), filePath, rawAudio.size());
-                    } else {
-                        // Append ao arquivo existente
-                        std::ofstream fstream(m_currentResponseFile.c_str(), std::ofstream::binary | std::ofstream::app);
-                        fstream << rawAudio;
-                        fstream.close();
-                        
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
-                            "(%s) 📝 Appending to: %s (+%zu bytes)\n", 
-                            m_sessionId.c_str(), m_currentResponseFile.c_str(), rawAudio.size());
+                    /* Write to playback buffer */
+                    switch_mutex_lock(tech_pvt->playback_mutex);
+                    switch_size_t written = switch_buffer_write(tech_pvt->playback_buffer, 
+                        rawAudio.data(), rawAudio.size());
+                    
+                    /* Activate playback if not already active */
+                    if (!tech_pvt->playback_active && written > 0) {
+                        tech_pvt->playback_active = 1;
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
+                            "(%s) 🔊 Streaming playback started\n", m_sessionId.c_str());
                     }
                     
-                    jsonFile = cJSON_CreateString(m_currentResponseFile.c_str());
-                    cJSON_AddItemToObject(jsonData, "file", jsonFile);
-                }
-
-                if(jsonFile) {
-                    char *jsonString = cJSON_PrintUnformatted(jsonData);
-                    m_notify(session, EVENT_PLAY, jsonString);
-                    message.assign(jsonString);
-                    free(jsonString);
-                    status = SWITCH_TRUE;
+                    switch_size_t buffered = switch_buffer_inuse(tech_pvt->playback_buffer);
+                    switch_mutex_unlock(tech_pvt->playback_mutex);
                     
-                    // NETPLAY: NÃO fazer auto-playback aqui
-                    // O playback será feito quando receber "flushAudio"
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+                        "(%s) 📝 Buffer: +%zu bytes (total: %zu)\n", 
+                        m_sessionId.c_str(), rawAudio.size(), buffered);
+                    
+                    status = SWITCH_TRUE;
                 }
+                
                 if (jsonAudio)
                     cJSON_Delete(jsonAudio);
-
             } else {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "(%s) processMessage - no data in streamAudio\n", m_sessionId.c_str());
+                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, 
+                    "(%s) streamAudio - missing data or buffer\n", m_sessionId.c_str());
             }
         }
         cJSON_Delete(json);
@@ -362,10 +316,6 @@ private:
     int m_playFile;
     std::unordered_set<std::string> m_Files;
     std::atomic<bool> m_cleanedUp{false};
-    
-    // NETPLAY: Buffer único para resposta completa
-    std::string m_currentResponseFile;  // Arquivo atual sendo acumulado
-    bool m_responseInProgress{false};   // Flag de resposta em andamento
 };
 
 
@@ -422,6 +372,19 @@ namespace {
                 "%s: Error creating switch buffer.\n", tech_pvt->sessionId);
             return SWITCH_STATUS_FALSE;
         }
+        
+        /* NETPLAY: Create playback buffer for streaming audio from WebSocket */
+        /* Buffer size: 2 seconds of L16 audio @ 8kHz = 8000 * 2 * 2 = 32000 bytes */
+        const size_t playback_buflen = 32000;
+        if (switch_buffer_create(pool, &tech_pvt->playback_buffer, playback_buflen) != SWITCH_STATUS_SUCCESS) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                "%s: Error creating playback buffer.\n", tech_pvt->sessionId);
+            return SWITCH_STATUS_FALSE;
+        }
+        switch_mutex_init(&tech_pvt->playback_mutex, SWITCH_MUTEX_NESTED, pool);
+        tech_pvt->playback_active = 0;
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+            "(%s) Streaming playback buffer created (%zu bytes)\n", tech_pvt->sessionId, playback_buflen);
 
         if (desiredSampling != sampling) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) resampling from %u to %u\n", tech_pvt->sessionId, sampling, desiredSampling);

@@ -36,8 +36,11 @@ struct private_data {
     int close_requested:1;
     int cleanup_started:1;
     int codec_initialized:1;    /* Flag indicating if G.711 codec is initialized */
+    int playback_active:1;      /* NETPLAY: Flag indicating playback is active */
     char initialMetadata[8192];
     switch_buffer_t *sbuffer;
+    switch_buffer_t *playback_buffer;  /* NETPLAY: Buffer for streaming playback */
+    switch_mutex_t *playback_mutex;    /* NETPLAY: Mutex for playback buffer */
     int rtp_packets;
     int audio_format;           /* AUDIO_FORMAT_L16, AUDIO_FORMAT_PCMU, AUDIO_FORMAT_PCMA */
     switch_codec_t write_codec; /* Codec for encoding L16 to PCMU/PCMA */

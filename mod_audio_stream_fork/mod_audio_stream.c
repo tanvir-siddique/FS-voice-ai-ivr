@@ -46,6 +46,31 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
             break;
 
         case SWITCH_ABC_TYPE_WRITE:
+            /* NETPLAY: Inject audio from playback_buffer into channel */
+            if (tech_pvt->playback_buffer && tech_pvt->playback_active) {
+                switch_frame_t *write_frame = switch_core_media_bug_get_write_replace_frame(bug);
+                if (write_frame && write_frame->data && write_frame->datalen > 0) {
+                    switch_mutex_lock(tech_pvt->playback_mutex);
+                    switch_size_t available = switch_buffer_inuse(tech_pvt->playback_buffer);
+                    if (available >= write_frame->datalen) {
+                        /* Read from buffer and replace frame data */
+                        switch_buffer_read(tech_pvt->playback_buffer, write_frame->data, write_frame->datalen);
+                        switch_core_media_bug_set_write_replace_frame(bug, write_frame);
+                    } else if (available > 0) {
+                        /* Partial data - fill with what we have, zero the rest */
+                        uint8_t *data = (uint8_t *)write_frame->data;
+                        switch_buffer_read(tech_pvt->playback_buffer, data, available);
+                        memset(data + available, 0, write_frame->datalen - available);
+                        switch_core_media_bug_set_write_replace_frame(bug, write_frame);
+                    }
+                    /* If buffer is empty and no more data expected, deactivate */
+                    if (switch_buffer_inuse(tech_pvt->playback_buffer) == 0 && !tech_pvt->playback_active) {
+                        /* Buffer empty and playback finished */
+                    }
+                    switch_mutex_unlock(tech_pvt->playback_mutex);
+                }
+            }
+            break;
         default:
             break;
     }
@@ -279,16 +304,17 @@ done:
 }
 
 /* ========================================
- * NETPLAY FORK - G.711 Native + Buffered Playback
- * Version: 1.5.0-netplay
+ * NETPLAY FORK - G.711 Native + Streaming Playback
+ * Version: 2.0.0-netplay
  * Build: 2026-01-19
  * Features:
  *   - Native PCMU/PCMA encoding for WebSocket
- *   - Buffered playback (append to single file per response)
- *   - flushAudio: inicia playback quando resposta termina
- *   - Elimina gaps entre chunks de áudio
+ *   - TRUE STREAMING: audio injected directly into channel
+ *   - No file I/O - uses internal ring buffer
+ *   - Real-time playback with minimal latency
+ *   - Barge-in support via stopAudio command
  * ======================================== */
-#define MOD_AUDIO_STREAM_VERSION "1.5.0-netplay"
+#define MOD_AUDIO_STREAM_VERSION "2.0.0-netplay"
 #define MOD_AUDIO_STREAM_BUILD_DATE "2026-01-19"
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
@@ -302,7 +328,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, 
         "Build: %s\n", MOD_AUDIO_STREAM_BUILD_DATE);
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, 
-        "G.711 Native: ENABLED | Buffered Playback: ENABLED\n");
+        "G.711 Native: ENABLED | Streaming Playback: ENABLED\n");
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, 
         "========================================\n");
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_audio_stream API loading..\n");
