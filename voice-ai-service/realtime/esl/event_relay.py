@@ -583,19 +583,36 @@ class DualModeEventRelay:
     
     def uuid_hold(self, on: bool = True) -> bool:
         """
-        Coloca/retira a chamada em espera.
+        Coloca/retira a chamada em espera no modo ESL Outbound.
         
-        NOTA: ESL Outbound não suporta uuid_hold diretamente.
-        Precisa usar ESL Inbound.
+        NOTA: uuid_hold (API) não funciona em Outbound, mas podemos usar
+        session.execute("hold"/"unhold") no canal atual.
         
         Args:
             on: True para colocar em espera, False para retirar
             
         Returns:
-            False (não suportado no modo Outbound, usar Inbound)
+            True se executado com sucesso, False caso contrário
         """
-        logger.debug(f"[{self._uuid}] uuid_hold not supported on ESL Outbound, use ESL Inbound")
-        return False
+        if not self._connected or not self.session:
+            logger.warning(f"[{self._uuid}] Cannot hold/unhold: not connected")
+            return False
+        
+        try:
+            import gevent
+            
+            app = "hold" if on else "unhold"
+            with gevent.Timeout(2.0, False):
+                self.session.execute(app)
+                logger.info(f"[{self._uuid}] {app} executed via ESL Outbound")
+                return True
+            
+            logger.warning(f"[{self._uuid}] {app} via ESL Outbound timed out")
+            return False
+            
+        except Exception as e:
+            logger.warning(f"[{self._uuid}] {('hold' if on else 'unhold')} via ESL Outbound failed: {e}")
+            return False
     
     def uuid_break(self) -> bool:
         """
