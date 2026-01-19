@@ -1429,30 +1429,36 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             )
             
             # Enviar via webhook OmniPlay se configurado
+            # O phone pode vir do LLM ou usar o caller_id da chamada
+            caller_phone = phone if phone != "Não informado" else self.config.caller_id
+            
             if self.config.omniplay_webhook_url:
                 try:
                     import aiohttp
-                    async with aiohttp.ClientSession() as session:
+                    async with aiohttp.ClientSession() as http_session:
                         payload = {
                             "event": "voice_ai_message",
-                            "secretary_uuid": self.config.domain_uuid,
+                            "secretary_uuid": self.config.secretary_uuid,
+                            "caller_id": caller_phone,  # OBRIGATÓRIO pelo backend
                             "ticket": {
                                 "caller_name": caller_name,
-                                "phone": phone,
+                                "phone": caller_phone,
                                 "message": message,
                                 "urgency": urgency,
                                 "type": "recado"
                             }
                         }
-                        async with session.post(
+                        logger.debug(f"📝 [TAKE_MESSAGE] Enviando payload: {payload}")
+                        async with http_session.post(
                             self.config.omniplay_webhook_url,
                             json=payload,
                             timeout=aiohttp.ClientTimeout(total=5)
                         ) as resp:
-                            if resp.status == 200:
-                                logger.info("📝 [TAKE_MESSAGE] Recado enviado ao OmniPlay")
+                            resp_text = await resp.text()
+                            if resp.status in (200, 201):
+                                logger.info(f"📝 [TAKE_MESSAGE] Recado enviado ao OmniPlay: {resp_text}")
                             else:
-                                logger.warning(f"📝 [TAKE_MESSAGE] Webhook retornou {resp.status}")
+                                logger.warning(f"📝 [TAKE_MESSAGE] Webhook retornou {resp.status}: {resp_text}")
                 except Exception as e:
                     logger.warning(f"📝 [TAKE_MESSAGE] Erro ao enviar webhook: {e}")
             
