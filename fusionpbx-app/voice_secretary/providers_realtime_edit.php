@@ -59,7 +59,7 @@
 			'description' => 'GPT-4o Realtime with voice',
 			'fields' => ['api_key', 'model', 'voice'],
 			'voices' => ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'],
-			'models' => ['gpt-realtime', 'gpt-realtime-mini', 'gpt-realtime-mini-2025-12-15', 'gpt-4o-realtime-preview', 'gpt-4o-realtime-preview-2024-12-17', 'gpt-4o-mini-realtime-preview', 'gpt-4o-mini-realtime-preview-2024-12-17'],
+			'models' => ['gpt-4o-realtime-preview', 'gpt-4o-realtime-preview-2024-12-17', 'gpt-4o-mini-realtime-preview', 'gpt-4o-mini-realtime-preview-2024-12-17'],
 		],
 		'elevenlabs' => [
 			'name' => 'ElevenLabs Conversational AI',
