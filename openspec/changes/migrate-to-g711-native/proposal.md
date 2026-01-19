@@ -1,48 +1,71 @@
-# Change: Migrar Voice AI para G.711 Nativo
+# Change: Migrar Voice AI para G.711 Híbrido
 
 ## Why
 
-Atualmente o Voice AI usa PCM16 16kHz do FreeSWITCH e faz resample para 24kHz antes de enviar à OpenAI. 
+Atualmente o Voice AI usa PCM16 16kHz do FreeSWITCH e faz resample para 24kHz antes de enviar à OpenAI.
 Isso adiciona ~10-20ms de latência e consome CPU desnecessariamente.
 
 Todos os clientes em produção usam G.711 μ-law (codec padrão de telefonia PSTN).
-A OpenAI Realtime API suporta G.711 nativamente (`audio/pcmu`), eliminando a necessidade de resample.
 
-Ref: https://github.com/aicc2025/sip-to-ai (projeto que já usa G.711 direto)
+**Descoberta importante**: O mod_audio_stream v1.0.3 tem suporte parcial:
+- **Envio (FS → WS)**: Apenas L16 PCM (não suporta G.711)
+- **Recebimento (WS → FS)**: Suporta PCMU/PCMA nativo (otimizado, sem transcoding)
+
+Ref: https://github.com/amigniter/mod_audio_stream/issues/72
 
 ## What Changes
 
-- **mod_audio_stream**: Configurar para enviar G.711 μ-law 8kHz em vez de PCM16 16kHz
-- **OpenAI session.update**: Mudar formato de `audio/pcm` para `audio/pcmu`
-- **Resampler**: Remover resample 16kHz↔24kHz (não mais necessário)
-- **Echo Canceller**: Adaptar para 8kHz (frame_size = 160 samples)
-- **Barge-in detection**: Ajustar thresholds para G.711 (8-bit vs 16-bit)
+### Fase 1: G.711 Híbrido (mod_audio_stream v1.0.3)
+- **OpenAI output**: Solicitar resposta em `audio/pcmu` (G.711)
+- **Playback**: mod_audio_stream reproduz G.711 direto (sem transcoding)
+- **Input**: Mantém L16 PCM (limitação do mod_audio_stream)
+
+### Fase 2: G.711 Completo (opções)
+
+**Opção A: Conversão no Voice AI (recomendada)**
+- Converter L16 PCM → G.711 µ-law no Python usando `audioop.lin2ulaw()`
+- Enviar G.711 para OpenAI via `audio/pcmu`
+- Benefício: Zero mudança no FreeSWITCH, implementação rápida
+- Trade-off: CPU mínima no container Python
+
+**Opção B: Contribuir patch para mod_audio_stream**
+- Adicionar flag `format=mulaw` no comando `uuid_audio_stream`
+- PR para https://github.com/amigniter/mod_audio_stream
+- Benefício: Solução definitiva para a comunidade
+- Trade-off: Tempo de desenvolvimento e aprovação
+
+**Opção C: Media bug customizado (complexo)**
+- Capturar RTP G.711 antes da decodificação via `switch_media_bug`
+- Enviar pacotes G.711 direto via WebSocket
+- Benefício: Zero transcoding
+- Trade-off: Módulo C customizado, manutenção complexa
+
+**Opção D: mod_audio_fork (não recomendada)**
+- Módulo antigo com problemas de compatibilidade
+- Muitos reports de falhas com FreeSWITCH recente
+- Não recomendado para produção
 
 ## Impact
 
 - Affected specs: `voice-ai-realtime`
 - Affected code:
-  - `voice-ai-service/realtime/providers/openai_realtime.py` (session.update)
-  - `voice-ai-service/realtime/session.py` (handle_audio_input, _handle_audio_output)
-  - `voice-ai-service/realtime/utils/resampler.py` (pode ser removido)
-  - `voice-ai-service/realtime/utils/echo_canceller.py` (adaptar para 8kHz)
-  - `voice-ai-service/realtime/server.py` (configuração de sample rate)
+  - `voice-ai-service/realtime/providers/openai_realtime.py` (output format)
+  - `voice-ai-service/realtime/session.py` (_handle_audio_output)
 
-## Benefits
+## Benefits (Fase 1 - G.711 Híbrido)
 
-| Métrica | Antes (PCM16) | Depois (G.711) | Melhoria |
-|---------|---------------|----------------|----------|
-| Latência | +10-20ms | 0ms | -10-20ms |
-| Banda (uplink) | 512kbps | 64kbps | 8x menor |
-| CPU (resample) | Contínuo | Zero | 100% menos |
+| Métrica | Antes | Depois | Melhoria |
+|---------|-------|--------|----------|
+| Latência playback | +5-10ms | 0ms | -5-10ms |
+| CPU playback | Transcoding | Zero | 100% menos |
+| Input | Sem mudança | Sem mudança | - |
 
 ## Risks
 
-- **Qualidade de áudio**: G.711 8kHz tem menos fidelidade que PCM16 24kHz
-- **STT accuracy**: Pode ser ligeiramente inferior (a testar)
-- **Compatibilidade**: Requer mod_audio_stream configurado para G.711
+- **Compatibilidade**: Verificar se canal SIP usa PCMU (maioria usa)
+- **Fallback**: Se canal não for PCMU, mod_audio_stream faz transcoding automático
 
 ## Rollback
 
-- Manter código de resample como fallback configurável
-- Flag `use_g711_native: bool` na configuração da secretária
+- Mudar output format de volta para `audio/pcm`
+- Flag `output_format: "g711" | "pcm16"` na configuração

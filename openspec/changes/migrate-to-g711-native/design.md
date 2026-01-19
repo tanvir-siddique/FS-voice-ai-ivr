@@ -1,39 +1,38 @@
-# Design: Migração para G.711 Nativo
+# Design: Migração para G.711 Híbrido/Nativo
 
 ## Context
 
 O Voice AI atualmente usa a seguinte cadeia de áudio:
 
 ```
-FreeSWITCH (PCM16 16kHz) → Resample (16→24kHz) → OpenAI (PCM16 24kHz)
-OpenAI (PCM16 24kHz) → Resample (24→16kHz) → FreeSWITCH (PCM16 16kHz)
+FreeSWITCH (L16 PCM 8kHz) → Resample (8→24kHz) → OpenAI (PCM16 24kHz)
+OpenAI (PCM16 24kHz) → Resample (24→8kHz) → FreeSWITCH (L16 PCM 8kHz)
 ```
 
-Todos os clientes em produção usam G.711 μ-law nas linhas PSTN.
-A OpenAI Realtime API suporta G.711 nativamente via formato `audio/pcmu`.
+**Descoberta importante**: mod_audio_stream v1.0.3 tem suporte parcial:
+- **Envio (FS → WS)**: Apenas L16 PCM (não suporta G.711)
+- **Recebimento (WS → FS)**: Suporta PCMU/PCMA nativo (otimizado)
+
+Ref: https://github.com/amigniter/mod_audio_stream/issues/72
 
 ## Goals
 
-- Eliminar resample 16kHz↔24kHz
-- Reduzir latência em ~10-20ms
-- Reduzir consumo de banda em 8x
-- Manter compatibilidade com clientes existentes
+- Fase 1: Otimizar playback com G.711 nativo (output)
+- Fase 2: Eliminar resample de input com conversão no Python
+- Reduzir latência total em ~10-15ms
+- Manter compatibilidade com mod_audio_stream v1.0.3
 
 ## Non-Goals
 
-- Suportar outros codecs (A-law, Opus, etc.) - fora de escopo
-- Mudar arquitetura do mod_audio_stream
+- Modificar mod_audio_stream (complexo, fora de escopo)
+- Suportar outros codecs (A-law, Opus)
 - Alterar fluxo de transferência/handoff
 
 ## Decisions
 
-### Decision 1: Usar audio/pcmu na OpenAI
+### Decision 1: G.711 Híbrido (Fase 1)
 
-A OpenAI Realtime API aceita os seguintes formatos de áudio:
-- `audio/pcm` - PCM16 (16-bit signed, little-endian)
-- `audio/pcmu` - G.711 μ-law (8-bit, 8kHz)
-
-Decisão: Usar `audio/pcmu` para input e output.
+Usar G.711 apenas no output (OpenAI → FreeSWITCH).
 
 ```python
 # session.update para OpenAI GA
@@ -42,7 +41,7 @@ Decisão: Usar `audio/pcmu` para input e output.
     "session": {
         "audio": {
             "input": {
-                "format": {"type": "audio/pcmu"}  # G.711 μ-law
+                "format": {"type": "audio/pcm", "rate": 24000}  # Mantém PCM
             },
             "output": {
                 "format": {"type": "audio/pcmu"}  # G.711 μ-law
@@ -52,89 +51,111 @@ Decisão: Usar `audio/pcmu` para input e output.
 }
 ```
 
-### Decision 2: Configurar mod_audio_stream para G.711
-
-O mod_audio_stream suporta diferentes formatos:
-- `mono 16k` - PCM16 16kHz (atual)
-- `mono 8k` - PCM16 8kHz
-- `mulaw` - G.711 μ-law 8kHz
-
-Decisão: Usar `mulaw` no dialplan/ESL.
-
-```bash
-# Comando ESL
-uuid_audio_stream <uuid> start <ws_url> mulaw
+Fluxo:
+```
+FreeSWITCH (L16 8kHz) → Resample (8→24kHz) → OpenAI (PCM 24kHz)
+OpenAI (G.711 8kHz) → mod_audio_stream (direto, sem transcoding) → FreeSWITCH
 ```
 
-### Decision 3: Remover ResamplerPair
+### Decision 2: Conversão L16→G.711 no Python (Fase 2)
 
-Com G.711 nativo, não há necessidade de resample:
-- Input: G.711 8kHz → OpenAI (mesmo formato)
-- Output: OpenAI G.711 8kHz → FreeSWITCH (mesmo formato)
+Usar `audioop.lin2ulaw()` para converter L16 PCM para G.711 no Voice AI:
 
-Decisão: Remover `ResamplerPair` e substituir por passthrough.
+```python
+import audioop
 
-### Decision 4: Adaptar Echo Canceller para 8kHz
+# L16 PCM 8kHz → G.711 µ-law
+def pcm_to_ulaw(pcm_bytes: bytes) -> bytes:
+    return audioop.lin2ulaw(pcm_bytes, 2)  # 2 = 16-bit
 
-O Speex AEC precisa de ajustes para 8kHz:
-- `sample_rate`: 8000 (era 16000)
-- `frame_size`: 160 samples (era 320) para 20ms
-- `filter_length`: 1024 samples (era 2048) para 128ms
+# G.711 µ-law → L16 PCM (para AEC)
+def ulaw_to_pcm(ulaw_bytes: bytes) -> bytes:
+    return audioop.ulaw2lin(ulaw_bytes, 2)
+```
+
+Fluxo final:
+```
+FreeSWITCH (L16 8kHz) → Python (L16→G.711) → OpenAI (G.711 8kHz)
+OpenAI (G.711 8kHz) → mod_audio_stream (direto) → FreeSWITCH
+```
+
+### Decision 3: Manter L16 para AEC
+
+O Speex AEC requer L16 PCM. Converter apenas para processamento:
+
+```python
+# Input flow com AEC
+incoming_l16 = audio_from_freeswitch  # L16 8kHz
+clean_l16 = aec.process(incoming_l16)  # AEC em L16
+outgoing_ulaw = pcm_to_ulaw(clean_l16)  # Converter para G.711
+send_to_openai(outgoing_ulaw)  # Enviar G.711
+```
+
+### Decision 4: Adaptar para 8kHz
+
+Com G.711, sample rate é fixo em 8kHz:
+- `sample_rate`: 8000
+- `frame_size`: 160 samples (20ms @ 8kHz)
+- `bytes_per_frame`: 160 bytes (G.711) ou 320 bytes (L16)
 
 ### Decision 5: Flag de configuração
-
-Adicionar flag para permitir rollback:
 
 ```python
 @dataclass
 class RealtimeSessionConfig:
     # Audio format
     audio_format: str = "g711"  # "g711" ou "pcm16"
+    # Fase de implementação
+    # - "hybrid": G.711 só no output
+    # - "full": G.711 input e output
+    g711_mode: str = "hybrid"
 ```
 
 ## Alternatives Considered
 
-### Alternative 1: Manter PCM16 com resample otimizado
-- Prós: Melhor qualidade de áudio
-- Contras: Latência adicional, CPU desnecessária
-- Rejeitado: Clientes já usam G.711 na PSTN
+### Alternative 1: Contribuir patch para mod_audio_stream
+- Prós: Solução definitiva
+- Contras: Tempo de desenvolvimento, aprovação incerta
+- Decisão: Considerar após Fase 2 funcionar
 
-### Alternative 2: Usar Opus
-- Prós: Melhor compressão, qualidade adaptativa
-- Contras: OpenAI não suporta Opus nativo
-- Rejeitado: Não suportado
+### Alternative 2: mod_audio_fork
+- Prós: Pode capturar G.711 nativo
+- Contras: Abandonado, problemas de compatibilidade
+- Rejeitado: Risco alto para produção
+
+### Alternative 3: Media bug customizado em C
+- Prós: Zero overhead
+- Contras: Complexidade alta, manutenção difícil
+- Rejeitado: Custo/benefício ruim
 
 ## Risks / Trade-offs
 
 | Risco | Impacto | Mitigação |
 |-------|---------|-----------|
-| Qualidade de áudio inferior | Médio | Testar STT accuracy |
-| STT menos preciso | Baixo | G.711 é padrão telefonia |
-| mod_audio_stream não suporta mulaw | Alto | Verificar versão |
+| CPU da conversão Python | Baixo | audioop é C puro, ~0.1ms |
+| Compatibilidade G.711 output | Baixo | Testar com canal PCMU |
+| AEC com sample rate diferente | Médio | Manter L16 para AEC |
 
 ## Migration Plan
 
-### Fase 1: Preparação
-1. Verificar versão do mod_audio_stream
-2. Testar G.711 em ambiente de dev
-3. Implementar flag de configuração
+### Fase 1: G.711 Híbrido (output only)
+1. Modificar session.update para output G.711
+2. Testar playback sem transcoding
+3. Medir latência
 
-### Fase 2: Implementação
-1. Adicionar suporte a G.711 no código
-2. Manter PCM16 como fallback
-3. Testar em paralelo
-
-### Fase 3: Rollout
-1. Ativar G.711 para uma secretária de teste
-2. Monitorar métricas (latência, STT accuracy)
-3. Expandir para todas as secretárias
+### Fase 2: G.711 Completo
+1. Adicionar conversão L16→G.711 no input
+2. Ajustar AEC para 8kHz
+3. Remover resampler 8k↔24k
+4. Testar end-to-end
 
 ### Rollback
-- Mudar `audio_format: "pcm16"` na configuração
-- Reiniciar container
+- Flag `audio_format: "pcm16"` restaura comportamento atual
 
 ## Open Questions
 
-1. Qual versão do mod_audio_stream está instalada? Suporta `mulaw`?
-2. A OpenAI cobra diferente por G.711 vs PCM16?
-3. Deepgram e Gemini também suportam G.711?
+1. ~~Qual versão do mod_audio_stream?~~ → v1.0.3 (confirmado)
+2. ~~Suporta G.711 no envio?~~ → Não, apenas L16
+3. ~~Suporta G.711 no recebimento?~~ → Sim, otimizado
+4. A OpenAI cobra diferente por G.711 vs PCM16?
+5. Deepgram e Gemini também suportam G.711?

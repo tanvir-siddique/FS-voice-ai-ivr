@@ -1,56 +1,84 @@
-# Tasks: Migrar para G.711 Nativo
+# Tasks: Migrar para G.711 Híbrido/Nativo
 
-## 0. Pré-requisitos
-- [ ] 0.1 Verificar versão do mod_audio_stream instalada
-- [ ] 0.2 Testar se mod_audio_stream suporta formato `mulaw`
-- [ ] 0.3 Confirmar que OpenAI aceita `audio/pcmu` no modelo GA
+## Fase 1: G.711 Híbrido (Output Only)
 
-## 1. Configuração
-- [ ] 1.1 Adicionar campo `audio_format` em `RealtimeSessionConfig` (valores: `g711`, `pcm16`)
-- [ ] 1.2 Adicionar campo `audio_format` na tabela `voice_secretaries` do FusionPBX
-- [ ] 1.3 Carregar configuração no `server.py`
+### 1.1 Configuração
+- [ ] 1.1.1 Adicionar campo `audio_format` em `RealtimeSessionConfig`
+- [ ] 1.1.2 Adicionar campo `g711_mode` ("hybrid" | "full")
+- [ ] 1.1.3 Carregar configuração no `server.py`
 
-## 2. OpenAI Provider
-- [ ] 2.1 Modificar `_build_session_config()` para usar `audio/pcmu` quando `audio_format=g711`
-- [ ] 2.2 Ajustar envio de áudio (já é base64, apenas formato muda)
-- [ ] 2.3 Ajustar recebimento de áudio (decode G.711 se necessário)
+### 1.2 OpenAI Provider - Output G.711
+- [ ] 1.2.1 Modificar `_build_session_config()` para output `audio/pcmu`
+- [ ] 1.2.2 Manter input como `audio/pcm` (por enquanto)
+- [ ] 1.2.3 Testar recebimento de áudio G.711 da OpenAI
 
-## 3. Session
-- [ ] 3.1 Modificar `handle_audio_input()` para passthrough quando G.711
-- [ ] 3.2 Modificar `_handle_audio_output()` para passthrough quando G.711
-- [ ] 3.3 Remover chamadas ao ResamplerPair quando G.711
+### 1.3 Session - Passthrough G.711
+- [ ] 1.3.1 Modificar `_handle_audio_output()` para enviar G.711 direto ao WebSocket
+- [ ] 1.3.2 Remover resample de output quando G.711
+- [ ] 1.3.3 Testar playback no FreeSWITCH
 
-## 4. Echo Canceller
-- [ ] 4.1 Ajustar `EchoCancellerWrapper` para 8kHz (frame_size=160)
-- [ ] 4.2 Converter G.711↔PCM16 apenas para o AEC (Speex requer PCM)
-- [ ] 4.3 Testar AEC com áudio 8kHz
+### 1.4 Testes Fase 1
+- [ ] 1.4.1 Testar chamada completa com output G.711
+- [ ] 1.4.2 Comparar latência de playback
+- [ ] 1.4.3 Verificar qualidade de áudio
 
-## 5. Barge-in Detection
-- [ ] 5.1 Ajustar thresholds de RMS para G.711 (8-bit vs 16-bit)
-- [ ] 5.2 Converter G.711→PCM16 apenas para cálculo de RMS
-- [ ] 5.3 Testar barge-in com G.711
+---
 
-## 6. ESL Client
-- [ ] 6.1 Modificar `audio_stream()` para aceitar formato `mulaw`
-- [ ] 6.2 Passar formato correto baseado em `audio_format`
+## Fase 2: G.711 Completo (Input + Output)
 
-## 7. Server
-- [ ] 7.1 Ajustar `freeswitch_sample_rate` para 8000 quando G.711
-- [ ] 7.2 Ajustar cálculos de frame size (160 bytes para 20ms @ 8kHz G.711)
+### 2.1 Conversão L16→G.711 no Python
+- [ ] 2.1.1 Criar `utils/audio_codec.py` com funções `pcm_to_ulaw()` e `ulaw_to_pcm()`
+- [ ] 2.1.2 Usar `audioop` (stdlib) para conversão
+- [ ] 2.1.3 Testar conversão isolada
 
-## 8. Testes
-- [ ] 8.1 Testar chamada completa com G.711
-- [ ] 8.2 Comparar latência G.711 vs PCM16
-- [ ] 8.3 Comparar qualidade de STT
-- [ ] 8.4 Testar barge-in
-- [ ] 8.5 Testar AEC com viva-voz
-- [ ] 8.6 Testar transferência
+### 2.2 Session - Input G.711
+- [ ] 2.2.1 Modificar `handle_audio_input()` para converter L16→G.711
+- [ ] 2.2.2 Manter L16 para processamento AEC
+- [ ] 2.2.3 Enviar G.711 para OpenAI
 
-## 9. Rollout
-- [ ] 9.1 Ativar para secretária de teste
-- [ ] 9.2 Monitorar métricas por 24h
-- [ ] 9.3 Expandir para produção
+### 2.3 OpenAI Provider - Input G.711
+- [ ] 2.3.1 Modificar `_build_session_config()` para input `audio/pcmu`
+- [ ] 2.3.2 Ajustar envio de áudio (base64 G.711)
 
-## 10. Documentação
-- [ ] 10.1 Atualizar CLAUDE.md com nova configuração
-- [ ] 10.2 Documentar flag `audio_format` no FusionPBX
+### 2.4 Echo Canceller - Adaptar para 8kHz
+- [ ] 2.4.1 Ajustar `EchoCancellerWrapper` para 8kHz
+- [ ] 2.4.2 `frame_size` = 160 samples (20ms @ 8kHz)
+- [ ] 2.4.3 `filter_length` = 1024 samples (128ms)
+- [ ] 2.4.4 Converter G.711↔L16 apenas para AEC
+
+### 2.5 Barge-in Detection
+- [ ] 2.5.1 Ajustar threshold RMS para 8-bit (G.711)
+- [ ] 2.5.2 Ou converter G.711→L16 para cálculo RMS
+- [ ] 2.5.3 Testar barge-in com G.711
+
+### 2.6 Remover Resampler
+- [ ] 2.6.1 Remover `ResamplerPair` quando `g711_mode=full`
+- [ ] 2.6.2 Limpar código de resample não usado
+
+### 2.7 Testes Fase 2
+- [ ] 2.7.1 Testar chamada completa com G.711 bidirecional
+- [ ] 2.7.2 Comparar latência total vs PCM16
+- [ ] 2.7.3 Comparar qualidade de STT
+- [ ] 2.7.4 Testar barge-in
+- [ ] 2.7.5 Testar AEC com viva-voz
+- [ ] 2.7.6 Testar transferência
+
+---
+
+## Fase 3: Rollout
+
+### 3.1 Configuração FusionPBX
+- [ ] 3.1.1 Adicionar campo `audio_format` na tabela `voice_secretaries`
+- [ ] 3.1.2 Adicionar UI no FusionPBX para configurar formato
+- [ ] 3.1.3 Migrar secretárias existentes (default: pcm16)
+
+### 3.2 Rollout Gradual
+- [ ] 3.2.1 Ativar G.711 para uma secretária de teste
+- [ ] 3.2.2 Monitorar métricas por 24h
+- [ ] 3.2.3 Expandir para 10% das secretárias
+- [ ] 3.2.4 Expandir para 100%
+
+### 3.3 Documentação
+- [ ] 3.3.1 Atualizar CLAUDE.md
+- [ ] 3.3.2 Documentar flag `audio_format` no FusionPBX
+- [ ] 3.3.3 Criar runbook de troubleshooting
