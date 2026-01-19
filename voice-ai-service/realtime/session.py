@@ -354,6 +354,7 @@ class RealtimeSession:
         self._assistant_speaking = False
         self._call_state = CallState.LISTENING
         self._last_barge_in_ts = 0.0
+        self._interrupt_protected_until = 0.0  # Timestamp até quando interrupções são ignoradas
         self._last_audio_delta_ts = 0.0
         self._local_barge_hits = 0
         self._barge_noise_floor = 0.0
@@ -1258,6 +1259,20 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         elif event.type == ProviderEventType.SPEECH_STARTED:
             self._user_speaking = True
             self._speech_start_time = time.time()
+            
+            # Verificar se estamos em período de proteção contra interrupções
+            # Isso evita que ruído do unhold interrompa a mensagem pós-transfer
+            now = time.time()
+            if now < self._interrupt_protected_until:
+                logger.debug(
+                    "🛡️ Interrupção ignorada (período de proteção)",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "protection_remaining_ms": int((self._interrupt_protected_until - now) * 1000)
+                    }
+                )
+                return  # Ignorar este evento de fala
+            
             # Se o usuário começou a falar, tentar interromper e limpar playback pendente.
             # (Mesmo que _assistant_speaking esteja brevemente fora de sincronia.)
             if self._assistant_speaking:
@@ -2867,6 +2882,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # 3. Pequeno delay para garantir que FreeSWITCH processou unhold
             logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 3: Aguardando 200ms...")
             await asyncio.sleep(0.2)
+            
+            # 3.5. PROTEÇÃO CONTRA INTERRUPÇÕES
+            # Após unhold, pode haver ruído residual (clique, MOH) que o VAD detecta como fala.
+            # Proteger por 2 segundos para garantir que a mensagem seja dita completamente.
+            protection_duration = 2.0  # segundos
+            self._interrupt_protected_until = time.time() + protection_duration
+            logger.info(
+                f"📋 [HANDLE_TRANSFER_RESULT] Step 3.5: Proteção contra interrupções ativada ({protection_duration}s)",
+                extra={"call_uuid": self.call_uuid}
+            )
             
             # 4. Habilitar áudio novamente ANTES de enviar mensagem
             logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 4: Habilitando áudio (transfer_in_progress=False)...")
