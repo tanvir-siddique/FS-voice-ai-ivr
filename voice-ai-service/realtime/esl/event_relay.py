@@ -659,29 +659,19 @@ class DualModeEventRelay:
             if on:
                 # Tocar MOH em background (não bloqueante)
                 # 
-                # IMPORTANTE: local_stream retorna sucesso mesmo sem arquivos!
-                # Então usamos tone_stream PRIMEIRO para garantir que o cliente ouça algo.
-                # Se o usuário configurar MOH real no FreeSWITCH, pode mudar a ordem.
+                # FusionPBX tem música de espera configurada em local_stream://default
+                # Usar isso como primeira opção, com tone_stream como fallback
                 #
-                # Variável de ambiente para escolher MOH preferido
-                preferred_moh = os.getenv("VOICE_AI_MOH_SOURCE", "tone_stream")
-                
-                if preferred_moh == "local_stream":
-                    # Prioriza música de espera configurada
-                    moh_sources = [
-                        "local_stream://default",
-                        "local_stream://moh",
-                        "tone_stream://%(1000,4000,425);loops=-1",
-                    ]
-                else:
-                    # Prioriza tom de ringback (garantido funcionar)
-                    moh_sources = [
-                        # Tom de ringback brasileiro (som de "chamando" - 425Hz)
-                        "tone_stream://%(1000,4000,425);loops=-1",
-                        # Fallback para MOH configurado
-                        "local_stream://default",
-                        "local_stream://moh",
-                    ]
+                moh_sources = [
+                    # 1. MOH do FusionPBX (configurado via UI)
+                    "local_stream://default",
+                    # 2. MOH alternativo
+                    "local_stream://moh",
+                    # 3. Arquivo de música direto (8kHz para compatibilidade)
+                    "$${sounds_dir}/music/8000/ponce-preludio-in-e-major.wav",
+                    # 4. Tom de ringback brasileiro como último fallback
+                    "tone_stream://%(1000,4000,425);loops=-1",
+                ]
                 
                 for moh_source in moh_sources:
                     try:
