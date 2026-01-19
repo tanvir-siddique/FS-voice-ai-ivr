@@ -25,6 +25,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    # Speex DSP for echo cancellation (AEC)
+    libspeexdsp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
@@ -52,6 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Audio processing
     ffmpeg \
     libsndfile1 \
+    # Speex DSP runtime for echo cancellation (AEC)
+    libspeexdsp1 \
     # For health checks
     curl \
     # Cleanup
