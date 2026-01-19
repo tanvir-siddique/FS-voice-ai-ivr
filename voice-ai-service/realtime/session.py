@@ -1666,7 +1666,10 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
     async def _send_text_to_provider(self, text: str, request_response: bool = True) -> None:
         """Envia texto para o provider (TTS)."""
         if self._provider:
-            await self._provider.send_text(text, request_response=request_response)
+            try:
+                await self._provider.send_text(text, request_response=request_response)
+            except RuntimeError as e:
+                logger.warning(f"Provider not connected, skipping send_text: {e}")
     
     async def _check_handoff_keyword(self, user_text: str) -> bool:
         """Verifica se o texto contém keyword de handoff."""

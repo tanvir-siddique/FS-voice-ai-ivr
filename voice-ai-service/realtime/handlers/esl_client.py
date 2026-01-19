@@ -50,6 +50,7 @@ ESL_READ_TIMEOUT = float(os.getenv("ESL_READ_TIMEOUT", "30.0"))
 ESL_RECONNECT_DELAY = float(os.getenv("ESL_RECONNECT_DELAY", "2.0"))
 ESL_MAX_RECONNECT_ATTEMPTS = int(os.getenv("ESL_MAX_RECONNECT_ATTEMPTS", "3"))
 ESL_REGISTRATION_TIMEOUT = float(os.getenv("ESL_REGISTRATION_TIMEOUT", "3.0"))
+ESL_API_TIMEOUT = float(os.getenv("ESL_API_TIMEOUT", "5.0"))
 
 
 class ESLError(Exception):
@@ -803,7 +804,10 @@ class AsyncESLClient:
             True se sucesso
         """
         try:
-            result = await self.execute_api(f"uuid_broadcast {uuid} {audio} {leg}")
+            result = await asyncio.wait_for(
+                self.execute_api(f"uuid_broadcast {uuid} {audio} {leg}"),
+                timeout=ESL_API_TIMEOUT
+            )
             success = "+OK" in result or "Success" in result
             
             if success:
@@ -812,6 +816,9 @@ class AsyncESLClient:
                 logger.warning(f"uuid_broadcast failed: {result}")
             
             return success
+        except asyncio.TimeoutError:
+            logger.error(f"uuid_broadcast timeout after {ESL_API_TIMEOUT}s: {uuid} {audio}")
+            return False
         except Exception as e:
             logger.error(f"uuid_broadcast error: {e}")
             return False
@@ -1348,8 +1355,11 @@ class AsyncESLClient:
             
             # 3. Executar speak via uuid_broadcast
             # Formato documentado: speak::<texto> ou speak::flite|voice|texto
-            result = await self.execute_api(
-                f"uuid_broadcast {uuid} 'speak::{text_escaped}' aleg"
+            result = await asyncio.wait_for(
+                self.execute_api(
+                    f"uuid_broadcast {uuid} 'speak::{text_escaped}' aleg"
+                ),
+                timeout=ESL_API_TIMEOUT
             )
             
             if "+OK" in result:
@@ -1364,8 +1374,11 @@ class AsyncESLClient:
             logger.warning(f"uuid_say speak failed: {result}")
             
             # Fallback: tentar com formato alternativo flite|voice|text
-            result = await self.execute_api(
-                f"uuid_broadcast {uuid} 'speak::flite|{voice}|{text_escaped}' aleg"
+            result = await asyncio.wait_for(
+                self.execute_api(
+                    f"uuid_broadcast {uuid} 'speak::flite|{voice}|{text_escaped}' aleg"
+                ),
+                timeout=ESL_API_TIMEOUT
             )
             
             if "+OK" in result:
