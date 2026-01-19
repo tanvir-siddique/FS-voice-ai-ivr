@@ -715,8 +715,9 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             # Áudio (formatos antigo e novo)
             "response.audio.delta", "response.output_audio.delta",
             "response.audio.done", "response.output_audio.done",
-            # Transcrição do assistente
+            # Transcrição do assistente (formatos antigo e novo)
             "response.audio_transcript.delta", "response.audio_transcript.done",
+            "response.output_audio_transcript.delta", "response.output_audio_transcript.done",  # Formato GA 2026
             # Transcrição do usuário (STT)
             "conversation.item.input_audio_transcription.completed",
             "conversation.item.input_audio_transcription.failed",
@@ -735,7 +736,9 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "session.created", "session.updated",
             # Buffers
             "input_audio_buffer.committed", "input_audio_buffer.cleared",
+            # Conversation items lifecycle
             "conversation.item.created", "conversation.item.truncated",
+            "conversation.item.done",  # Item concluído (formato GA 2026)
             # Rate limits (info, não erro)
             "rate_limits.updated",
             # Errors
@@ -777,13 +780,15 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             return ProviderEvent(type=ProviderEventType.AUDIO_DONE, data={})
         
         # ===== TRANSCRIÇÃO DO ASSISTENTE =====
-        if etype == "response.audio_transcript.delta":
+        # COMPATIBILIDADE: Suporta formatos antigo (response.audio_transcript.*) 
+        # e novo GA (response.output_audio_transcript.*)
+        if etype in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
             return ProviderEvent(
                 type=ProviderEventType.TRANSCRIPT_DELTA,
                 data={"transcript": event.get("delta", "")}
             )
         
-        if etype == "response.audio_transcript.done":
+        if etype in ("response.audio_transcript.done", "response.output_audio_transcript.done"):
             return ProviderEvent(
                 type=ProviderEventType.TRANSCRIPT_DONE,
                 data={"transcript": event.get("transcript", "")}
@@ -894,7 +899,7 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         if etype in (
             "session.updated", "session.created",
             "input_audio_buffer.committed", "input_audio_buffer.cleared",
-            "conversation.item.created",
+            "conversation.item.created", "conversation.item.done",  # Item lifecycle
             "response.content_part.added", "response.content_part.done",
             "response.output_item.added", "response.output_item.done",
             "rate_limits.updated",  # Info de rate limits (não é erro)

@@ -194,8 +194,16 @@ class AsyncESLClient:
         self._command_lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
         
-        # Flag para pausar event reader durante comandos
+        # Lock para leitura do socket - resolve "readuntil() called while another coroutine is already waiting"
+        # Este lock garante que apenas uma coroutine pode ler do socket por vez
+        self._read_lock = asyncio.Lock()
+        
+        # Event para pausar event reader durante comandos
         # Evita "readuntil() called while another coroutine is already waiting"
+        self._reader_paused = asyncio.Event()
+        self._reader_paused.set()  # Inicialmente não pausado (set = pode rodar)
+        
+        # Flag para pausar event reader durante comandos (backup/legado)
         self._command_in_progress = False
     
     async def connect(self) -> bool:
@@ -309,14 +317,20 @@ class AsyncESLClient:
             self._reconnecting = False
     
     async def _resubscribe_events(self) -> None:
-        """Re-subscreve eventos após reconexão."""
+        """
+        Re-subscreve eventos após reconexão.
+        
+        THREAD SAFETY:
+        - Usa _reader_paused Event para pausar event reader
+        """
         events = list(self._subscribed_events)
         self._subscribed_events.clear()
         
         # Pausar event reader durante resubscribe
+        self._reader_paused.clear()
         self._command_in_progress = True
         try:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
             
             for event in events:
                 try:
@@ -327,6 +341,7 @@ class AsyncESLClient:
                     logger.warning(f"Failed to resubscribe to {event}: {e}")
         finally:
             self._command_in_progress = False
+            self._reader_paused.set()
     
     @property
     def is_connected(self) -> bool:
@@ -356,69 +371,90 @@ class AsyncESLClient:
           ter ficado no buffer e continua lendo até receber uma resposta de comando
           (Content-Type: api/response ou command/reply).
         - Se discard_events=False: retorna o payload mesmo se for evento (usado pelo event loop).
+        
+        THREAD SAFETY:
+        - Usa _read_lock para garantir que apenas uma coroutine lê do socket por vez
+        - Resolve erro "readuntil() called while another coroutine is already waiting"
         """
         if not self._reader:
             raise ESLConnectionError("Not connected")
         
         max_retries = 10  # Evitar loop infinito (quando discard_events=True)
         
-        for attempt in range(max_retries if discard_events else 1):
-            try:
-                lines = []
-                content_length = 0
-                content_type = ""
-                
-                # Ler headers
-                while True:
-                    line = await asyncio.wait_for(
-                        self._reader.readline(),
-                        timeout=timeout
-                    )
-                    line_str = line.decode().rstrip("\r\n")
+        # Usar lock para serializar leituras do socket
+        # Isso evita "readuntil() called while another coroutine is already waiting"
+        async with self._read_lock:
+            for attempt in range(max_retries if discard_events else 1):
+                try:
+                    lines = []
+                    content_length = 0
+                    content_type = ""
                     
-                    if not line_str:
-                        # Linha vazia = fim dos headers
-                        break
+                    # Ler headers
+                    while True:
+                        line = await asyncio.wait_for(
+                            self._reader.readline(),
+                            timeout=timeout
+                        )
+                        line_str = line.decode().rstrip("\r\n")
+                        
+                        if not line_str:
+                            # Linha vazia = fim dos headers
+                            break
+                        
+                        lines.append(line_str)
+                        
+                        # Verificar Content-Length
+                        if line_str.startswith("Content-Length:"):
+                            content_length = int(line_str.split(":")[1].strip())
+                        
+                        # Verificar Content-Type
+                        if line_str.startswith("Content-Type:"):
+                            content_type = line_str.split(":", 1)[1].strip()
                     
-                    lines.append(line_str)
+                    # Ler body se houver
+                    body = ""
+                    if content_length > 0:
+                        body_bytes = await asyncio.wait_for(
+                            self._reader.read(content_length),
+                            timeout=timeout
+                        )
+                        body = body_bytes.decode()
                     
-                    # Verificar Content-Length
-                    if line_str.startswith("Content-Length:"):
-                        content_length = int(line_str.split(":")[1].strip())
+                    # Verificar se é evento (text/event-plain)
+                    # No modo de leitura de comando, descartar e continuar.
+                    if discard_events and content_type.startswith("text/event-plain"):
+                        logger.debug(f"Discarding buffered event during command read: {body[:100]}...")
+                        continue  # Ler próximo pacote
                     
-                    # Verificar Content-Type
-                    if line_str.startswith("Content-Type:"):
-                        content_type = line_str.split(":", 1)[1].strip()
-                
-                # Ler body se houver
-                body = ""
-                if content_length > 0:
-                    body_bytes = await asyncio.wait_for(
-                        self._reader.read(content_length),
-                        timeout=timeout
-                    )
-                    body = body_bytes.decode()
-                
-                # Verificar se é evento (text/event-plain)
-                # No modo de leitura de comando, descartar e continuar.
-                if discard_events and content_type.startswith("text/event-plain"):
-                    logger.debug(f"Discarding buffered event during command read: {body[:100]}...")
-                    continue  # Ler próximo pacote
-                
-                # É uma resposta de comando
-                return "\n".join(lines) + ("\n\n" + body if body else "")
-                
-            except asyncio.TimeoutError:
-                raise ESLError(f"Read timeout ({timeout}s)")
-        
-        raise ESLError("Max retries reached reading command response")
+                    # É uma resposta de comando
+                    return "\n".join(lines) + ("\n\n" + body if body else "")
+                    
+                except asyncio.TimeoutError:
+                    raise ESLError(f"Read timeout ({timeout}s)")
+            
+            raise ESLError("Max retries reached reading command response")
     
     async def _event_reader_loop(self) -> None:
-        """Loop de leitura de eventos em background."""
+        """
+        Loop de leitura de eventos em background.
+        
+        THREAD SAFETY:
+        - Aguarda _reader_paused Event antes de cada leitura
+        - Usa _read_lock implicitamente via _read_event() -> _read_response()
+        - Resolve erro "readuntil() called while another coroutine is already waiting"
+        """
         while self._connected:
             try:
-                # Pausar enquanto um comando está em progresso
-                # Evita "readuntil() called while another coroutine is already waiting"
+                # Aguardar permissão para ler (pausa durante comandos)
+                # wait() retorna imediatamente se o Event estiver set
+                try:
+                    await asyncio.wait_for(self._reader_paused.wait(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    # Timeout esperando permissão - comando em progresso, continuar loop
+                    continue
+                
+                # Flag legado de pausa (backup)
                 if self._command_in_progress:
                     await asyncio.sleep(0.05)  # 50ms
                     continue
@@ -529,6 +565,12 @@ class AsyncESLClient:
         
         Returns:
             Resposta do comando
+        
+        THREAD SAFETY:
+        - Usa _command_lock para serializar comandos
+        - Pausa _event_reader_loop via _reader_paused Event
+        - Usa _read_lock implicitamente via _read_response()
+        - Resolve erro "readuntil() called while another coroutine is already waiting"
         """
         async with self._command_lock:
             if not self._connected:
@@ -536,10 +578,13 @@ class AsyncESLClient:
                     raise ESLConnectionError("Failed to connect to ESL")
             
             # Pausar event reader loop durante o comando
+            # clear() faz wait() bloquear no event reader
+            self._reader_paused.clear()
             self._command_in_progress = True
             try:
-                # Pequeno delay para garantir que o event reader pausou
-                await asyncio.sleep(0.01)
+                # Delay para garantir que o event reader pausou
+                # Aumentado para 50ms para dar tempo do reader sair do readline()
+                await asyncio.sleep(0.05)
                 
                 await self._send(f"api {command}\n\n")
                 response = await self._read_response(discard_events=True)
@@ -553,6 +598,8 @@ class AsyncESLClient:
                 return response
             finally:
                 self._command_in_progress = False
+                # Permitir event reader continuar
+                self._reader_paused.set()
     
     async def execute_bgapi(self, command: str) -> str:
         """
@@ -563,6 +610,9 @@ class AsyncESLClient:
         
         Returns:
             Job-UUID do comando
+        
+        THREAD SAFETY:
+        - Usa _reader_paused Event para pausar event reader
         """
         async with self._command_lock:
             if not self._connected:
@@ -570,9 +620,10 @@ class AsyncESLClient:
                     raise ESLConnectionError("Failed to connect to ESL")
             
             # Pausar event reader loop durante o comando
+            self._reader_paused.clear()
             self._command_in_progress = True
             try:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)
                 
                 await self._send(f"bgapi {command}\n\n")
                 response = await self._read_response(discard_events=True)
@@ -585,6 +636,7 @@ class AsyncESLClient:
                 return response
             finally:
                 self._command_in_progress = False
+                self._reader_paused.set()
     
     # =========================================================================
     # API de eventos
@@ -601,11 +653,15 @@ class AsyncESLClient:
         Args:
             events: Lista de eventos (ex: ["CHANNEL_ANSWER", "CHANNEL_HANGUP"])
             uuid: UUID específico para filtrar (opcional)
+        
+        THREAD SAFETY:
+        - Usa _reader_paused Event para pausar event reader
         """
         async with self._command_lock:
+            self._reader_paused.clear()
             self._command_in_progress = True
             try:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)
                 
                 for event in events:
                     if event not in self._subscribed_events:
@@ -620,18 +676,26 @@ class AsyncESLClient:
                     await self._read_response(discard_events=True)
             finally:
                 self._command_in_progress = False
+                self._reader_paused.set()
     
     async def unsubscribe_events(self, uuid: Optional[str] = None) -> None:
-        """Remove filtros de eventos."""
+        """
+        Remove filtros de eventos.
+        
+        THREAD SAFETY:
+        - Usa _reader_paused Event para pausar event reader
+        """
         if uuid:
             async with self._command_lock:
+                self._reader_paused.clear()
                 self._command_in_progress = True
                 try:
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.05)
                     await self._send(f"filter delete Unique-ID {uuid}\n\n")
                     await self._read_response(discard_events=True)
                 finally:
                     self._command_in_progress = False
+                    self._reader_paused.set()
     
     def on_event(
         self,
@@ -1151,6 +1215,64 @@ class AsyncESLClient:
             return "true" in result.lower()
         except Exception:
             return False
+    
+    async def check_extension_registered(self, extension: str, domain: str) -> tuple[bool, Optional[str]]:
+        """
+        Verifica se uma extensão está registrada (online) no FreeSWITCH.
+        
+        Usa o comando 'sofia status profile internal reg' para verificar
+        se o ramal tem registro ativo.
+        
+        Args:
+            extension: Número do ramal (ex: "1001")
+            domain: Domínio do ramal (ex: "empresa.com.br")
+        
+        Returns:
+            Tuple (is_registered, contact_info)
+            - is_registered: True se o ramal está registrado
+            - contact_info: Endereço de contato (IP:porta) se registrado
+        
+        NOTA: Esta verificação é útil para dar feedback rápido ao usuário
+        antes de tentar originate. Se o ramal não está registrado, o
+        originate falharia com USER_NOT_REGISTERED após o timeout.
+        """
+        try:
+            # Usar sofia status para verificar registro
+            # Formato: sofia status profile internal reg <user>@<domain>
+            result = await self.execute_api(f"sofia status profile internal reg {extension}@{domain}")
+            
+            # Se encontrar "Total items returned: 0", não está registrado
+            if "Total items returned: 0" in result or "0 total" in result.lower():
+                logger.debug(f"Extension {extension}@{domain} is NOT registered")
+                return (False, None)
+            
+            # Se encontrar dados de registro, está online
+            # Formato típico: Call-ID, User, Contact, Agent, Status, Ping, etc.
+            if extension in result and ("Registered" in result or "Contact:" in result):
+                # Extrair endereço de contato se disponível
+                contact = None
+                for line in result.split("\n"):
+                    if "Contact:" in line or "contact:" in line.lower():
+                        parts = line.split()
+                        if len(parts) > 1:
+                            contact = parts[1]
+                            break
+                
+                logger.debug(f"Extension {extension}@{domain} is registered at {contact}")
+                return (True, contact)
+            
+            # Fallback: se retornou dados mas não identificamos claramente
+            # assumir registrado para não bloquear indevidamente
+            if len(result) > 50:  # Tem conteúdo significativo
+                logger.debug(f"Extension {extension}@{domain} status unclear, assuming registered")
+                return (True, None)
+            
+            return (False, None)
+            
+        except Exception as e:
+            logger.warning(f"Failed to check extension registration: {e}")
+            # Em caso de erro, retornar True para não bloquear a chamada
+            return (True, None)
     
     # =========================================================================
     # ANNOUNCED TRANSFER: Métodos para transferência com anúncio
