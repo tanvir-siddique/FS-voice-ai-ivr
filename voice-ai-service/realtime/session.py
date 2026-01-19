@@ -1405,6 +1405,104 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         elif name == "check_appointment":
             return await self._execute_webhook_function("check_appointment", args)
         
+        # ========================================
+        # CALLBACK/RECADO: Funções para captura de recado
+        # ========================================
+        elif name == "leave_message":
+            # Cliente quer deixar um recado
+            message = args.get("message", "")
+            for_whom = args.get("for_whom", "")
+            
+            if not message:
+                return {"status": "error", "message": "Mensagem vazia"}
+            
+            # Criar recado via OmniPlay
+            result = await self._create_message_ticket(message, for_whom)
+            
+            if result.get("success"):
+                logger.info(
+                    "Message/recado created",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "for_whom": for_whom,
+                        "message_length": len(message),
+                    }
+                )
+                return {"status": "created", "ticket_id": result.get("ticket_id")}
+            else:
+                logger.warning(
+                    "Failed to create message/recado",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "error": result.get("error"),
+                    }
+                )
+                # Ainda retornamos sucesso para o LLM continuar o fluxo
+                return {"status": "noted", "message": "Recado anotado internamente"}
+        
+        elif name == "accept_callback":
+            # Cliente aceitou callback - usar CallbackHandler se disponível
+            use_current_number = args.get("use_current_number", True)
+            reason = args.get("reason", "")
+            
+            if self._callback_handler:
+                if use_current_number:
+                    success = self._callback_handler.use_caller_id_as_callback()
+                    if success:
+                        self._callback_handler.set_reason(reason)
+                        return {"status": "number_confirmed", "number": self.caller_id}
+                    else:
+                        return {"status": "need_number", "message": "Número atual inválido, pergunte outro"}
+                else:
+                    return {"status": "need_number", "message": "Pergunte o número para callback"}
+            
+            return {"status": "noted", "reason": reason}
+        
+        elif name == "provide_callback_number":
+            # Cliente forneceu número para callback
+            phone_number = args.get("phone_number", "")
+            
+            if self._callback_handler:
+                from .handlers.callback_handler import PhoneNumberUtils
+                
+                extracted = PhoneNumberUtils.extract_phone_from_text(phone_number)
+                if extracted:
+                    normalized, is_valid = PhoneNumberUtils.validate_brazilian_number(extracted)
+                    if is_valid:
+                        self._callback_handler.set_callback_number(normalized)
+                        formatted = PhoneNumberUtils.format_for_speech(normalized)
+                        return {"status": "captured", "number": normalized, "formatted": formatted}
+                
+                return {"status": "invalid", "message": "Número inválido, peça para repetir"}
+            
+            return {"status": "noted", "number": phone_number}
+        
+        elif name == "confirm_callback_number":
+            # Cliente confirmou o número
+            confirmed = args.get("confirmed", True)
+            
+            if confirmed and self._callback_handler and self._callback_handler.callback_data.callback_number:
+                # Criar o callback ticket
+                result = await self._create_callback_ticket()
+                if result.get("success"):
+                    return {"status": "callback_created", "ticket_id": result.get("ticket_id")}
+                else:
+                    return {"status": "noted", "message": "Callback registrado"}
+            elif not confirmed:
+                return {"status": "need_correction", "message": "Pergunte o número correto"}
+            
+            return {"status": "confirmed" if confirmed else "need_correction"}
+        
+        elif name == "schedule_callback":
+            # Cliente quer agendar horário
+            preferred_time = args.get("preferred_time", "asap")
+            
+            if self._callback_handler:
+                # TODO: Implementar parsing de horário
+                pass
+            
+            return {"status": "scheduled", "time": preferred_time}
+        
         return {"error": f"Unknown function: {name}"}
 
     async def _execute_webhook_function(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1434,6 +1532,121 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                     return {"status": "error", "http_status": resp.status}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+    
+    async def _create_message_ticket(self, message: str, for_whom: str = "") -> Dict[str, Any]:
+        """
+        Cria ticket de recado via OmniPlay.
+        
+        Args:
+            message: Conteúdo do recado
+            for_whom: Para quem é o recado (nome ou departamento)
+        
+        Returns:
+            Dict com status e ticket_id se sucesso
+        """
+        if not self.config.omniplay_webhook_url:
+            logger.warning("OmniPlay webhook not configured, message ticket skipped")
+            return {"success": False, "error": "webhook_not_configured"}
+        
+        # Preparar destinatário
+        intended_for = for_whom
+        if not intended_for and self._current_transfer and self._current_transfer.destination:
+            intended_for = self._current_transfer.destination.name
+        
+        # Preparar transcrição como contexto
+        transcript_text = ""
+        if self._handoff_handler and self._handoff_handler.transcript:
+            transcript_text = "\n".join([
+                f"{t.role}: {t.text}" 
+                for t in self._handoff_handler.transcript[-10:]  # Últimas 10 mensagens
+            ])
+        
+        payload = {
+            "event": "voice_ai_message",
+            "domain_uuid": self.config.domain_uuid,
+            "call_uuid": self.call_uuid,
+            "caller_id": self.caller_id,
+            "secretary_uuid": self.config.secretary_uuid,
+            "ticket": {
+                "type": "message",
+                "subject": f"Recado de {self.caller_id}",
+                "message": message,
+                "for_whom": intended_for,
+                "priority": "medium",
+                "channel": "voice",
+                "transcript": transcript_text,
+                "call_duration": int(time.time() - self._start_time) if hasattr(self, '_start_time') else 0,
+            },
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.config.omniplay_webhook_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status in (200, 201):
+                        data = await resp.json()
+                        return {
+                            "success": True,
+                            "ticket_id": data.get("id") or data.get("ticketId"),
+                        }
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to create message ticket: {resp.status} - {error_text}")
+                        return {"success": False, "error": f"HTTP {resp.status}"}
+        except Exception as e:
+            logger.exception(f"Error creating message ticket: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _create_callback_ticket(self) -> Dict[str, Any]:
+        """
+        Cria ticket de callback via CallbackHandler.
+        
+        Returns:
+            Dict com status e ticket_id se sucesso
+        """
+        if not self._callback_handler:
+            return {"success": False, "error": "callback_handler_not_configured"}
+        
+        if not self._callback_handler.callback_data.callback_number:
+            return {"success": False, "error": "callback_number_not_set"}
+        
+        try:
+            # Configurar destino se houver
+            if self._current_transfer and self._current_transfer.destination:
+                self._callback_handler.set_intended_destination(
+                    self._current_transfer.destination
+                )
+            
+            # Configurar dados da chamada
+            call_duration = int(time.time() - self._start_time) if hasattr(self, '_start_time') else 0
+            
+            transcript = None
+            if self._handoff_handler and self._handoff_handler.transcript:
+                transcript = [
+                    {"role": t.role, "text": t.text}
+                    for t in self._handoff_handler.transcript
+                ]
+            
+            self._callback_handler.set_voice_call_data(
+                duration=call_duration,
+                transcript=transcript
+            )
+            
+            # Criar callback
+            result = await self._callback_handler.create_callback()
+            
+            return {
+                "success": result.success,
+                "ticket_id": result.ticket_id,
+                "error": result.error,
+            }
+            
+        except Exception as e:
+            logger.exception(f"Error creating callback ticket: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _send_text_to_provider(self, text: str) -> None:
         """Envia texto para o provider (TTS)."""
