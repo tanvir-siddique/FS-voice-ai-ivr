@@ -749,14 +749,18 @@ extern "C" {
         auto *tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
         if (!tech_pvt || tech_pvt->audio_paused) return SWITCH_TRUE;
         
-        /* NETPLAY v2.4: Half-duplex safety net
-         * Even with AEC, we skip sending mic audio while agent is actively speaking.
-         * This provides extra protection against echo feedback.
-         * The user can still barge-in during natural pauses.
+        /* NETPLAY v2.5: Full-duplex mode - AEC no Python
+         * 
+         * O half-duplex foi removido. O cancelamento de eco agora é feito no Python
+         * usando Speex DSP (EchoCancellerWrapper em realtime/utils/echo_canceller.py).
+         * 
+         * Fluxo:
+         * 1. FreeSWITCH envia mic + echo para Python
+         * 2. Python usa speaker buffer como referência para AEC
+         * 3. Python envia audio limpo para OpenAI
+         * 
+         * Isso permite barge-in real durante a fala do agente.
          */
-        if (tech_pvt->playback_active) {
-            return SWITCH_TRUE;
-        }
         /*
         auto flush_sbuffer = [&]() {
             switch_size_t inuse = switch_buffer_inuse(tech_pvt->sbuffer);

@@ -396,7 +396,7 @@ done:
  *   - SMBF_WRITE_REPLACE for frame injection
  *   - Barge-in support via stopAudio command
  * ======================================== */
-#define MOD_AUDIO_STREAM_VERSION "2.4.0-netplay"
+#define MOD_AUDIO_STREAM_VERSION "2.5.0-netplay"
 #define MOD_AUDIO_STREAM_BUILD_DATE "2026-01-19"
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_audio_stream_load)
