@@ -748,6 +748,14 @@ extern "C" {
     switch_bool_t stream_frame(switch_media_bug_t *bug) {
         auto *tech_pvt = (private_t *)switch_core_media_bug_get_user_data(bug);
         if (!tech_pvt || tech_pvt->audio_paused) return SWITCH_TRUE;
+        
+        /* NETPLAY v2.3: Half-duplex mode - don't send mic audio while agent is speaking
+         * This prevents echo from being sent to OpenAI and causing self-interruption.
+         * When playback_active=1, the agent is speaking, so we skip capturing mic audio.
+         */
+        if (tech_pvt->playback_active) {
+            return SWITCH_TRUE;
+        }
         /*
         auto flush_sbuffer = [&]() {
             switch_size_t inuse = switch_buffer_inuse(tech_pvt->sbuffer);
