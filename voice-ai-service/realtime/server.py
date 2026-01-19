@@ -1159,7 +1159,7 @@ class RealtimeServer:
 
                 if sender_task is None:
                     sender_task = asyncio.create_task(_sender_loop_rawaudio())
-                    logger.info("FreeSWITCH playback sender started (rawAudio+binary)", extra={"call_uuid": call_uuid})
+                    logger.info(f"FreeSWITCH playback sender started (mode={playback_mode})", extra={"call_uuid": call_uuid})
 
                 pending.extend(audio_bytes)
 

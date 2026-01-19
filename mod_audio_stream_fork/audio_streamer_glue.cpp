@@ -254,6 +254,24 @@ public:
                     message.assign(jsonString);
                     free(jsonString);
                     status = SWITCH_TRUE;
+                    
+                    // NETPLAY FORK: Auto-playback do arquivo recebido (assíncrono)
+                    switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, 
+                        "(%s) 🔊 Auto-playback: %s\n", m_sessionId.c_str(), filePath);
+                    
+                    // Usar uuid_broadcast para playback assíncrono
+                    // Formato: uuid_broadcast <uuid> <path> aleg
+                    switch_channel_t *channel = switch_core_session_get_channel(session);
+                    if (channel && switch_channel_ready(channel)) {
+                        char broadcast_cmd[512];
+                        switch_snprintf(broadcast_cmd, sizeof(broadcast_cmd), "%s %s aleg", 
+                            m_sessionId.c_str(), filePath);
+                        
+                        switch_stream_handle_t stream = { 0 };
+                        SWITCH_STANDARD_STREAM(stream);
+                        switch_api_execute("uuid_broadcast", broadcast_cmd, session, &stream);
+                        switch_safe_free(stream.data);
+                    }
                 }
                 if (jsonAudio)
                     cJSON_Delete(jsonAudio);
