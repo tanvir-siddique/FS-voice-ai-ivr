@@ -269,6 +269,9 @@ class DualModeEventRelay:
         # Handler para CHANNEL_UNHOLD
         self.session.register_handle("CHANNEL_UNHOLD", self._on_channel_unhold_raw)
         
+        # Handler para eventos CUSTOM (mod_audio_stream::play)
+        self.session.register_handle("CUSTOM", self._on_custom_event_raw)
+        
         logger.debug(f"[{self._uuid}] Event handlers registered")
     
     def _correlate_session(self) -> None:
@@ -538,6 +541,66 @@ class DualModeEventRelay:
         
         if self._realtime_session:
             self._dispatch_to_session("handle_hold", False)
+    
+    def _on_custom_event_raw(self, event: Any) -> None:
+        """
+        Handler para eventos CUSTOM (mod_audio_stream::play, etc).
+        
+        Quando mod_audio_stream recebe áudio via streamAudio, ele:
+        1. Salva o arquivo em /tmp
+        2. Envia evento CUSTOM com subclass mod_audio_stream::play
+        3. NÓS precisamos fazer o playback do arquivo
+        """
+        # Extrair subclass do evento
+        subclass = None
+        if hasattr(event, 'headers') and isinstance(event.headers, dict):
+            subclass = event.headers.get("Event-Subclass", "")
+        elif hasattr(event, 'get_header'):
+            subclass = event.get_header("Event-Subclass") or ""
+        
+        if subclass == "mod_audio_stream::play":
+            self._handle_audio_stream_play(event)
+        else:
+            logger.debug(f"[{self._uuid}] CUSTOM event ignored: {subclass}")
+    
+    def _handle_audio_stream_play(self, event: Any) -> None:
+        """
+        Handler para mod_audio_stream::play - reproduz arquivo de áudio.
+        
+        O evento contém o caminho do arquivo no body (JSON).
+        """
+        import json
+        
+        # Extrair body do evento
+        body = None
+        if hasattr(event, 'body'):
+            body = event.body
+        elif hasattr(event, 'get_body'):
+            body = event.get_body()
+        
+        if not body:
+            logger.warning(f"[{self._uuid}] mod_audio_stream::play without body")
+            return
+        
+        try:
+            data = json.loads(body)
+            file_path = data.get("file")
+            
+            if not file_path:
+                logger.warning(f"[{self._uuid}] mod_audio_stream::play without file path")
+                return
+            
+            logger.info(f"[{self._uuid}] 🔊 Playing audio: {file_path}")
+            
+            # Usar playback para reproduzir o arquivo
+            # O greenswitch OutboundSession suporta session.playback()
+            try:
+                self.session.playback(file_path, block=False)
+            except Exception as e:
+                logger.error(f"[{self._uuid}] Failed to playback {file_path}: {e}")
+        
+        except json.JSONDecodeError as e:
+            logger.error(f"[{self._uuid}] Failed to parse mod_audio_stream::play body: {e}")
     
     # ========================================
     # Comandos ESL Outbound (para RealtimeSession)
