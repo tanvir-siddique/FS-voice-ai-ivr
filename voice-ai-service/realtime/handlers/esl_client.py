@@ -49,6 +49,7 @@ ESL_CONNECT_TIMEOUT = float(os.getenv("ESL_CONNECT_TIMEOUT", "5.0"))
 ESL_READ_TIMEOUT = float(os.getenv("ESL_READ_TIMEOUT", "30.0"))
 ESL_RECONNECT_DELAY = float(os.getenv("ESL_RECONNECT_DELAY", "2.0"))
 ESL_MAX_RECONNECT_ATTEMPTS = int(os.getenv("ESL_MAX_RECONNECT_ATTEMPTS", "3"))
+ESL_REGISTRATION_TIMEOUT = float(os.getenv("ESL_REGISTRATION_TIMEOUT", "3.0"))
 
 
 class ESLError(Exception):
@@ -1250,7 +1251,10 @@ class AsyncESLClient:
         try:
             # Usar sofia status para verificar registro
             # Formato: sofia status profile internal reg <user>@<domain>
-            result = await self.execute_api(f"sofia status profile internal reg {extension}@{domain}")
+            result = await asyncio.wait_for(
+                self.execute_api(f"sofia status profile internal reg {extension}@{domain}"),
+                timeout=ESL_REGISTRATION_TIMEOUT
+            )
             
             # Se encontrar "Total items returned: 0", não está registrado
             if "Total items returned: 0" in result or "0 total" in result.lower():
@@ -1280,10 +1284,15 @@ class AsyncESLClient:
             
             return (False, None)
             
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Extension registration check timed out after {ESL_REGISTRATION_TIMEOUT}s; treating as offline",
+                extra={"extension": extension, "domain": domain}
+            )
+            return (False, None)
         except Exception as e:
             logger.warning(f"Failed to check extension registration: {e}")
-            # Em caso de erro, retornar True para não bloquear a chamada
-            return (True, None)
+            return (False, None)
     
     # =========================================================================
     # ANNOUNCED TRANSFER: Métodos para transferência com anúncio
