@@ -449,7 +449,8 @@ class RealtimeServer:
                     -- Push-to-talk tuning
                     s.ptt_rms_threshold,
                     s.ptt_hits,
-                    -- Transfer Realtime Mode (migration 022)
+                    -- Transfer Mode Configuration (migrations 013, 022)
+                    COALESCE(s.transfer_announce_enabled, true) as transfer_announce_enabled,
                     COALESCE(s.transfer_realtime_enabled, false) as transfer_realtime_enabled,
                     s.transfer_realtime_prompt,
                     COALESCE(s.transfer_realtime_timeout, 15) as transfer_realtime_timeout
@@ -839,7 +840,8 @@ class RealtimeServer:
             # Guardrails Configuration (migration 023)
             guardrails_enabled=_parse_bool(row.get("guardrails_enabled"), default=True),
             guardrails_topics=_parse_guardrails_topics(row.get("guardrails_topics")),
-            # Transfer Realtime Mode (migration 022)
+            # Transfer Mode Configuration (migrations 013, 022)
+            transfer_announce_enabled=_parse_bool(row.get("transfer_announce_enabled"), default=True),
             transfer_realtime_enabled=_parse_bool(row.get("transfer_realtime_enabled"), default=False),
             transfer_realtime_prompt=row.get("transfer_realtime_prompt"),
             transfer_realtime_timeout=float(row.get("transfer_realtime_timeout") or 15),

@@ -94,6 +94,7 @@
 		'guardrails_topics' => '',
 		// Transfer / Handoff
 		'transfer_extension' => '200',
+		'transfer_announce_enabled' => 'true',
 		'transfer_realtime_enabled' => 'false',
 		'transfer_realtime_timeout' => 15,
 		'announcement_tts_provider' => 'elevenlabs',
@@ -179,7 +180,8 @@
 			// Guardrails Configuration
 			'guardrails_enabled' => isset($_POST['guardrails_enabled']) ? 'true' : 'false',
 			'guardrails_topics' => str_replace("\r\n", "\n", trim($_POST['guardrails_topics'] ?? '')),
-			// Transfer Realtime Configuration
+			// Transfer Configuration (from hidden fields set by JS)
+			'transfer_announce_enabled' => ($_POST['transfer_announce_enabled'] ?? '1') === '1' ? 'true' : 'false',
 			'transfer_realtime_enabled' => ($_POST['transfer_realtime_enabled'] ?? 'false') === 'true' ? 'true' : 'false',
 			'transfer_realtime_prompt' => str_replace("\r\n", "\n", trim($_POST['transfer_realtime_prompt'] ?? '')),
 			'transfer_realtime_timeout' => intval($_POST['transfer_realtime_timeout'] ?? 15),
@@ -269,7 +271,8 @@
 			// Guardrails Configuration
 			$array['voice_secretaries'][0]['guardrails_enabled'] = $form_data['guardrails_enabled'];
 			$array['voice_secretaries'][0]['guardrails_topics'] = $form_data['guardrails_topics'] ?: null;
-			// Transfer Realtime Configuration
+			// Transfer Configuration
+			$array['voice_secretaries'][0]['transfer_announce_enabled'] = $form_data['transfer_announce_enabled'];
 			$array['voice_secretaries'][0]['transfer_realtime_enabled'] = $form_data['transfer_realtime_enabled'];
 			$array['voice_secretaries'][0]['transfer_realtime_prompt'] = $form_data['transfer_realtime_prompt'] ?: null;
 			$array['voice_secretaries'][0]['transfer_realtime_timeout'] = $form_data['transfer_realtime_timeout'] ?: 15;
@@ -864,30 +867,45 @@
 	echo "</tr>\n";
 
 	// =====================================================
-	// Transfer Realtime Mode (Premium Feature)
+	// Transfer Mode Configuration - 3 Modes
 	// =====================================================
 	echo "<tr>\n";
 	echo "	<td colspan='2' style='padding: 12px 10px; background: #e8f5e9; border-bottom: 1px solid #4caf50;'>\n";
-	echo "		<b>🎙️ ".($text['header-transfer_realtime'] ?? 'Anúncio de Transferência (Premium)')."</b>\n";
+	echo "		<b>🎙️ ".($text['header-transfer_mode'] ?? 'Modo de Transferência')."</b>\n";
 	echo "		<span style='font-size: 0.85em; color: #2e7d32; margin-left: 10px;'>"
-		. "Como o agente anuncia o cliente ao atendente humano"
+		. "Como o funcionário é notificado da ligação"
 		. "</span>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
-	// Transfer Realtime Enabled
+	// Transfer Announce Enabled + Mode Selection
 	echo "<tr>\n";
-	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_realtime'] ?? 'Modo de Anúncio')."</td>\n";
+	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>".($text['label-transfer_mode'] ?? 'Modo de Transferência')."</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
+	
+	// Determine current mode
+	$transfer_announce = ($data['transfer_announce_enabled'] === true || $data['transfer_announce_enabled'] === 'true' || $data['transfer_announce_enabled'] === 't' || !isset($data['transfer_announce_enabled']));
 	$transfer_realtime = ($data['transfer_realtime_enabled'] === true || $data['transfer_realtime_enabled'] === 'true' || $data['transfer_realtime_enabled'] === 't');
-	echo "		<select class='formfld' name='transfer_realtime_enabled' id='transfer_realtime_enabled' onchange='toggleTransferRealtimeOptions()'>\n";
-	echo "			<option value='false' ".(!$transfer_realtime ? 'selected' : '').">📢 TTS Simples (Padrão)</option>\n";
-	echo "			<option value='true' ".($transfer_realtime ? 'selected' : '').">🗣️ Conversa Realtime (Premium)</option>\n";
+	
+	// Compute mode value for single select
+	$transfer_mode = 'blind';
+	if ($transfer_announce && $transfer_realtime) {
+		$transfer_mode = 'realtime';
+	} elseif ($transfer_announce) {
+		$transfer_mode = 'announced';
+	}
+	
+	echo "		<select class='formfld' name='transfer_mode' id='transfer_mode' style='width: 350px;' onchange='toggleTransferModeOptions()'>\n";
+	echo "			<option value='blind' ".($transfer_mode === 'blind' ? 'selected' : '').">📞 Transferência Direta (Blind)</option>\n";
+	echo "			<option value='announced' ".($transfer_mode === 'announced' ? 'selected' : '').">📢 Anúncio TTS + DTMF (Padrão)</option>\n";
+	echo "			<option value='realtime' ".($transfer_mode === 'realtime' ? 'selected' : '').">🗣️ Conversa IA Realtime (Premium)</option>\n";
 	echo "		</select>\n";
-	echo "		<br /><span class='vtable-hint'>"
-		. "<b>TTS Simples:</b> Toca um áudio pré-gerado + aguarda DTMF ou timeout<br/>"
-		. "<b>Conversa Realtime:</b> O agente IA conversa por voz com o humano (mais natural, mais caro)"
-		. "</span>\n";
+	
+	// Hidden fields to store actual values
+	echo "		<input type='hidden' name='transfer_announce_enabled' id='transfer_announce_enabled' value='".($transfer_announce ? '1' : '0')."'>\n";
+	echo "		<input type='hidden' name='transfer_realtime_enabled' id='transfer_realtime_enabled' value='".($transfer_realtime ? 'true' : 'false')."'>\n";
+	
+	echo "		<div style='margin-top: 10px; padding: 12px; border-radius: 6px;' id='transfer_mode_description'></div>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";
 
@@ -1507,12 +1525,68 @@ function toggleGuardrailsOptions() {
 	});
 }
 
-function toggleTransferRealtimeOptions() {
-	var enabled = document.getElementById('transfer_realtime_enabled')?.value === 'true';
-	var rows = document.querySelectorAll('.transfer-realtime-option');
-	rows.forEach(function(row) {
-		row.style.display = enabled ? '' : 'none';
+function toggleTransferModeOptions() {
+	var mode = document.getElementById('transfer_mode')?.value || 'announced';
+	var descDiv = document.getElementById('transfer_mode_description');
+	
+	// Update hidden fields based on mode
+	var announceField = document.getElementById('transfer_announce_enabled');
+	var realtimeField = document.getElementById('transfer_realtime_enabled');
+	
+	if (mode === 'blind') {
+		announceField.value = '0';
+		realtimeField.value = 'false';
+		if (descDiv) {
+			descDiv.style.background = '#fff3e0';
+			descDiv.style.borderLeft = '4px solid #ff9800';
+			descDiv.innerHTML = '<b>📞 Modo: Transferência Direta</b><br/>' +
+				'<span style="color: #666; font-size: 0.9em;">' +
+				'O funcionário atende e já está conectado com o cliente.<br/>' +
+				'<b>Vantagem:</b> Mais rápido<br/>' +
+				'<b>Desvantagem:</b> Funcionário não sabe quem está ligando ou o motivo' +
+				'</span>';
+		}
+	} else if (mode === 'announced') {
+		announceField.value = '1';
+		realtimeField.value = 'false';
+		if (descDiv) {
+			descDiv.style.background = '#e3f2fd';
+			descDiv.style.borderLeft = '4px solid #2196f3';
+			descDiv.innerHTML = '<b>📢 Modo: Anúncio TTS + DTMF</b><br/>' +
+				'<span style="color: #666; font-size: 0.9em;">' +
+				'Quando o funcionário atende, ouve: "Tenho o cliente X na linha sobre vendas. Pressione 2 para recusar."<br/>' +
+				'<b>Aceitar:</b> Aguardar timeout (5s)<br/>' +
+				'<b>Recusar:</b> Pressionar tecla 2<br/>' +
+				'<b>Custo:</b> Apenas TTS (baixo)' +
+				'</span>';
+		}
+	} else if (mode === 'realtime') {
+		announceField.value = '1';
+		realtimeField.value = 'true';
+		if (descDiv) {
+			descDiv.style.background = '#e8f5e9';
+			descDiv.style.borderLeft = '4px solid #4caf50';
+			descDiv.innerHTML = '<b>🗣️ Modo: Conversa IA Realtime (Premium)</b><br/>' +
+				'<span style="color: #666; font-size: 0.9em;">' +
+				'O agente IA <b>conversa por voz</b> com o funcionário!<br/>' +
+				'• IA: "Olá João! Tenho o cliente Fulano na linha sobre vendas. Pode atender?"<br/>' +
+				'• João: "Estou ocupado, diz que ligo em 10 minutos"<br/>' +
+				'• IA: "Entendido!" → Volta para cliente com a mensagem<br/>' +
+				'<b>Custo:</b> Usa OpenAI Realtime (mais caro, mais natural)' +
+				'</span>';
+		}
+	}
+	
+	// Toggle realtime-specific options
+	var realtimeRows = document.querySelectorAll('.transfer-realtime-option');
+	realtimeRows.forEach(function(row) {
+		row.style.display = (mode === 'realtime') ? '' : 'none';
 	});
+}
+
+// Legacy function for backward compatibility
+function toggleTransferRealtimeOptions() {
+	toggleTransferModeOptions();
 }
 
 function toggleHandoffOptions() {
@@ -1545,7 +1619,7 @@ function toggleUnbridgeOptions() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
 	toggleRealtimeProvider();
-	toggleTransferRealtimeOptions();
+	toggleTransferModeOptions();
 	toggleHandoffOptions();
 	toggleFallbackOptions();
 	toggleUnbridgeOptions();
