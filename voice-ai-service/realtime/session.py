@@ -1449,11 +1449,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
                                 "priority": urgency
                             }
                         }
-                        # Usar endpoint específico /message que é mais robusto
+                        # Usar endpoint configurado (genérico /webhook já detecta formato)
                         webhook_url = self.config.omniplay_webhook_url
-                        if not webhook_url.endswith("/message"):
-                            webhook_url = webhook_url.rstrip("/") + "/message"
-                        
                         logger.info(f"📝 [TAKE_MESSAGE] Enviando para {webhook_url}: {payload}")
                         async with http_session.post(
                             webhook_url,
