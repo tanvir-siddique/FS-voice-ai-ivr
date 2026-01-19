@@ -150,16 +150,23 @@ logger = logging.getLogger(__name__)
 
 
 # Tools padrão conforme design.md Decision 7
+# NOTA: Todos os tools devem ter "required" (mesmo que vazio) conforme Context7
 DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "name": "transfer_call",
-        "description": "Transfere a chamada para outro ramal ou departamento",
+        "description": "Transfere a chamada para outro ramal ou departamento. Use quando o cliente pedir para falar com alguém específico ou um setor.",
         "parameters": {
             "type": "object",
             "properties": {
-                "destination": {"type": "string"},
-                "reason": {"type": "string"}
+                "destination": {
+                    "type": "string",
+                    "description": "Nome do setor, pessoa ou ramal de destino"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Motivo da transferência"
+                }
             },
             "required": ["destination"]
         }
@@ -167,13 +174,23 @@ DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function", 
         "name": "create_ticket",
-        "description": "Cria um ticket no sistema",
+        "description": "Cria um ticket/recado no sistema. Use quando o cliente quiser deixar uma mensagem ou recado.",
         "parameters": {
             "type": "object",
             "properties": {
-                "subject": {"type": "string"},
-                "description": {"type": "string"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high"]}
+                "subject": {
+                    "type": "string",
+                    "description": "Assunto do ticket/recado"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Descrição detalhada da mensagem"
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "Prioridade do ticket"
+                }
             },
             "required": ["subject"]
         }
@@ -181,10 +198,16 @@ DEFAULT_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "name": "end_call",
-        "description": "Encerra a chamada",
+        "description": "Encerra a chamada telefônica. Use quando o cliente se despedir (tchau, adeus, até logo) ou quando a conversa terminar naturalmente.",
         "parameters": {
             "type": "object",
-            "properties": {"reason": {"type": "string"}}
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Motivo do encerramento (ex: despedida, cliente satisfeito)"
+                }
+            },
+            "required": []
         }
     }
 ]
@@ -445,6 +468,10 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
         vad_eagerness = vad_config.get("eagerness") if vad_config else None
         format_label = "GA" if is_ga else "PREVIEW"
         
+        # Contar tools para log
+        tools_count = len(session_config.get("session", {}).get("tools", []))
+        tools_names = [t.get("name") for t in session_config.get("session", {}).get("tools", [])]
+        
         logger.info(f"Sending session.update ({format_label} format) - voice={voice}, vad={vad_type}", extra={
             "domain_uuid": self.config.domain_uuid,
             "has_instructions": bool(self.config.system_prompt),
@@ -453,11 +480,18 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             "vad_eagerness": vad_eagerness,
             "model": self.model,
             "is_ga_model": is_ga,
+            "tools_count": tools_count,
+            "tools_names": tools_names,
         })
+        
+        # DEBUG: Log do payload completo (apenas em DEBUG level)
+        logger.debug(f"session.update payload: {json.dumps(session_config, indent=2)[:2000]}")
         
         try:
             await self._ws.send(json.dumps(session_config))
-            logger.info(f"session.update sent successfully ({format_label} format)")
+            logger.info(f"session.update sent successfully ({format_label} format)", extra={
+                "tools_count": tools_count,
+            })
         except Exception as e:
             logger.error(f"Failed to send session.update: {e}")
             raise
@@ -968,8 +1002,12 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                 })
                 return None  # Ignorar, não é erro crítico
             
+            # Log detalhado do erro para debug
             logger.error(f"OpenAI error: {error_code} - {error_message}", extra={
                 "domain_uuid": self.config.domain_uuid,
+                "error_type": error.get("type"),
+                "error_param": error.get("param"),
+                "full_error": json.dumps(error)[:500],
             })
             
             if error_code == "rate_limit_exceeded":
@@ -977,9 +1015,25 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
             
             return ProviderEvent(type=ProviderEventType.ERROR, data={"error": error})
         
+        # ===== SESSION UPDATED - CONFIRMAÇÃO DA CONFIGURAÇÃO =====
+        if etype == "session.updated":
+            session_data = event.get("session", {})
+            tools_count = len(session_data.get("tools", []))
+            tools_names = [t.get("name") for t in session_data.get("tools", [])]
+            
+            logger.info("OpenAI session.updated - configuration confirmed", extra={
+                "domain_uuid": self.config.domain_uuid,
+                "model": session_data.get("model"),
+                "voice": session_data.get("audio", {}).get("output", {}).get("voice"),
+                "tools_count": tools_count,
+                "tools_names": tools_names,
+                "has_turn_detection": session_data.get("audio", {}).get("input", {}).get("turn_detection") is not None,
+            })
+            return None
+        
         # ===== SESSION/META EVENTS (confirmações, ignorar) =====
         if etype in (
-            "session.updated", "session.created",
+            "session.created",
             "input_audio_buffer.committed", "input_audio_buffer.cleared",
             "conversation.item.created", "conversation.item.done",  # Item lifecycle
             "response.content_part.added", "response.content_part.done",
