@@ -207,12 +207,19 @@ public:
                     cJSON* jsonSampleRate = cJSON_GetObjectItem(jsonData, "sampleRate");
                     sampleRate = jsonSampleRate && jsonSampleRate->valueint ? jsonSampleRate->valueint : 0;
                     
-                    // NETPLAY FIX: Extensões .r8/.r16 indicam BIT DEPTH, não sample rate!
-                    // .r8 = 8-bit audio, .r16 = 16-bit audio
-                    // Nosso áudio é sempre L16 PCM (16-bit), então usar .r16
-                    // O sample rate é inferido pelo FreeSWITCH baseado no codec do canal (8kHz para G.711)
-                    if (sampleRate > 0) {
-                        fileType = ".r16";  // L16 PCM = 16-bit
+                    // NETPLAY FIX: Usar .sln (Signed Linear) que é o formato nativo do FreeSWITCH
+                    // .sln = raw 16-bit signed linear PCM @ 8kHz (L16)
+                    // FreeSWITCH reconhece .sln como seu formato interno
+                    if (sampleRate == 8000) {
+                        fileType = ".sln";  // L16 PCM @ 8kHz
+                    } else if (sampleRate == 16000) {
+                        fileType = ".sln16";  // L16 PCM @ 16kHz
+                    } else if (sampleRate == 24000) {
+                        fileType = ".sln24";  // L16 PCM @ 24kHz
+                    } else if (sampleRate == 48000) {
+                        fileType = ".sln48";  // L16 PCM @ 48kHz
+                    } else if (sampleRate > 0) {
+                        fileType = ".sln";  // fallback
                     } else {
                         fileType = "";
                     }
