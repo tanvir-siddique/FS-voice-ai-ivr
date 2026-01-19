@@ -1479,28 +1479,28 @@ IMPORTANTE:
         number = dest.destination_number
         context = dest.destination_context
         
-        if dest.destination_type == "extension":
-            # user/ resolve para o IP real do softphone via directory lookup
-            # Exemplo: user/1001@domain → sofia/internal/1001@177.72.9.170:57203
-            return f"user/{number}@{context}"
+        # IMPORTANTE: No FusionPBX, user/ é o formato mais confiável para extensões internas
+        # O FreeSWITCH resolve user/ext@domain para o IP real do softphone via directory lookup
+        # Exemplo: user/1001@domain → sofia/internal/1001@177.72.9.170:57203
+        #
+        # group/ NÃO funciona como esperado no FusionPBX - ring groups são implementados
+        # de forma diferente (via dialplan, não via group/).
         
-        elif dest.destination_type == "ring_group":
-            # Ring groups usam group/
-            return f"group/{number}@{context}"
-        
-        elif dest.destination_type == "queue":
-            return f"fifo/{number}@{context}"
-        
-        elif dest.destination_type == "voicemail":
-            return f"voicemail/{number}@{context}"
-        
-        elif dest.destination_type == "external":
+        if dest.destination_type == "external":
             # Número externo - usar gateway padrão
             gateway = os.getenv("DEFAULT_GATEWAY", "default")
             return f"sofia/gateway/{gateway}/{number}"
         
+        elif dest.destination_type == "voicemail":
+            return f"voicemail/{number}@{context}"
+        
+        elif dest.destination_type == "fifo" or dest.destination_type == "queue":
+            # FIFO queues
+            return f"fifo/{number}@{context}"
+        
         else:
-            # Default: tratar como extensão via user/
+            # extension, ring_group e outros: usar user/ que é universal
+            # Isso funciona para qualquer extensão registrada no FusionPBX
             return f"user/{number}@{context}"
     
     def _hangup_cause_to_status(self, hangup_cause: Optional[str]) -> TransferStatus:

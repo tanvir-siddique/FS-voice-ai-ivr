@@ -2896,16 +2896,12 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             )
             
             # Enviar e solicitar resposta (o OpenAI vai FALAR)
+            # IMPORTANTE: Não enviar mais mensagens até o OpenAI terminar!
+            # A instrução já inclui "pergunte se deseja deixar recado", então
+            # NÃO chamamos _offer_callback_or_message para evitar conflito.
             await self._send_text_to_provider(openai_instruction, request_response=True)
             
             logger.info("📋 [HANDLE_TRANSFER_RESULT] Processamento concluído - OpenAI vai falar")
-            
-            # Oferecer callback/recado se aplicável (após o OpenAI falar)
-            if result.should_offer_callback and result.destination:
-                logger.info("📋 [HANDLE_TRANSFER_RESULT] Step 6: Callback será oferecido pelo OpenAI...")
-                await self._offer_callback_or_message(result, original_reason)
-            
-            logger.info("📋 [HANDLE_TRANSFER_RESULT] Processamento concluído")
     
     async def _offer_callback_or_message(
         self,
