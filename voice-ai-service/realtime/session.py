@@ -2844,7 +2844,8 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             )
             
             # Tempo mínimo de espera (em segundos) para parecer natural
-            MIN_HOLD_TIME_SECONDS = 10.0
+            # 15 segundos é ideal para dar tempo de tocar e parecer uma transferência real
+            MIN_HOLD_TIME_SECONDS = 15.0
             
             # 3. Executar transferência
             logger.info(f"📞 [INTELLIGENT_HANDOFF] Step 3: transfer_announce_enabled={self.config.transfer_announce_enabled}")
