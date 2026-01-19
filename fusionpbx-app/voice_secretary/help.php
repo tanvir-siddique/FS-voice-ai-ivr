@@ -560,7 +560,7 @@ curl http://localhost:8100/health  <span class="comment"># API Principal</span>
 				<tr><td><strong>Tipo</strong></td><td>realtime</td></tr>
 				<tr><td><strong>Provider</strong></td><td>openai_realtime</td></tr>
 				<tr><td><strong>API Key</strong></td><td>sk-proj-xxxxxxxxxxxxxxxx</td></tr>
-				<tr><td><strong>Model</strong></td><td>gpt-4o-realtime-preview</td></tr>
+				<tr><td><strong>Model</strong></td><td>gpt-realtime (recomendado)</td></tr>
 			</table>
 		</div>
 		

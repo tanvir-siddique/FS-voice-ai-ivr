@@ -59,7 +59,7 @@
 			'description' => 'GPT-4o Realtime with voice',
 			'fields' => ['api_key', 'model', 'voice'],
 			'voices' => ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse', 'marin', 'cedar'],
-			'models' => ['gpt-4o-realtime-preview', 'gpt-4o-realtime-preview-2024-12-17', 'gpt-4o-mini-realtime-preview', 'gpt-4o-mini-realtime-preview-2024-12-17'],
+			'models' => ['gpt-realtime', 'gpt-realtime-mini', 'gpt-4o-realtime-preview', 'gpt-4o-mini-realtime-preview'],
 		],
 		'elevenlabs' => [
 			'name' => 'ElevenLabs Conversational AI',
@@ -220,7 +220,10 @@
 	echo "	<td class='vncell' valign='top' align='left' nowrap='nowrap'>Model</td>\n";
 	echo "	<td class='vtable' align='left'>\n";
 	echo "		<select class='formfld' name='model'>\n";
-	echo "			<option value='gpt-4o-realtime-preview' ".((($config['model'] ?? '') === 'gpt-4o-realtime-preview') ? 'selected' : '').">gpt-4o-realtime-preview</option>\n";
+	echo "			<option value='gpt-realtime' ".((($config['model'] ?? '') === 'gpt-realtime') ? 'selected' : '').">gpt-realtime (GA - recomendado)</option>\n";
+	echo "			<option value='gpt-realtime-mini' ".((($config['model'] ?? '') === 'gpt-realtime-mini') ? 'selected' : '').">gpt-realtime-mini (GA - menor custo)</option>\n";
+	echo "			<option value='gpt-4o-realtime-preview' ".((($config['model'] ?? '') === 'gpt-4o-realtime-preview') ? 'selected' : '').">gpt-4o-realtime-preview (deprecated)</option>\n";
+	echo "			<option value='gpt-4o-mini-realtime-preview' ".((($config['model'] ?? '') === 'gpt-4o-mini-realtime-preview') ? 'selected' : '').">gpt-4o-mini-realtime-preview (deprecated)</option>\n";
 	echo "		</select>\n";
 	echo "	</td>\n";
 	echo "</tr>\n";

@@ -39,7 +39,7 @@ class RealtimeSettings(BaseSettings):
     
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_REALTIME_MODEL: str = "gpt-4o-realtime-preview"
+    OPENAI_REALTIME_MODEL: str = "gpt-realtime"
     
     # ElevenLabs
     ELEVENLABS_API_KEY: Optional[str] = None

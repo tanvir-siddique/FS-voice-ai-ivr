@@ -18,7 +18,7 @@ class TestRealtimeProviderFactory:
         """Credenciais mock."""
         return {
             "api_key": "test-api-key",
-            "model": "gpt-4o-realtime-preview",
+            "model": "gpt-realtime",
         }
     
     @pytest.fixture

@@ -472,7 +472,7 @@ Agent ID: (opcional, se usar agente pré-configurado)
 Provider Type: realtime
 Provider Name: openai
 API Key: sk-xxxxxxxxxxxxxxxxxxxxxxxx
-Model: gpt-4o-realtime-preview
+Model: gpt-realtime
 ```
 
 ---
