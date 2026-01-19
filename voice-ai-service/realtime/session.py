@@ -955,6 +955,13 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """Processa áudio do FreeSWITCH."""
         if not self.is_active or not self._provider:
             return
+        
+        # Log inicial do áudio recebido (a cada 100 frames para não poluir)
+        if not hasattr(self, '_input_frame_count'):
+            self._input_frame_count = 0
+        self._input_frame_count += 1
+        
+        original_len = len(audio_bytes)
 
         # ========================================
         # G.711 → L16 Conversion (if needed)
@@ -964,10 +971,24 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         if self.config.audio_format in ("pcmu", "g711u", "ulaw"):
             # G.711 μ-law: 160 bytes/20ms → 320 bytes/20ms (L16)
             audio_bytes = ulaw_to_pcm(audio_bytes)
+            if self._input_frame_count == 1:
+                logger.info(f"🎤 [INPUT] G.711 μ-law → L16: {original_len}B → {len(audio_bytes)}B", extra={
+                    "call_uuid": self.call_uuid,
+                    "audio_format": self.config.audio_format,
+                })
         elif self.config.audio_format in ("pcma", "g711a", "alaw"):
             # G.711 A-law: 160 bytes/20ms → 320 bytes/20ms (L16)
             from .utils.audio_codec import alaw_to_pcm
             audio_bytes = alaw_to_pcm(audio_bytes)
+            if self._input_frame_count == 1:
+                logger.info(f"🎤 [INPUT] G.711 A-law → L16: {original_len}B → {len(audio_bytes)}B", extra={
+                    "call_uuid": self.call_uuid,
+                })
+        else:
+            if self._input_frame_count == 1:
+                logger.info(f"🎤 [INPUT] L16 PCM direto: {original_len}B", extra={
+                    "call_uuid": self.call_uuid,
+                })
 
         # Durante transferência, não encaminhar áudio do FreeSWITCH para o provider.
         # Motivo: o MOH (uuid_broadcast/local_stream://moh) pode "vazar" no stream
@@ -1095,8 +1116,14 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             
             # Se usando G.711, converter L16 de volta para G.711 antes de enviar ao provider
             # (já convertemos G.711→L16 no início do handle_audio_input para processamento)
+            pre_convert_len = len(frame)
             if self.config.audio_format in ("pcmu", "g711u", "ulaw"):
                 frame = pcm_to_ulaw(frame)
+                # Log a cada 500 frames
+                if self._input_frame_count % 500 == 1:
+                    logger.debug(f"🎤 [INPUT→OPENAI] L16 → G.711 μ-law: {pre_convert_len}B → {len(frame)}B", extra={
+                        "call_uuid": self.call_uuid,
+                    })
             elif self.config.audio_format in ("pcma", "g711a", "alaw"):
                 from .utils.audio_codec import pcm_to_alaw
                 frame = pcm_to_alaw(frame)
@@ -1117,6 +1144,19 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """
         if not audio_bytes:
             return
+        
+        # Contador de frames de output para logs
+        if not hasattr(self, '_output_frame_count'):
+            self._output_frame_count = 0
+        self._output_frame_count += 1
+        
+        original_len = len(audio_bytes)
+        
+        # Log do primeiro frame de output
+        if self._output_frame_count == 1:
+            logger.info(f"🔊 [OUTPUT] Primeiro frame do OpenAI: {original_len}B (PCM16 @ 24kHz)", extra={
+                "call_uuid": self.call_uuid,
+            })
         
         # Forçar resample se o provider retornar sample rate diferente do declarado
         # Alguns providers (ElevenLabs) podem retornar 22050Hz ao invés de 16kHz
@@ -1146,9 +1186,15 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             inverted = -samples  # Inverte fase
             audio_bytes = np.clip(inverted, -32768, 32767).astype(np.int16).tobytes()
         
+        pre_resample_len = len(audio_bytes)
         if self._resampler:
             # resample_output já inclui o buffer warmup
             audio_bytes = self._resampler.resample_output(audio_bytes)
+            # Log do primeiro resample
+            if self._output_frame_count == 1 and audio_bytes:
+                logger.info(f"🔊 [OUTPUT] Após resample 24k→8k: {pre_resample_len}B → {len(audio_bytes)}B", extra={
+                    "call_uuid": self.call_uuid,
+                })
         
         # Durante warmup, resample_output retorna b""
         # Durante transfer, não enviar áudio (MOH está tocando)
@@ -1168,13 +1214,28 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             # O ResamplerPair já converteu 24kHz → 8kHz (freeswitch_sample_rate)
             # Agora só precisamos converter L16 PCM → G.711
             # ========================================
+            pre_g711_len = len(audio_bytes)
             if self.config.audio_format in ("pcmu", "g711u", "ulaw"):
                 # L16 PCM @ 8kHz → G.711 μ-law @ 8kHz
                 # (ResamplerPair já fez 24kHz→8kHz)
                 audio_bytes = pcm_to_ulaw(audio_bytes)
+                # Log do primeiro frame convertido
+                if self._output_frame_count == 1:
+                    logger.info(f"🔊 [OUTPUT→FS] L16 → G.711 μ-law: {pre_g711_len}B → {len(audio_bytes)}B", extra={
+                        "call_uuid": self.call_uuid,
+                    })
             elif self.config.audio_format in ("pcma", "g711a", "alaw"):
                 from .utils.audio_codec import pcm_to_alaw
                 audio_bytes = pcm_to_alaw(audio_bytes)
+                if self._output_frame_count == 1:
+                    logger.info(f"🔊 [OUTPUT→FS] L16 → G.711 A-law: {pre_g711_len}B → {len(audio_bytes)}B", extra={
+                        "call_uuid": self.call_uuid,
+                    })
+            else:
+                if self._output_frame_count == 1:
+                    logger.info(f"🔊 [OUTPUT→FS] L16 PCM direto: {len(audio_bytes)}B", extra={
+                        "call_uuid": self.call_uuid,
+                    })
             
             self._pending_audio_bytes += len(audio_bytes)
             await self._on_audio_output(audio_bytes)

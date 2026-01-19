@@ -162,6 +162,14 @@ class EchoCancellerWrapper:
             
             self.frames_processed += 1
             offset += frame_bytes
+            
+            # Log periódico a cada 500 frames (~10 segundos)
+            if self.frames_processed % 500 == 0:
+                logger.debug(
+                    f"🔇 [AEC] frames={self.frames_processed}, "
+                    f"echo_removed={self.frames_with_echo_removed}, "
+                    f"speaker_buffer={len(self.speaker_buffer)}"
+                )
         
         # Processar resto parcial
         if offset < len(mic_audio):
