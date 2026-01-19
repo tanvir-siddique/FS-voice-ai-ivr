@@ -421,6 +421,9 @@ class OpenAIRealtimeProvider(BaseRealtimeProvider):
                                 "type": "audio/pcm",
                                 "rate": 24000
                             },
+                            # Noise reduction para ambientes ruidosos (viva-voz, salas)
+                            # far_field = microfone distante, near_field = headset
+                            "noise_reduction": {"type": "far_field"},
                         },
                         "output": {
                             "format": {
