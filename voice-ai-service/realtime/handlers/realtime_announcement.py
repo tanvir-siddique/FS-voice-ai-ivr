@@ -281,16 +281,19 @@ class RealtimeAnnouncementSession:
         
         # Aguardar confirmação session.updated
         try:
-            msg = await asyncio.wait_for(self._ws.recv(), timeout=3.0)
+            msg = await asyncio.wait_for(self._ws.recv(), timeout=5.0)
             event = json.loads(msg)
             if event.get("type") == "session.updated":
-                logger.info("Session configured for announcement (semantic_vad, eagerness=high)")
+                logger.info("✅ Session configured successfully (server_vad)")
             elif event.get("type") == "error":
                 error = event.get("error", {})
-                logger.error(f"Session config error: {error}")
-                raise RuntimeError(f"Session config failed: {error.get('message', 'unknown')}")
+                logger.error(f"❌ Session config error: {error}")
+                # Não levantar exceção - tentar continuar mesmo assim
+                # raise RuntimeError(f"Session config failed: {error.get('message', 'unknown')}")
+            else:
+                logger.warning(f"⚠️ Unexpected event after session.update: {event.get('type')}")
         except asyncio.TimeoutError:
-            logger.warning("No session.updated confirmation received, continuing...")
+            logger.warning("⚠️ No session.updated confirmation received (timeout 5s), continuing...")
     
     async def _start_audio_stream(self) -> None:
         """
