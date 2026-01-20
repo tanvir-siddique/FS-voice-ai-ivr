@@ -1296,17 +1296,27 @@ class AsyncESLClient:
                 logger.debug(f"📞 [CHECK_EXTENSION] Resultado vazio")
                 return (False, None, True)
             
-            # Procurar pelo número do ramal na saída
+            # Procurar pelo número do ramal E domínio na saída
             # Formato típico: "User:       1001@dominio"
+            # SEGURANÇA MULTI-TENANT: Verificar AMBOS número e domínio
             extension_found = False
             contact = None
             
+            # Padrões válidos para match (número@domínio)
+            # O domínio pode ter variações (com/sem porta, etc)
+            domain_base = domain.split(":")[0].lower()  # Remove porta se houver
+            target_user = f"{extension}@{domain_base}"
+            
             for line in result.split("\n"):
-                # Verifica se a linha contém "User:" seguido do número do ramal
-                if "User:" in line and f"{extension}@" in line:
-                    extension_found = True
-                    logger.debug(f"📞 [CHECK_EXTENSION] Encontrado: {line.strip()}")
-                    continue
+                line_lower = line.lower()
+                
+                # Verifica se a linha contém "User:" seguido do número@domínio
+                if "user:" in line_lower:
+                    # Verificar match exato do número E domínio (multi-tenant safe)
+                    if target_user in line_lower or f"{extension}@" in line and domain_base in line_lower:
+                        extension_found = True
+                        logger.debug(f"📞 [CHECK_EXTENSION] Match encontrado: {line.strip()}")
+                        continue
                 
                 # Se encontramos o usuário, procurar o Contact na próxima linha
                 if extension_found and "Contact:" in line:
@@ -1317,7 +1327,7 @@ class AsyncESLClient:
                     break
             
             if extension_found:
-                logger.info(f"✅ Extension {extension} is REGISTERED (contact={contact})")
+                logger.info(f"✅ Extension {extension}@{domain} is REGISTERED (contact={contact})")
                 return (True, contact, True)
             
             # Verificar total de registros
