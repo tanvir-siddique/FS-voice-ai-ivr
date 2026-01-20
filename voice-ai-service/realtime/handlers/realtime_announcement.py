@@ -359,23 +359,26 @@ class RealtimeAnnouncementSession:
             # 3) Aguardar conexão do FreeSWITCH
             try:
                 await asyncio.wait_for(self._fs_connected.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "B-leg audio stream did not connect, fallback to semi-duplex",
+                logger.info(
+                    "✅ B-leg audio stream connected (FULL-DUPLEX)",
                     extra={"b_leg_uuid": self.b_leg_uuid},
                 )
-                return
-            
-            logger.info(
-                "B-leg audio stream connected (FULL-DUPLEX)",
-                extra={"b_leg_uuid": self.b_leg_uuid},
-            )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "⚠️ B-leg audio stream did not connect - SEMI-DUPLEX mode (TTS fallback)",
+                    extra={"b_leg_uuid": self.b_leg_uuid},
+                )
+                # NÃO retorna - continua em modo semi-duplex (TTS fallback)
             
         except Exception as e:
             logger.error(f"Failed to initialize audio stream: {e}")
     
     async def _send_initial_message(self) -> None:
         """Envia mensagem inicial de anúncio."""
+        if not self._ws:
+            logger.error("Cannot send initial message: WebSocket not connected")
+            return
+        
         # Criar item de conversa com a mensagem inicial
         await self._ws.send(json.dumps({
             "type": "conversation.item.create",
@@ -400,13 +403,20 @@ class RealtimeAnnouncementSession:
                 await self._handle_event(event)
                 
             except asyncio.TimeoutError:
-                # Verificar se B-leg ainda existe
-                b_leg_exists = await self.esl.uuid_exists(self.b_leg_uuid)
-                if not b_leg_exists:
-                    logger.info("B-leg hangup detected")
-                    self._rejected = True
-                    self._rejection_message = "Humano desligou"
-                    break
+                # Verificar se B-leg ainda existe (com timeout curto para não bloquear)
+                try:
+                    b_leg_exists = await asyncio.wait_for(
+                        self.esl.uuid_exists(self.b_leg_uuid),
+                        timeout=1.0
+                    )
+                    if not b_leg_exists:
+                        logger.info("B-leg hangup detected")
+                        self._rejected = True
+                        self._rejection_message = "Humano desligou"
+                        break
+                except (asyncio.TimeoutError, Exception) as e:
+                    # ESL check falhou - não assumir hangup, continuar
+                    logger.debug(f"B-leg check failed (continuing): {e}")
     
     async def _handle_event(self, event: dict) -> None:
         """Processa evento do OpenAI Realtime."""
@@ -588,11 +598,12 @@ class RealtimeAnnouncementSession:
                 return
             
             if process.returncode == 0 and Path(wav_path).exists():
-                # Tocar via uuid_broadcast
+                # Tocar via uuid_broadcast no B-leg (humano)
+                # Sem argumento = canal atual (B-leg), 'aleg' seria o cliente (errado)
                 await self.esl.execute_api(
-                    f"uuid_broadcast {self.b_leg_uuid} {wav_path} aleg"
+                    f"uuid_broadcast {self.b_leg_uuid} {wav_path} both"
                 )
-                logger.debug(f"Played {len(self._audio_buffer)} bytes to B-leg")
+                logger.debug(f"Played {len(self._audio_buffer)} bytes to B-leg via TTS fallback")
             else:
                 error_msg = stderr.decode()[:200] if stderr else "unknown"
                 logger.warning(f"ffmpeg conversion failed: {error_msg}")
