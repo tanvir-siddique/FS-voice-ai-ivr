@@ -333,20 +333,40 @@ class RealtimeAnnouncementSession:
             
             # 1) Subir WS server para receber áudio do B-leg
             # bind_host: onde o server escuta (0.0.0.0 para todas interfaces)
-            # connect_host: como o FreeSWITCH vai conectar (IP externo ou hostname)
+            # connect_host: como o FreeSWITCH vai conectar (IP/hostname do host)
+            # bleg_port: porta fixa para B-leg stream (deve estar mapeada no Docker)
             bind_host = os.getenv("REALTIME_BLEG_STREAM_BIND", "0.0.0.0")
-            connect_host = os.getenv("REALTIME_BLEG_STREAM_HOST", "host.docker.internal")
+            connect_host = os.getenv("REALTIME_BLEG_STREAM_HOST", "127.0.0.1")
             
-            logger.info(f"🔊 Starting B-leg audio WS server on {bind_host}...")
+            # Porta fixa para B-leg - DEVE estar mapeada no docker-compose
+            # Se não configurada, usa porta aleatória (só funciona se container em host network)
+            bleg_port_str = os.getenv("REALTIME_BLEG_STREAM_PORT", "")
+            bleg_port = int(bleg_port_str) if bleg_port_str else 0
             
-            self._audio_ws_server = await websockets.serve(
-                self._handle_fs_ws,
-                bind_host,
-                0,  # Porta aleatória
-                max_size=None,
-            )
-            if not self._audio_ws_server.sockets:
-                raise RuntimeError("Failed to allocate port for B-leg audio WS")
+            if bleg_port == 0:
+                logger.warning(
+                    "⚠️ REALTIME_BLEG_STREAM_PORT not set - using random port. "
+                    "This will NOT work if FreeSWITCH is outside Docker network!"
+                )
+            
+            logger.info(f"🔊 Starting B-leg audio WS server on {bind_host}:{bleg_port or 'random'}...")
+            
+            try:
+                self._audio_ws_server = await websockets.serve(
+                    self._handle_fs_ws,
+                    bind_host,
+                    bleg_port,  # Porta fixa se configurada, senão aleatória
+                    max_size=None,
+                )
+            except OSError as e:
+                # Porta em uso - tentar sem WebSocket (fallback TTS)
+                logger.warning(f"⚠️ Cannot bind B-leg WS port {bleg_port}: {e}. Using TTS fallback only.")
+                self._audio_ws_server = None
+                return
+                
+            if not self._audio_ws_server or not self._audio_ws_server.sockets:
+                logger.warning("⚠️ Failed to allocate B-leg WS port. Using TTS fallback only.")
+                return
             
             self._audio_ws_port = self._audio_ws_server.sockets[0].getsockname()[1]
             ws_url = f"ws://{connect_host}:{self._audio_ws_port}/bleg/{self.b_leg_uuid}"
