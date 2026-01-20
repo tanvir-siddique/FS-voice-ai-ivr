@@ -2120,9 +2120,13 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         })
         
         # Se criou ticket ou transferiu, encerrar após mensagem de despedida
-        # 6 segundos = tempo suficiente para TTS terminar (média ~4-5s)
         if self._handoff_result.action in ("ticket_created", "transferred"):
-            await asyncio.sleep(6.0)  # Aguardar mensagem de despedida
+            # Esperar áudio de despedida terminar de tocar
+            await self._wait_for_audio_playback(
+                min_wait=1.0,
+                max_wait=10.0,
+                context="handoff_farewell"
+            )
             await self.stop(f"handoff_{self._handoff_result.action}")
     
     async def _timeout_monitor(self) -> None:
@@ -2278,82 +2282,145 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         finally:
             self._fallback_active = False
     
-    async def _delayed_stop(self, delay: float, reason: str) -> None:
+    # =========================================================================
+    # AUDIO PLAYBACK SYNC - Funções para esperar áudio terminar
+    # =========================================================================
+    
+    async def _wait_for_audio_playback(
+        self,
+        min_wait: float = 0.5,
+        max_wait: float = 6.0,
+        context: str = "audio"
+    ) -> float:
         """
-        Espera antes de encerrar a sessão.
+        Espera o áudio terminar de reproduzir no FreeSWITCH.
         
-        IMPORTANTE: Calcula o tempo necessário para o áudio terminar de tocar
-        no FreeSWITCH baseado nos bytes enviados e no sample rate.
-        
-        Fluxo:
-        1. Espera o primeiro chunk de áudio de despedida chegar
-        2. Espera o assistente terminar de gerar áudio
-        3. Calcula duração do áudio e tempo restante de playback
-        4. Espera o tempo necessário e desliga
+        Esta função usa lógica event-driven:
+        1. Espera OpenAI terminar de GERAR (assistant_speaking = False)
+        2. Calcula tempo restante baseado nos bytes pendentes
+        3. Aguarda o tempo necessário com margem de segurança
         
         Args:
-            delay: Delay mínimo em segundos (usado como fallback)
+            min_wait: Tempo mínimo de espera em segundos
+            max_wait: Tempo máximo de espera em segundos
+            context: Contexto para logs (ex: "handoff", "end_call")
+        
+        Returns:
+            Tempo total aguardado em segundos
+        """
+        start_time = time.time()
+        
+        # === FASE 1: Esperar OpenAI terminar de GERAR ===
+        generation_wait = 0.0
+        max_generation_wait = max_wait
+        
+        while self._assistant_speaking and generation_wait < max_generation_wait:
+            if self._ended or self._ending_call:
+                logger.debug(f"🔊 [{context}] Chamada encerrada durante geração")
+                return time.time() - start_time
+            await asyncio.sleep(0.1)
+            generation_wait += 0.1
+        
+        if generation_wait > 0.1:
+            logger.debug(f"🔊 [{context}] Aguardou {generation_wait:.1f}s para OpenAI terminar de gerar")
+        
+        # === FASE 2: Calcular tempo de reprodução restante ===
+        # PCM 16-bit mono = sample_rate * 2 bytes/segundo
+        bytes_per_second = self.config.freeswitch_sample_rate * 2
+        
+        if bytes_per_second > 0 and self._pending_audio_bytes > 0:
+            # Duração total do áudio gerado
+            audio_duration = self._pending_audio_bytes / bytes_per_second
+            
+            # Tempo já decorrido desde o início da reprodução
+            if self._response_audio_start_time > 0:
+                audio_elapsed = time.time() - self._response_audio_start_time
+            else:
+                audio_elapsed = generation_wait
+            
+            # Tempo restante de reprodução
+            remaining_time = audio_duration - audio_elapsed
+            
+            if remaining_time > 0:
+                # Margem de 20% para latência de rede + 300ms buffer
+                wait_playback = remaining_time * 1.2 + 0.3
+                
+                # Aplicar limites
+                wait_playback = max(min_wait, min(wait_playback, max_wait))
+                
+                logger.info(
+                    f"🔊 [{context}] Audio: {audio_duration:.1f}s total, "
+                    f"{audio_elapsed:.1f}s elapsed, aguardando {wait_playback:.1f}s",
+                    extra={
+                        "call_uuid": self.call_uuid,
+                        "pending_audio_bytes": self._pending_audio_bytes,
+                    }
+                )
+                
+                await asyncio.sleep(wait_playback)
+            else:
+                # Áudio já terminou, pequena margem
+                await asyncio.sleep(0.3)
+        else:
+            # Sem áudio pendente, pequena margem
+            await asyncio.sleep(0.3)
+        
+        total_wait = time.time() - start_time
+        logger.debug(f"🔊 [{context}] Total aguardado: {total_wait:.1f}s")
+        
+        return total_wait
+    
+    async def _wait_for_farewell_response(self, max_wait: float = 5.0) -> float:
+        """
+        Espera o primeiro chunk de áudio de despedida chegar.
+        
+        Usado antes de _wait_for_audio_playback quando estamos esperando
+        uma resposta específica (ex: despedida após end_call).
+        
+        Args:
+            max_wait: Tempo máximo de espera em segundos
+        
+        Returns:
+            Tempo aguardado em segundos
+        """
+        wait_time = 0.0
+        
+        while not self._farewell_response_started and wait_time < max_wait:
+            if self._ended:
+                return wait_time
+            await asyncio.sleep(0.1)
+            wait_time += 0.1
+        
+        if wait_time > 0.1:
+            logger.debug(f"🔊 [farewell] Aguardou {wait_time:.1f}s para resposta iniciar")
+        
+        return wait_time
+    
+    async def _delayed_stop(self, delay: float, reason: str) -> None:
+        """
+        Espera o áudio de despedida terminar e encerra a sessão.
+        
+        Args:
+            delay: Delay mínimo/fallback em segundos
             reason: Motivo do encerramento
         """
         if self._ended:
             return
         
-        # 1. Esperar o primeiro chunk de áudio de despedida (máximo 5s)
-        # Isso garante que _pending_audio_bytes e _response_audio_start_time estejam corretos
-        wait_for_response = 0
-        max_wait_response = 5.0
-        while not self._farewell_response_started and wait_for_response < max_wait_response:
-            if self._ended:
-                return
-            await asyncio.sleep(0.1)
-            wait_for_response += 0.1
+        # 1. Esperar resposta de despedida iniciar
+        await self._wait_for_farewell_response(max_wait=5.0)
         
-        if wait_for_response > 0.1:
-            logger.debug(f"Waited {wait_for_response:.1f}s for farewell response to start", extra={
-                "call_uuid": self.call_uuid,
-            })
+        if self._ended:
+            return
         
-        # 2. Esperar o assistente terminar de GERAR áudio (máximo 10s)
-        # _assistant_speaking = False quando recebe TRANSCRIPT_DONE ou RESPONSE_DONE
-        wait_for_speaking = 0
-        max_wait_speaking = 10.0
-        while self._assistant_speaking and wait_for_speaking < max_wait_speaking:
-            if self._ended:
-                return
-            await asyncio.sleep(0.2)
-            wait_for_speaking += 0.2
+        # 2. Esperar áudio terminar de reproduzir
+        await self._wait_for_audio_playback(
+            min_wait=delay / 2,
+            max_wait=15.0,
+            context="end_call"
+        )
         
-        if wait_for_speaking > 0.1:
-            logger.debug(f"Waited {wait_for_speaking:.1f}s for assistant to finish generating audio", extra={
-                "call_uuid": self.call_uuid,
-            })
-        
-        # 3. Calcular quanto tempo o áudio de despedida leva para tocar
-        # PCM 16-bit mono 16kHz = 32000 bytes/s
-        bytes_per_second = self.config.freeswitch_sample_rate * 2
-        audio_duration = self._pending_audio_bytes / bytes_per_second if bytes_per_second > 0 else 0
-        
-        # 4. Calcular quanto tempo já passou desde que o áudio começou
-        if self._response_audio_start_time > 0:
-            audio_elapsed = time.time() - self._response_audio_start_time
-        else:
-            audio_elapsed = wait_for_response + wait_for_speaking
-        
-        # 5. Tempo restante = duração do áudio - tempo já decorrido + buffer de segurança
-        remaining = max(0, audio_duration - audio_elapsed) + 1.0
-        
-        # 6. Garantir um mínimo (delay / 2) para não desligar muito rápido
-        final_wait = max(remaining, delay / 2)
-        
-        logger.info(f"Playback calculation: {audio_duration:.1f}s audio, "
-                   f"{audio_elapsed:.1f}s elapsed, waiting {final_wait:.1f}s", extra={
-            "call_uuid": self.call_uuid,
-            "pending_audio_bytes": self._pending_audio_bytes,
-        })
-        
-        # 7. Aguardar o tempo calculado (máximo 15s para não ficar preso)
-        await asyncio.sleep(min(final_wait, 15.0))
-        
+        # 3. Encerrar chamada
         if not self._ended:
             await self.stop(reason)
     
@@ -2526,14 +2593,16 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
             message = action_config.get("message", f"Você pressionou {digit}. Vou transferir você para um atendente.")
             
             await self._send_text_to_provider(message)
-            await asyncio.sleep(2.0)
+            # Esperar áudio terminar antes de transferir
+            await self._wait_for_audio_playback(min_wait=1.0, max_wait=5.0, context="dtmf_handoff")
             await self._execute_intelligent_handoff(destination, f"DTMF {digit}")
             
         elif action == "hangup":
             # Encerrar chamada
             message = action_config.get("message", "Obrigado por ligar. Até logo!")
             await self._send_text_to_provider(message)
-            await asyncio.sleep(2.0)
+            # Esperar áudio terminar antes de desligar
+            await self._wait_for_audio_playback(min_wait=1.0, max_wait=5.0, context="dtmf_hangup")
             await self.stop("dtmf_hangup")
             
         elif action == "help":
@@ -2838,72 +2907,38 @@ Comece cumprimentando e informando sobre o horário de atendimento."""
         """
         Aguarda o OpenAI terminar de falar e então executa o handoff.
         
-        Este método:
-        1. Aguarda `delay_seconds` para o OpenAI falar o aviso
-        2. Muta o áudio (transfer_in_progress = True)
-        3. Coloca o cliente em espera
-        4. Executa o handoff inteligente
+        Usa _wait_for_audio_playback para garantir que o agente 
+        termine de falar "Vou transferir você..." antes de iniciar.
         
         Args:
             destination_text: Texto do destino (ex: "Jeni", "financeiro")
             reason: Motivo do handoff
-            delay_seconds: Segundos para aguardar o OpenAI falar
+            delay_seconds: Tempo máximo de espera (usado como max_wait)
         """
         logger.info(
             "⏳ [DELAYED_HANDOFF] Aguardando OpenAI terminar de falar...",
             extra={
                 "call_uuid": self.call_uuid,
                 "destination_text": destination_text,
-                "delay_seconds": delay_seconds,
             }
         )
         
         try:
-            # === FASE 1: Esperar OpenAI terminar de GERAR a resposta ===
-            # _assistant_speaking = True enquanto OpenAI está gerando
-            wait_generation = 0
-            max_wait_generation = delay_seconds
-            while self._assistant_speaking and wait_generation < max_wait_generation:
-                if self._ending_call or not self._provider:
-                    break
-                await asyncio.sleep(0.1)
-                wait_generation += 0.1
-            
-            if self._ending_call or not self._provider:
-                logger.warning("⏳ [DELAYED_HANDOFF] Chamada encerrada durante geração, abortando")
-                return
-            
-            # === FASE 2: Calcular tempo de reprodução restante ===
-            # _pending_audio_bytes = total de bytes enviados nesta resposta
-            # _response_audio_start_time = quando o primeiro chunk foi enviado
-            bytes_per_second = self.config.freeswitch_sample_rate * 2  # 16-bit mono
-            audio_duration = self._pending_audio_bytes / bytes_per_second if bytes_per_second > 0 else 0
-            audio_elapsed = time.time() - self._response_audio_start_time if self._response_audio_start_time > 0 else 0
-            remaining_time = audio_duration - audio_elapsed
-            
-            # Adicionar margem de 20% para latência de rede + 300ms buffer
-            if remaining_time > 0:
-                wait_playback = remaining_time * 1.2 + 0.3
-                wait_playback = max(0.5, min(wait_playback, 6.0))  # Entre 500ms e 6s
-                
-                logger.info(
-                    f"⏳ [DELAYED_HANDOFF] Audio: {audio_duration:.1f}s total, "
-                    f"{audio_elapsed:.1f}s elapsed, aguardando {wait_playback:.1f}s"
-                )
-                await asyncio.sleep(wait_playback)
-            else:
-                # Pequena margem se o áudio já terminou
-                await asyncio.sleep(0.3)
+            # Esperar áudio terminar de reproduzir
+            total_wait = await self._wait_for_audio_playback(
+                min_wait=0.5,
+                max_wait=max(delay_seconds, 6.0),
+                context="handoff"
+            )
             
             # Verificar se a chamada ainda está ativa
             if self._ending_call or not self._provider:
-                logger.warning("⏳ [DELAYED_HANDOFF] Chamada encerrada durante reprodução, abortando")
+                logger.warning("⏳ [DELAYED_HANDOFF] Chamada encerrada, abortando")
                 return
             
-            total_wait = wait_generation + (wait_playback if remaining_time > 0 else 0.3)
-            logger.info(f"⏳ [DELAYED_HANDOFF] Delay concluído (esperou {total_wait:.1f}s), iniciando handoff...")
+            logger.info(f"⏳ [DELAYED_HANDOFF] Delay concluído ({total_wait:.1f}s), iniciando handoff...")
             
-            # Agora sim, mutar o áudio e iniciar o handoff
+            # Mutar o áudio e iniciar o handoff
             self._set_transfer_in_progress(True, "delayed_handoff_start")
             
             # Interromper qualquer resposta do OpenAI
