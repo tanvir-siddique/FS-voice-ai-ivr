@@ -248,7 +248,8 @@ class RealtimeAnnouncementSession:
                     },
                     "output": {
                         "format": {
-                            "type": "audio/pcm"
+                            "type": "audio/pcm",
+                            "rate": 24000  # OBRIGATÓRIO na GA API
                         },
                         "voice": self.voice,
                     },
