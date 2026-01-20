@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # Modelo GA (General Availability) - Recomendado
 OPENAI_REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime")
-OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "nova")
+# Vozes válidas GA: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar
+OPENAI_REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "marin")
 
 
 @dataclass
@@ -84,7 +85,7 @@ class RealtimeAnnouncementSession:
             esl_client: Cliente ESL para controle de áudio
             system_prompt: Prompt de sistema para o agente
             initial_message: Mensagem inicial de anúncio
-            voice: Voz do OpenAI (alloy, echo, fable, onyx, nova, shimmer)
+            voice: Voz do OpenAI GA (alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar)
             model: Modelo Realtime
         """
         self.b_leg_uuid = b_leg_uuid
