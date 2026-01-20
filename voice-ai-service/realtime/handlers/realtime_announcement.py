@@ -354,24 +354,40 @@ class RealtimeAnnouncementSession:
             logger.info(f"🔊 B-leg audio WS server ready at {ws_url}")
             
             # 2) Iniciar mod_audio_stream no B-leg
+            # Usa conexão ESL dedicada para evitar conflitos com o singleton
             cmd = f"uuid_audio_stream {self.b_leg_uuid} start {ws_url} mono 16k"
             logger.info(f"🔊 Executing ESL command: {cmd}")
             
             try:
-                response = await asyncio.wait_for(
-                    self.esl.execute_api(cmd),
-                    timeout=3.0
-                )
-                logger.info(
-                    f"🔊 B-leg audio stream command result: {response[:200] if response else 'None'}",
-                    extra={
-                        "b_leg_uuid": self.b_leg_uuid,
-                        "ws_url": ws_url,
-                        "esl_response": response,
-                    },
-                )
+                # Criar conexão ESL dedicada para este comando
+                dedicated_esl = AsyncESLClient()
+                try:
+                    connected = await asyncio.wait_for(
+                        dedicated_esl.connect(),
+                        timeout=2.0
+                    )
+                    if not connected:
+                        raise RuntimeError("Failed to connect dedicated ESL")
+                    
+                    logger.debug("🔊 Dedicated ESL connected for uuid_audio_stream")
+                    
+                    response = await asyncio.wait_for(
+                        dedicated_esl.execute_api(cmd),
+                        timeout=3.0
+                    )
+                    logger.info(
+                        f"🔊 B-leg audio stream command result: {response[:200] if response else 'None'}",
+                        extra={
+                            "b_leg_uuid": self.b_leg_uuid,
+                            "ws_url": ws_url,
+                            "esl_response": response,
+                        },
+                    )
+                finally:
+                    await dedicated_esl.disconnect()
+                    
             except asyncio.TimeoutError:
-                logger.error(f"❌ ESL command timeout (3s): {cmd}")
+                logger.error(f"❌ ESL command timeout: {cmd}")
             except Exception as e:
                 logger.error(f"❌ ESL command failed: {e}")
             
