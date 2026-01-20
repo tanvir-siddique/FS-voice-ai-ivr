@@ -243,7 +243,8 @@ class RealtimeAnnouncementSession:
             "type": "session.update",
             "session": {
                 # Tipo de sessão (OBRIGATÓRIO na API GA)
-                "type": "response",
+                # Valores válidos: 'realtime' ou 'transcription'
+                "type": "realtime",
                 
                 # Modelo e voz
                 "model": "gpt-4o-realtime-preview-2024-12-17",
