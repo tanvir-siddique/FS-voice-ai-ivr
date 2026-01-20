@@ -49,82 +49,82 @@ Supports **STT, TTS, LLMs, and RAG**, with strict **multi-tenant isolation**.
 voice-ai-ivr/
 ├── README.md # This file
 │
-├── voice-ai-service/ # Python service (STT/TTS/LLM/RAG)
-│ ├── main.py # FastAPI application
-│ ├── requirements.txt # Python dependencies
-│ ├── config/ # Settings
+├── voice-ai-service/                 # Python service (STT/TTS/LLM/RAG)
+│ ├── main.py                         # FastAPI application
+│ ├── requirements.txt                # Python dependencies
+│ ├── config/                         # Settings
 │ │ └── settings.py
-│ ├── api/ # REST endpoints
+│ ├── api/                            # REST endpoints
 │ │ ├── __init__.py
-│ │ ├── transcribe.py # POST /transcribe
-│ │ ├── synthesize.py # POST /synthesize
-│ │ ├── chat.py # POST /chat
-│ │ └── documents.py # POST /documents
-│ ├── services/ # Business logic
-│ │ ├── stt/ # Speech-to-Text providers
+│ │ ├── transcribe.py                 # POST /transcribe
+│ │ ├── synthesize.py                 # POST /synthesize
+│ │ ├── chat.py                       # POST /chat
+│ │ └── documents.py                  # POST /documents
+│ ├── services/                       # Business logic
+│ │ ├── stt/                          # Speech-to-Text providers
 │ │ │ ├── __init__.py
-│ │ │ ├── base.py # Base interface
-│ │ │ ├── whisper_local.py # Whisper.cpp/faster-whisper
-│ │ │ ├── whisper_api.py # OpenAI Whisper API
-│ │ │ ├── azure_speech.py ​​# Azure Speech-to-Text
-│ │ │ ├── google_speech.py ​​# Google Cloud STT
-│ │ │ ├── aws_transcribe.py # AWS Transcribe
-│ │ │ └── deepgram.py # Deepgram
-│ │ ├── tts/ # Text-to-Speech providers
-│ │ │ ├── __init__.py
-│ │ │ ├── base.py
-│ │ │ ├── piper_local.py # Piper TTS site
-│ │ │ ├── openai_tts.py # OpenAI TTS
-│ │ │ ├── elevenlabs.py # ElevenLabs
-│ │ │ ├── azure_neural.py # Azure Neural TTS
-│ │ │ └── ...
-│ │ ├── llm/ # LLM providers
+│ │ │ ├── base.py                     # Base interface
+│ │ │ ├── whisper_local.py            # Whisper.cpp/faster-whisper
+│ │ │ ├── whisper_api.py              # OpenAI Whisper API
+│ │ │ ├── azure_speech.py             ​​# Azure Speech-to-Text
+│ │ │ ├── google_speech.py ​​           # Google Cloud STT
+│ │ │ ├── aws_transcribe.py           # AWS Transcribe
+│ │ │ └── deepgram.py                 # Deepgram
+│ │ ├── tts/                          # Text-to-Speech providers
 │ │ │ ├── __init__.py
 │ │ │ ├── base.py
-│ │ │ ├── openai.py # OpenAI GPT-4
-│ │ │ ├── azure_openai.py # Azure OpenAI
-│ │ │ ├── anthropic.py # Claude
-│ │ │ ├── groq.py # Groq (ultra-fast)
-│ │ │ ├── ollama_local.py # Ollama local
+│ │ │ ├── piper_local.py              # Piper TTS site
+│ │ │ ├── openai_tts.py               # OpenAI TTS
+│ │ │ ├── elevenlabs.py               # ElevenLabs
+│ │ │ ├── azure_neural.py             # Azure Neural TTS
 │ │ │ └── ...
-│ │ ├── embeddings/ # Embeddings providers
+│ │ ├── llm/                          # LLM providers
+│ │ │ ├── __init__.py
+│ │ │ ├── base.py
+│ │ │ ├── openai.py                  # OpenAI GPT-4
+│ │ │ ├── azure_openai.py            # Azure OpenAI
+│ │ │ ├── anthropic.py               # Claude
+│ │ │ ├── groq.py                    # Groq (ultra-fast)
+│ │ │ ├── ollama_local.py            # Ollama local
+│ │ │ └── ...
+│ │ ├── embeddings/                  # Embeddings providers
 │ │ │ ├── __init__.py
 │ │ │ ├── base.py
 │ │ │ ├── openai.py
 │ │ │ └── local.py
-│ │ └── rag/ # Retrieval Augmented Generation
+│ │ └── rag/                         # Retrieval Augmented Generation
 │ │ ├── __init__.py
 │ │ ├── document_processor.py
 │ │ ├── vector_store.py
 │ │ └── retriever.py
-│ ├── models/ # Pydantic models
+│ ├── models/                        # Pydantic models
 │ │ ├── __init__.py
 │ │ ├── request.py
 │ │ └── response.py
-│ ├── data/ # Local data
-│ │ ├── whisper/ # Whisper Models
-│ │ ├── piper/ # Piper Voices
-│ │ └── embeddings/ # Embeddings cache
-│ └── tests/ # Tests
+│ ├── data/                          # Local data
+│ │ ├── whisper/                     # Whisper Models
+│ │ ├── piper/                       # Piper Voices
+│ │ └── embeddings/                  # Embeddings cache
+│ └── tests/                         # Tests
 │ ├── unit/
 │ └── integration/
 │
-├── freeswitch/ # Scripts FreeSWITCH (Lua)
+├── freeswitch/                     # Scripts FreeSWITCH (Lua)
 │ ├── scripts/
-│ │ ├── secretary_ai.lua # Main script
+│ │ ├── secretary_ai.lua            # Main script
 │ │ ├── lib/
-│ │ │ ├── http.lua # HTTP Client
-│ │ │ ├── json.lua # JSON Parser
-│ │ │ ├── config.lua # Loads database configuration
-│ │ │ └── utils.lua # Utilities
+│ │ │ ├── http.lua                  # HTTP Client
+│ │ │ ├── json.lua                  # JSON Parser
+│ │ │ ├── config.lua                # Loads database configuration
+│ │ │ └── utils.lua                 # Utilities
 │ │ └── handlers/
-│ │ ├── stt.lua # STT Handler
-│ │ ├── tts.lua # TTS Handler
-│ │ └── chat.lua # Chat Handler
-│ ├── dialplan/
-│ │ └── secretary.xml # Call Routing
-│ └── sounds/
-│ └── .gitkeep # Generated Audio Files
+│ │ ├── stt.lua                     # STT Handler
+│ │ ├── tts.lua                     # TTS Handler
+│ │ └── chat.lua                    # Chat Handler
+│ ├── dialplan/                     # Call Routing
+│ │ └── secretary.xml               
+│ └── sounds/                       # Generated Audio Files
+│ └── .gitkeep                     
 │
 ├── fusionpbx-app/ # FusionPBX App (PHP)
 │ └── voice_secretary/
