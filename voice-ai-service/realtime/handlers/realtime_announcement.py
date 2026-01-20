@@ -217,30 +217,42 @@ class RealtimeAnnouncementSession:
         NOTA: Para anúncios curtos, usamos semantic_vad com eagerness=high
         para responder rapidamente quando o humano aceitar/recusar.
         """
+        # FORMATO GA (gpt-4o-realtime-preview-2024-12-17):
+        # - output_modalities ao invés de modalities
+        # - audio.input/output ao invés de input_audio_format/output_audio_format
+        # - VAD em audio.input.turn_detection
         config = {
             "type": "session.update",
             "session": {
                 "type": "realtime",  # OBRIGATÓRIO para GA API
-                "modalities": ["audio", "text"],
-                "voice": self.voice,
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                
-                # semantic_vad para conversa com humano
-                # eagerness=high porque queremos resposta rápida
-                "turn_detection": {
-                    "type": "semantic_vad",
-                    "eagerness": "high",
-                    "create_response": True,
-                    "interrupt_response": True,  # Permite humano interromper
-                },
-                
+                "output_modalities": ["audio"],
                 "instructions": self.system_prompt,
-                "temperature": 0.7,
-                
-                # Transcrição do input do humano
-                "input_audio_transcription": {
-                    "model": "whisper-1"
+                "audio": {
+                    "input": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "noise_reduction": {"type": "far_field"},
+                        # semantic_vad para conversa com humano
+                        # eagerness=high porque queremos resposta rápida
+                        "turn_detection": {
+                            "type": "semantic_vad",
+                            "eagerness": "high",
+                            "create_response": True,
+                            "interrupt_response": True,
+                        },
+                        "transcription": {
+                            "model": "gpt-4o-transcribe",
+                        },
+                    },
+                    "output": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "voice": self.voice,
+                    },
                 },
             }
         }
