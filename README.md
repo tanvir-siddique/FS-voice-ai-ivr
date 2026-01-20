@@ -47,13 +47,135 @@ Supports **STT, TTS, LLMs, and RAG**, with strict **multi-tenant isolation**.
 
 ```
 voice-ai-ivr/
-├── README.md
-├── voice-ai-service/     # Python (STT / TTS / LLM / RAG)
-├── freeswitch/           # Lua scripts & dialplan
-├── fusionpbx-app/        # FusionPBX PHP app
-├── database/             # PostgreSQL migrations
-├── deploy/               # systemd, nginx, install scripts
-└── docs/                 # Documentation
+├── README.md # This file
+│
+├── voice-ai-service/ # Python service (STT/TTS/LLM/RAG)
+│ ├── main.py # FastAPI application
+│ ├── requirements.txt # Python dependencies
+│ ├── config/ # Settings
+│ │ └── settings.py
+│ ├── api/ # REST endpoints
+│ │ ├── __init__.py
+│ │ ├── transcribe.py # POST /transcribe
+│ │ ├── synthesize.py # POST /synthesize
+│ │ ├── chat.py # POST /chat
+│ │ └── documents.py # POST /documents
+│ ├── services/ # Business logic
+│ │ ├── stt/ # Speech-to-Text providers
+│ │ │ ├── __init__.py
+│ │ │ ├── base.py # Base interface
+│ │ │ ├── whisper_local.py # Whisper.cpp/faster-whisper
+│ │ │ ├── whisper_api.py # OpenAI Whisper API
+│ │ │ ├── azure_speech.py ​​# Azure Speech-to-Text
+│ │ │ ├── google_speech.py ​​# Google Cloud STT
+│ │ │ ├── aws_transcribe.py # AWS Transcribe
+│ │ │ └── deepgram.py # Deepgram
+│ │ ├── tts/ # Text-to-Speech providers
+│ │ │ ├── __init__.py
+│ │ │ ├── base.py
+│ │ │ ├── piper_local.py # Piper TTS site
+│ │ │ ├── openai_tts.py # OpenAI TTS
+│ │ │ ├── elevenlabs.py # ElevenLabs
+│ │ │ ├── azure_neural.py # Azure Neural TTS
+│ │ │ └── ...
+│ │ ├── llm/ # LLM providers
+│ │ │ ├── __init__.py
+│ │ │ ├── base.py
+│ │ │ ├── openai.py # OpenAI GPT-4
+│ │ │ ├── azure_openai.py # Azure OpenAI
+│ │ │ ├── anthropic.py # Claude
+│ │ │ ├── groq.py # Groq (ultra-fast)
+│ │ │ ├── ollama_local.py # Ollama local
+│ │ │ └── ...
+│ │ ├── embeddings/ # Embeddings providers
+│ │ │ ├── __init__.py
+│ │ │ ├── base.py
+│ │ │ ├── openai.py
+│ │ │ └── local.py
+│ │ └── rag/ # Retrieval Augmented Generation
+│ │ ├── __init__.py
+│ │ ├── document_processor.py
+│ │ ├── vector_store.py
+│ │ └── retriever.py
+│ ├── models/ # Pydantic models
+│ │ ├── __init__.py
+│ │ ├── request.py
+│ │ └── response.py
+│ ├── data/ # Local data
+│ │ ├── whisper/ # Whisper Models
+│ │ ├── piper/ # Piper Voices
+│ │ └── embeddings/ # Embeddings cache
+│ └── tests/ # Tests
+│ ├── unit/
+│ └── integration/
+│
+├── freeswitch/ # Scripts FreeSWITCH (Lua)
+│ ├── scripts/
+│ │ ├── secretary_ai.lua # Main script
+│ │ ├── lib/
+│ │ │ ├── http.lua # HTTP Client
+│ │ │ ├── json.lua # JSON Parser
+│ │ │ ├── config.lua # Loads database configuration
+│ │ │ └── utils.lua # Utilities
+│ │ └── handlers/
+│ │ ├── stt.lua # STT Handler
+│ │ ├── tts.lua # TTS Handler
+│ │ └── chat.lua # Chat Handler
+│ ├── dialplan/
+│ │ └── secretary.xml # Call Routing
+│ └── sounds/
+│ └── .gitkeep # Generated Audio Files
+│
+├── fusionpbx-app/ # FusionPBX App (PHP)
+│ └── voice_secretary/
+│ ├── app_config.php # Schema and Permissions
+│ ├── app_defaults.php # Default Values
+│ ├── app_languages.php # Translations
+│ ├── app_menu.php # Menu
+│ ├── secretary.php # List of secretaries
+│ ├── secretary_edit.php # Edit secretary
+│ ├── providers.php # List of providers
+│ ├── providers_edit.php # Configure provider
+│ ├── documents.php # List of documents
+│ ├── documents_edit.php # Upload document
+│ ├── transfer_rules.php # Transfer rules
+│ ├── transfer_rules_edit.php
+│ ├── conversations.php # History
+│ ├── conversation_detail.php
+│ ├── settings.php # Settings
+│ ├── resources/
+│ │ ├── classes/
+│ │ │ ├── voice_secretary.php
+│ │ │ └── voice_ai_provider.php
+│ │ ├── dashboard/
+│ │ │ └── voice_secretary.php
+│ │ └── functions/
+│ └── languages/
+│ └── pt-br/
+│ └── app_languages.php
+│
+├── database/ # Migrations
+│ ├── migrations/
+│ │ ├── 001_create_providers.sql
+│ │ ├── 002_create_secretaries.sql
+│ │ ├── 003_create_documents.sql
+│ │ ├── 004_create_conversations.sql
+│ │ └── 005_create_transfer_rules.sql
+│ └── seeds/
+│ └── default_providers.sql
+│
+├── deploy/ # Deploy scripts
+│ ├── install.sh # Installation complete
+│ ├── systemd/
+│ │ └── voice-ai-service.service
+│ └── nginx/
+│ └── voice-ai.conf
+│
+└── docs/
+    ├── installation.md
+    ├── configuration.md
+    ├── providers.md
+    └── api.md
 ```
 
 ---
