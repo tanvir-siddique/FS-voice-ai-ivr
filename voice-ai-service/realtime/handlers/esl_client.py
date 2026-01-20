@@ -1250,7 +1250,7 @@ class AsyncESLClient:
         except Exception:
             return False
     
-    async def check_extension_registered(self, extension: str, domain: str) -> tuple[bool, Optional[str]]:
+    async def check_extension_registered(self, extension: str, domain: str) -> tuple[bool, Optional[str], bool]:
         """
         Verifica se uma extensão está registrada (online) no FreeSWITCH.
         
@@ -1262,9 +1262,11 @@ class AsyncESLClient:
             domain: Domínio do ramal (ex: "empresa.com.br")
         
         Returns:
-            Tuple (is_registered, contact_info)
+            Tuple (is_registered, contact_info, check_successful)
             - is_registered: True se o ramal está registrado
             - contact_info: Endereço de contato (IP:porta) se registrado
+            - check_successful: True se a verificação foi executada com sucesso
+              (False em caso de timeout/erro - nesse caso, tente o originate mesmo assim)
         
         NOTA: Esta verificação é útil para dar feedback rápido ao usuário
         antes de tentar originate. Se o ramal não está registrado, o
@@ -1295,7 +1297,7 @@ class AsyncESLClient:
             # Se encontrar "Total items returned: 0", não está registrado
             if "Total items returned: 0" in result or "0 total" in result.lower():
                 logger.debug(f"Extension {extension}@{domain} is NOT registered")
-                return (False, None)
+                return (False, None, True)  # check_successful = True, mas não registrado
             
             # Se encontrar dados de registro, está online
             # Formato típico: Call-ID, User, Contact, Agent, Status, Ping, etc.
@@ -1310,25 +1312,26 @@ class AsyncESLClient:
                             break
                 
                 logger.debug(f"Extension {extension}@{domain} is registered at {contact}")
-                return (True, contact)
+                return (True, contact, True)
             
             # Fallback: se retornou dados mas não identificamos claramente
             # assumir registrado para não bloquear indevidamente
             if len(result) > 50:  # Tem conteúdo significativo
                 logger.debug(f"Extension {extension}@{domain} status unclear, assuming registered")
-                return (True, None)
+                return (True, None, True)
             
-            return (False, None)
+            return (False, None, True)
             
         except asyncio.TimeoutError:
             logger.warning(
-                f"Extension registration check timed out after {ESL_REGISTRATION_TIMEOUT}s; treating as offline",
+                f"📞 [CHECK_EXTENSION] Timeout após {ESL_REGISTRATION_TIMEOUT}s - ESL Inbound pode não estar configurado. Tentando originate mesmo assim.",
                 extra={"extension": extension, "domain": domain}
             )
-            return (False, None)
+            # check_successful = False -> caller deve tentar originate mesmo assim
+            return (False, None, False)
         except Exception as e:
-            logger.warning(f"Failed to check extension registration: {e}")
-            return (False, None)
+            logger.warning(f"📞 [CHECK_EXTENSION] Falha: {e} - Tentando originate mesmo assim.")
+            return (False, None, False)
     
     # =========================================================================
     # ANNOUNCED TRANSFER: Métodos para transferência com anúncio

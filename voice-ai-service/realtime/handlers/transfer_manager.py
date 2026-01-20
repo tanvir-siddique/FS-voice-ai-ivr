@@ -425,12 +425,14 @@ class TransferManager:
                 # 1.5 VERIFICAÇÃO PRÉVIA DE PRESENÇA (para extensões)
                 # Evita esperar timeout de originate quando ramal está offline
                 if destination.destination_type == "extension":
-                    is_registered, contact = await self._esl.check_extension_registered(
+                    is_registered, contact, check_successful = await self._esl.check_extension_registered(
                         destination.destination_number,
                         destination.destination_context
                     )
                     
-                    if not is_registered:
+                    # Só retornar OFFLINE se a verificação foi bem-sucedida E o ramal não está registrado
+                    # Se check_successful = False (timeout/erro), tentar originate mesmo assim
+                    if check_successful and not is_registered:
                         logger.info(
                             f"Extension {destination.destination_number} is NOT registered - skipping originate",
                             extra={
@@ -446,6 +448,14 @@ class TransferManager:
                             hangup_cause="USER_NOT_REGISTERED",
                             error=f"Ramal {destination.destination_number} não está conectado",
                             retries=retries
+                        )
+                    elif not check_successful:
+                        logger.info(
+                            f"Extension {destination.destination_number} check failed - proceeding with originate",
+                            extra={
+                                "destination": destination.name,
+                                "extension": destination.destination_number,
+                            }
                         )
                 
                 # 2. Verificar se A-leg ainda existe
@@ -701,12 +711,13 @@ class TransferManager:
             # 1.5 VERIFICAÇÃO PRÉVIA DE PRESENÇA (para extensões)
             # Evita esperar timeout de originate quando ramal está offline
             if destination.destination_type == "extension":
-                is_registered, contact = await self._esl.check_extension_registered(
+                is_registered, contact, check_successful = await self._esl.check_extension_registered(
                     destination.destination_number,
                     destination.destination_context
                 )
                 
-                if not is_registered:
+                # Só retornar OFFLINE se a verificação foi bem-sucedida E o ramal não está registrado
+                if check_successful and not is_registered:
                     logger.info(
                         f"Extension {destination.destination_number} is NOT registered - skipping announced transfer",
                         extra={
@@ -722,6 +733,8 @@ class TransferManager:
                         hangup_cause="USER_NOT_REGISTERED",
                         error=f"Ramal {destination.destination_number} não está conectado",
                     )
+                elif not check_successful:
+                    logger.info(f"Extension {destination.destination_number} check failed - proceeding with announced transfer")
             
             # 2. Verificar se A-leg ainda existe
             a_leg_exists = await self._esl.uuid_exists(self.call_uuid)
@@ -1023,12 +1036,13 @@ class TransferManager:
             # 1.5 VERIFICAÇÃO PRÉVIA DE PRESENÇA (para extensões)
             # Evita esperar timeout de originate quando ramal está offline
             if destination.destination_type == "extension":
-                is_registered, contact = await self._esl.check_extension_registered(
+                is_registered, contact, check_successful = await self._esl.check_extension_registered(
                     destination.destination_number,
                     destination.destination_context
                 )
                 
-                if not is_registered:
+                # Só retornar OFFLINE se a verificação foi bem-sucedida E o ramal não está registrado
+                if check_successful and not is_registered:
                     logger.info(
                         f"Extension {destination.destination_number} is NOT registered - skipping realtime transfer",
                         extra={
@@ -1044,6 +1058,8 @@ class TransferManager:
                         hangup_cause="USER_NOT_REGISTERED",
                         error=f"Ramal {destination.destination_number} não está conectado",
                     )
+                elif not check_successful:
+                    logger.info(f"Extension {destination.destination_number} check failed - proceeding with realtime transfer")
             
             # 2. Verificar se A-leg ainda existe
             a_leg_exists = await self._esl.uuid_exists(self.call_uuid)
